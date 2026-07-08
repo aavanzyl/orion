@@ -4,34 +4,58 @@
   "files": [],
   "references": [
     {
-      "path": "./apps/api"
+      "path": "./packages/adapters/communication/core"
     },
     {
-      "path": "./apps/shop-e2e"
+      "path": "./packages/adapters/harness/codex"
     },
     {
-      "path": "./apps/shop"
+      "path": "./packages/adapters/board/native"
     },
     {
-      "path": "./packages/api/products"
+      "path": "./packages/adapters/harness/core"
+    },
+    {
+      "path": "./packages/core/workflow-engine"
+    },
+    {
+      "path": "./packages/adapters/board/core"
+    },
+    {
+      "path": "./packages/adapters/scm/github"
+    },
+    {
+      "path": "./packages/shared/adapter-kit"
+    },
+    {
+      "path": "./packages/adapters/scm/core"
     },
     {
       "path": "./packages/shared/models"
     },
     {
-      "path": "./packages/shop/data"
+      "path": "./packages/core/config"
     },
     {
-      "path": "./packages/shop/feature-product-detail"
+      "path": "./packages/data/db"
     },
     {
-      "path": "./packages/shop/feature-products"
+      "path": "./apps/orchestrator"
     },
     {
-      "path": "./packages/shop/shared-ui"
+      "path": "./apps/web"
     },
     {
-      "path": "./packages/shared/test-utils"
+      "path": "./apps/web-e2e"
+    },
+    {
+      "path": "./packages/adapters/communication/webhook"
+    },
+    {
+      "path": "./packages/adapters/board/linear"
+    },
+    {
+      "path": "./packages/core/rag"
     }
   ]
 }

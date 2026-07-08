@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "out-tsc/playwright",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "tsBuildInfoFile": "out-tsc/playwright/tsconfig.tsbuildinfo"
+  },
+  "include": ["playwright.config.ts", "src/**/*.ts"],
+  "exclude": ["out-tsc", "eslint.config.mjs"]
+}

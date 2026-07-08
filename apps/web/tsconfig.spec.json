@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/vitest",
+    "types": ["vitest/globals","vitest/importMeta","node","vitest","vite/client","@testing-library/jest-dom"],
+    "jsx": "react-jsx",
+    "lib": ["dom","dom.iterable","es2022"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["vitest.config.ts","src/**/*.test.ts","src/**/*.spec.ts","src/**/*.test.tsx","src/**/*.spec.tsx","src/**/*.d.ts"],
+  "references": [{ "path": "./tsconfig.app.json" }]
+}

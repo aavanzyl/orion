@@ -1,0 +1,74 @@
+<svg width="760" height="200" viewBox="0 0 760 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="lbg" x1="20" y1="20" x2="180" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#141b30"/>
+      <stop offset="0.55" stop-color="#0d1324"/>
+      <stop offset="1" stop-color="#080b16"/>
+    </linearGradient>
+    <radialGradient id="lglow" cx="0.5" cy="0.42" r="0.65">
+      <stop offset="0" stop-color="#5b6bff" stop-opacity="0.30"/>
+      <stop offset="0.5" stop-color="#7c3aed" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ledge" x1="60" y1="55" x2="150" y2="165" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#818cf8"/>
+      <stop offset="0.5" stop-color="#a855f7"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+    <radialGradient id="lstar" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.4" stop-color="#e0e7ff"/>
+      <stop offset="1" stop-color="#818cf8"/>
+    </radialGradient>
+    <radialGradient id="lstarBelt" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.4" stop-color="#e9d5ff"/>
+      <stop offset="1" stop-color="#c084fc"/>
+    </radialGradient>
+    <linearGradient id="lword" x1="230" y1="70" x2="230" y2="150" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#a855f7"/>
+    </linearGradient>
+    <filter id="lsoft" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="lsoftLine" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="1.6"/>
+    </filter>
+  </defs>
+
+  <!-- mark -->
+  <g transform="translate(20,20)">
+    <rect x="0" y="0" width="160" height="160" rx="38" fill="url(#lbg)"/>
+    <rect x="0" y="0" width="160" height="160" rx="38" fill="url(#lglow)"/>
+    <rect x="0.5" y="0.5" width="159" height="159" rx="37.5" stroke="#ffffff" stroke-opacity="0.08"/>
+    <g transform="scale(0.3125)">
+      <g stroke="url(#ledge)" stroke-width="5" stroke-linecap="round" filter="url(#lsoftLine)" opacity="0.9">
+        <path d="M256 120 L176 176"/><path d="M256 120 L344 190"/>
+        <path d="M176 176 L214 262"/><path d="M344 190 L298 286"/>
+        <path d="M214 262 L256 274"/><path d="M256 274 L298 286"/>
+        <path d="M214 262 L198 384"/><path d="M298 286 L336 396"/>
+      </g>
+      <g stroke="url(#ledge)" stroke-width="2.5" stroke-linecap="round">
+        <path d="M256 120 L176 176"/><path d="M256 120 L344 190"/>
+        <path d="M176 176 L214 262"/><path d="M344 190 L298 286"/>
+        <path d="M214 262 L256 274"/><path d="M256 274 L298 286"/>
+        <path d="M214 262 L198 384"/><path d="M298 286 L336 396"/>
+      </g>
+      <g filter="url(#lsoft)">
+        <circle cx="256" cy="120" r="6" fill="url(#lstar)"/>
+        <circle cx="176" cy="176" r="13" fill="url(#lstar)"/>
+        <circle cx="344" cy="190" r="9" fill="url(#lstar)"/>
+        <circle cx="214" cy="262" r="8" fill="url(#lstarBelt)"/>
+        <circle cx="256" cy="274" r="10" fill="url(#lstarBelt)"/>
+        <circle cx="298" cy="286" r="8" fill="url(#lstarBelt)"/>
+        <circle cx="198" cy="384" r="8" fill="url(#lstar)"/>
+        <circle cx="336" cy="396" r="13" fill="url(#lstar)"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- wordmark -->
+  <text x="210" y="126" font-family="'Inter','Helvetica Neue',Arial,sans-serif" font-size="96" font-weight="800" letter-spacing="2" fill="url(#lword)">Orion</text>
+</svg>

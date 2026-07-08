@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: orion-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: orion
+      POSTGRES_PASSWORD: orion
+      POSTGRES_DB: orion
+    ports:
+      - '8402:5432'
+    volumes:
+      - orion-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U orion -d orion']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.orchestrator
+    image: orion-backend
+    container_name: orion-orchestrator
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://orion:orion@postgres:5432/orion
+      ORION_MIGRATIONS_DIR: /app/packages/data/db/migrations
+      HOST: 0.0.0.0
+      PORT: '3333'
+      # Base URL the orchestrator reaches itself on (used for the codebase/tickets
+      # MCP servers auto-injected into agent runs). localhost resolves inside the
+      # container where the harness runs.
+      ORION_PUBLIC_URL: ${ORION_PUBLIC_URL:-http://localhost:3333}
+      ORION_WORKSPACE_DIR: /data/workspace
+      ORION_PROJECTS_DIR: ${ORION_PROJECTS_DIR:-${HOME}}
+      CODEX_API_KEY: ${CODEX_API_KEY:-}
+      CODEX_BASE_URL: ${CODEX_BASE_URL:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      PROVIDER_ENCRYPTION_SALT: ${PROVIDER_ENCRYPTION_SALT:-}
+      # Outbound notifications for `notify` nodes / run lifecycle events.
+      ORION_NOTIFY_WEBHOOK_URL: ${ORION_NOTIFY_WEBHOOK_URL:-}
+      ORION_SLACK_WEBHOOK_URL: ${ORION_SLACK_WEBHOOK_URL:-}
+    ports:
+      - '8400:3333'
+    volumes:
+      - orion-workspace:/data/workspace
+      # Mount your local dev directory at the SAME absolute path inside the
+      # container so `local`/`workspace` projects can be referenced by the exact
+      # path you see on the host. Defaults to your home directory; set
+      # ORION_PROJECTS_DIR in .env to narrow it (e.g. ~/Documents/Development).
+      - '${ORION_PROJECTS_DIR:-${HOME}}:${ORION_PROJECTS_DIR:-${HOME}}'
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: orion-web
+    container_name: orion-web
+    restart: unless-stopped
+    depends_on:
+      - orchestrator
+    ports:
+      - '8401:80'
+
+volumes:
+  orion-postgres-data:
+  orion-workspace:

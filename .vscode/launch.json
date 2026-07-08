@@ -4,9 +4,9 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug @org/api with Nx",
+      "name": "Debug @orion/orchestrator with Nx",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["nx", "serve", "@org/api"],
+      "runtimeArgs": ["nx", "serve", "@orion/orchestrator"],
       "env": {
         "NODE_OPTIONS": "--inspect=9229"
       },
@@ -15,7 +15,7 @@
       "skipFiles": ["<node_internals>/**"],
       "sourceMaps": true,
       "outFiles": [
-        "${workspaceFolder}/apps/api/dist/**/*.(m|c|)js",
+        "${workspaceFolder}/apps/orchestrator/dist/**/*.(m|c|)js",
         "!**/node_modules/**"
       ]
     }

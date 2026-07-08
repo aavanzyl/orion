@@ -1,0 +1,81 @@
+{
+  "name": "@orion/orchestrator",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "projectType": "application",
+    "targets": {
+      "build": {
+        "executor": "@nx/esbuild:esbuild",
+        "outputs": ["{options.outputPath}"],
+        "defaultConfiguration": "production",
+        "options": {
+          "platform": "node",
+          "outputPath": "apps/orchestrator/dist",
+          "format": ["esm"],
+          "bundle": true,
+          "main": "apps/orchestrator/src/main.ts",
+          "tsConfig": "apps/orchestrator/tsconfig.app.json",
+          "assets": ["apps/orchestrator/src/assets"],
+          "external": ["@openai/codex-sdk"],
+          "esbuildOptions": {
+            "sourcemap": true,
+            "outExtension": { ".js": ".mjs" }
+          }
+        },
+        "configurations": {
+          "development": {},
+          "production": {
+            "esbuildOptions": {
+              "sourcemap": false,
+              "outExtension": { ".js": ".mjs" }
+            }
+          }
+        }
+      },
+      "serve": {
+        "continuous": true,
+        "executor": "@nx/js:node",
+        "defaultConfiguration": "development",
+        "dependsOn": ["build"],
+        "options": {
+          "buildTarget": "@orion/orchestrator:build",
+          "runBuildTargetDependencies": false
+        },
+        "configurations": {
+          "development": {
+            "buildTarget": "@orion/orchestrator:build:development"
+          },
+          "production": {
+            "buildTarget": "@orion/orchestrator:build:production"
+          }
+        }
+      },
+      "test": {
+        "options": { "passWithNoTests": true }
+      }
+    },
+    "tags": ["scope:orchestrator", "type:app"]
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "cron-parser": "^4.9.0",
+    "express": "^4.21.2",
+    "zod": "^3.24.1",
+    "@orion/adapter-kit": "*",
+    "@orion/board-core": "*",
+    "@orion/board-linear": "*",
+    "@orion/board-native": "*",
+    "@orion/communication-core": "*",
+    "@orion/communication-webhook": "*",
+    "@orion/config": "*",
+    "@orion/db": "*",
+    "@orion/harness-core": "*",
+    "@orion/harness-codex": "*",
+    "@orion/models": "*",
+    "@orion/scm-core": "*",
+    "@orion/scm-github": "*",
+    "@orion/rag": "*",
+    "@orion/workflow-engine": "*"
+  }
+}

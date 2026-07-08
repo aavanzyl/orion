@@ -1,5 +1,5 @@
 {
-  "name": "@org/models",
+  "name": "@orion/models",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -14,10 +14,7 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "tags": [
-      "scope:shared",
-      "type:data"
-    ]
+    "tags": ["scope:shared", "type:data"]
   },
   "dependencies": {}
 }

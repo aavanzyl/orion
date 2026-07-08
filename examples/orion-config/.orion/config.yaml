@@ -1,0 +1,71 @@
+# Example Orion configuration.
+# Place this file at `.orion/config.yaml` in the repository a project tracks.
+# The board swimlanes drive the Kanban UI, and the workflow describes the DAG
+# each ticket follows.
+
+project:
+  name: example-service
+  defaultBranch: main
+
+# MCP servers shared by every agent node. Each node also inherits these in
+# addition to any it defines under its own `mcpServers`.
+mcpServers:
+  context7:
+    command: npx
+    args: [-y, '@upstash/context7-mcp']
+
+board:
+  swimlanes: [backlog, investigating, in_progress, review, done]
+
+workflow:
+  name: default
+  nodes:
+    - id: investigate
+      type: agent
+      provider: codex
+      model: gpt-5-codex
+      # Point at any OpenAI-compatible endpoint (e.g. DeepSeek) via baseUrl:
+      # baseUrl: https://api.deepseek.com
+      instructions: commands/investigate.md
+      command: commands/investigate.md
+      # MCP servers unique to this node (merged with the global set above; an
+      # entry of the same name overrides the global one).
+      mcpServers:
+        github:
+          command: npx
+          args: [-y, '@modelcontextprotocol/server-github']
+          env:
+            GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+      column: investigating
+
+    - id: implement
+      type: agent
+      provider: codex
+      model: gpt-5-codex
+      command: commands/implement.md
+      dependsOn: [investigate]
+      column: in_progress
+      # Loop this node: re-run until the agent's output contains the sentinel or
+      # maxIterations is reached. `freshContext: true` starts a new harness
+      # thread each pass instead of accumulating context.
+      # loop:
+      #   maxIterations: 10
+      #   until: ALL_TASKS_COMPLETE
+      #   freshContext: false
+
+    - id: verify
+      type: shell
+      script: 'echo "run your test suite here"'
+      dependsOn: [implement]
+      column: in_progress
+
+    - id: approval
+      type: approval
+      dependsOn: [verify]
+      column: review
+
+    - id: open_pr
+      type: scm
+      action: open_pull_request
+      dependsOn: [approval]
+      column: done

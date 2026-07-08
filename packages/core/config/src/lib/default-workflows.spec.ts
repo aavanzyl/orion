@@ -1,0 +1,114 @@
+import { describe, it, expect } from 'vitest';
+import type { ProjectConfig } from '@orion/models';
+import { parseProjectConfig } from './load-config.js';
+import { serializeProjectConfig } from './save-config.js';
+import { assertValidConfig } from './validate.js';
+import {
+  DEFAULT_WORKFLOW_TEMPLATES,
+  getWorkflowTemplate,
+  listWorkflowTemplates,
+  renderWorkflowTemplateYaml,
+  toWorkflowTemplateSummary,
+  type WorkflowTemplate,
+} from './default-workflows.js';
+
+/** Compose a full ProjectConfig around a template so it can be validated. */
+function toProjectConfig(template: WorkflowTemplate): ProjectConfig {
+  return {
+    project: { name: 'demo', defaultBranch: 'main' },
+    board: { swimlanes: template.suggestedSwimlanes ?? ['backlog'] },
+    workflow: template.workflow,
+  };
+}
+
+describe('default workflow templates', () => {
+  it('ships at least ten templates', () => {
+    expect(listWorkflowTemplates().length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('has unique, kebab-case template names', () => {
+    const names = DEFAULT_WORKFLOW_TEMPLATES.map((t) => t.name);
+    expect(new Set(names).size).toBe(names.length);
+    for (const name of names) {
+      expect(name).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+    }
+  });
+
+  it.each(DEFAULT_WORKFLOW_TEMPLATES.map((t) => [t.name, t] as const))(
+    'template "%s" validates as a full ProjectConfig',
+    (_name, template) => {
+      const config = toProjectConfig(template);
+      expect(() => assertValidConfig(config)).not.toThrow();
+      expect(() => parseProjectConfig(serializeProjectConfig(config))).not.toThrow();
+    },
+  );
+
+  it.each(DEFAULT_WORKFLOW_TEMPLATES.map((t) => [t.name, t] as const))(
+    'template "%s" only references its suggested swimlanes',
+    (_name, template) => {
+      const swimlanes = new Set(template.suggestedSwimlanes ?? []);
+      for (const node of template.workflow.nodes) {
+        if (node.swimlane) expect(swimlanes.has(node.swimlane)).toBe(true);
+      }
+    },
+  );
+
+  it('exposes loop nodes in the iterative templates', () => {
+    const plan = getWorkflowTemplate('plan-implement-verify');
+    const tdd = getWorkflowTemplate('tdd');
+    expect(plan?.workflow.nodes.some((n) => n.loop?.until === 'ALL_TASKS_COMPLETE')).toBe(true);
+    expect(tdd?.workflow.nodes.some((n) => n.loop?.until === 'TESTS_PASS')).toBe(true);
+  });
+
+  it('models refactor-safely as parallel gates off a single node', () => {
+    const refactor = getWorkflowTemplate('refactor-safely');
+    const gates = refactor?.workflow.nodes.filter(
+      (n) => n.dependsOn?.length === 1 && n.dependsOn[0] === 'refactor',
+    );
+    expect(gates?.length).toBe(3);
+    expect(refactor?.workflow.nodes.some((n) => n.continueOnError)).toBe(true);
+  });
+
+  it('fans out at least five parallel reviewers converging on one synthesizer in multi-agent-review', () => {
+    const template = getWorkflowTemplate('multi-agent-review');
+    expect(template).toBeDefined();
+    const synth = template!.workflow.nodes.find((n) => n.id === 'synthesize');
+    expect(synth).toBeDefined();
+    const reviewerIds = synth!.dependsOn ?? [];
+    expect(reviewerIds.length).toBeGreaterThanOrEqual(5);
+    const reviewers = template!.workflow.nodes.filter((n) => reviewerIds.includes(n.id));
+    expect(reviewers.every((n) => n.type === 'agent')).toBe(true);
+    expect(reviewers.every((n) => Boolean(n.instructions) && !n.command)).toBe(true);
+    const upstreams = new Set(reviewers.map((n) => (n.dependsOn ?? []).join(',')));
+    expect(upstreams.size).toBe(1);
+  });
+
+  it('drives a self-fix loop until REVIEW_CLEAN in review-and-fix', () => {
+    const template = getWorkflowTemplate('review-and-fix');
+    expect(template).toBeDefined();
+    const loopNode = template!.workflow.nodes.find((n) => n.loop?.until === 'REVIEW_CLEAN');
+    expect(loopNode).toBeDefined();
+    expect(loopNode!.type).toBe('agent');
+    expect(loopNode!.loop!.maxIterations).toBeGreaterThanOrEqual(1);
+    expect(template!.workflow.nodes.some((n) => n.type === 'scm' && n.action === 'open_pull_request')).toBe(true);
+  });
+
+  it('renders a workflow block as YAML that parses back into a config', () => {
+    const template = getWorkflowTemplate('default');
+    expect(template).toBeDefined();
+    const yaml = renderWorkflowTemplateYaml(template!);
+    expect(yaml).toContain('workflow:');
+    expect(yaml).toContain('open_pull_request');
+  });
+
+  it('summarizes a template for the UI', () => {
+    const summary = toWorkflowTemplateSummary(getWorkflowTemplate('default')!);
+    expect(summary.name).toBe('default');
+    expect(summary.nodeCount).toBe(5);
+    expect(summary.nodeTypes).toEqual(expect.arrayContaining(['agent', 'shell', 'approval', 'scm']));
+  });
+
+  it('returns undefined for an unknown template', () => {
+    expect(getWorkflowTemplate('does-not-exist')).toBeUndefined();
+  });
+});
