@@ -1,5 +1,8 @@
 import type {
   ApiResponse,
+  AppBranding,
+  AppPreferences,
+  AppSettings,
   Board,
   BoardConfig,
   ChatMessage,
@@ -7,20 +10,23 @@ import type {
   Conversation,
   ConversationDetail,
   CreateEvaluationInput,
+  CreateMcpServerInput,
   CreateProjectInput,
   CreateProviderInput,
   CreateTicketInput,
-  CreateTriggerInput,
+  CreateScheduleInput,
   EvaluationSummary,
   InstallSkillInput,
   InstallSkillResult,
   Label,
+  McpServer,
   Project,
   Provider,
   RunEvaluation,
   RunEvent,
   RunNode,
   SearchResult,
+  RecommendedSkill,
   SkillCatalogEntry,
   SkillDetail,
   SkillReference,
@@ -29,20 +35,64 @@ import type {
   TicketDetail,
   TicketRelation,
   TicketRelationKind,
-  Trigger,
+  Schedule,
+  ScheduleOptions,
   UpdateEvaluationInput,
+  UpdateMcpServerInput,
   UpdateProjectInput,
   UpdateProviderInput,
   UpdateSkillInput,
   UpdateTicketInput,
-  UpdateTriggerInput,
+  UpdateScheduleInput,
   WorkflowConfig,
   WorkflowRouteResult,
   WorkflowRun,
   WorkflowTemplateSummary,
 } from '@orion/models';
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3333/api';
+const DEFAULT_API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3333/api';
+const API_URL_STORAGE_KEY = 'orion-api-url';
+
+/** Resolve the orchestrator API base URL, preferring a user override. */
+export function getApiBaseUrl(): string {
+  try {
+    const override = localStorage.getItem(API_URL_STORAGE_KEY);
+    if (override && override.trim()) return override.trim();
+  } catch {
+    // ignore
+  }
+  return DEFAULT_API_URL;
+}
+
+/** Persist a user override for the API base URL. Pass null/empty to reset. */
+export function setApiBaseUrl(url: string | null): void {
+  try {
+    if (url && url.trim() && url.trim() !== DEFAULT_API_URL) {
+      localStorage.setItem(API_URL_STORAGE_KEY, url.trim());
+    } else {
+      localStorage.removeItem(API_URL_STORAGE_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function getDefaultApiBaseUrl(): string {
+  return DEFAULT_API_URL;
+}
+
+/** Ping the orchestrator's `/health` endpoint to verify connectivity. */
+export async function pingApi(url?: string): Promise<boolean> {
+  const base = (url ?? getApiBaseUrl()).replace(/\/api\/?$/, '');
+  try {
+    const response = await fetch(`${base}/health`);
+    if (!response.ok) return false;
+    const body = (await response.json()) as { status?: string };
+    return body.status === 'ok';
+  } catch {
+    return false;
+  }
+}
 
 export interface ProjectConfigResponse {
   board: BoardConfig;
@@ -82,7 +132,7 @@ export interface WorkflowTemplateDetail {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   });
@@ -169,10 +219,10 @@ export const api = {
     }),
   removeTicketRelation: (relationId: string) =>
     request<{ deleted: boolean }>(`/ticket-relations/${relationId}`, { method: 'DELETE' }),
-  moveTicket: (ticketId: string, swimlane: string, order?: number) =>
+  moveTicket: (ticketId: string, swimlane: string, order?: number, workflowName?: string) =>
     request<Ticket>(`/tickets/${ticketId}/move`, {
       method: 'POST',
-      body: JSON.stringify({ swimlane, order }),
+      body: JSON.stringify({ swimlane, order, workflowName }),
     }),
   setTicketAgent: (ticketId: string, agentId: string | null) =>
     request<Ticket>(`/tickets/${ticketId}/agent`, {
@@ -211,21 +261,27 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ message }),
     }),
-  listTriggers: (projectId: string) => request<Trigger[]>(`/projects/${projectId}/triggers`),
-  createTrigger: (projectId: string, input: Omit<CreateTriggerInput, 'projectId'>) =>
-    request<Trigger>(`/projects/${projectId}/triggers`, {
+  listSchedules: (projectId: string) => request<Schedule[]>(`/projects/${projectId}/schedules`),
+  listAllSchedules: () => request<Schedule[]>('/schedules'),
+  listScheduleOptions: (projectId: string) =>
+    request<ScheduleOptions>(`/projects/${projectId}/schedules/options`),
+  createSchedule: (projectId: string, input: Omit<CreateScheduleInput, 'projectId'>) =>
+    request<Schedule>(`/projects/${projectId}/schedules`, {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  updateTrigger: (id: string, input: UpdateTriggerInput) =>
-    request<Trigger>(`/triggers/${id}`, {
+  updateSchedule: (id: string, input: UpdateScheduleInput) =>
+    request<Schedule>(`/schedules/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(input),
     }),
-  deleteTrigger: (id: string) =>
-    request<{ deleted: boolean }>(`/triggers/${id}`, { method: 'DELETE' }),
-  fireTrigger: (id: string) =>
-    request<WorkflowRun>(`/triggers/${id}/fire`, { method: 'POST', body: JSON.stringify({}) }),
+  deleteSchedule: (id: string) =>
+    request<{ deleted: boolean }>(`/schedules/${id}`, { method: 'DELETE' }),
+  fireSchedule: (id: string) =>
+    request<{ agentResponse: string }>(`/schedules/${id}/fire`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
   getBoardConnection: (projectId: string) =>
     request<BoardConnectionResponse>(`/projects/${projectId}/board-connection`),
   saveBoardConnection: (
@@ -240,12 +296,32 @@ export const api = {
     request<{ deleted: boolean }>(`/projects/${projectId}/board-connection`, { method: 'DELETE' }),
   syncBoardConnection: (projectId: string) =>
     request<SyncSummary>(`/projects/${projectId}/board-connection/sync`, { method: 'POST' }),
-  listLinearTeams: (projectId: string, apiKey: string) =>
-    request<LinearTeam[]>(`/projects/${projectId}/board-connection/teams?apiKey=${encodeURIComponent(apiKey)}`),
-    listLinearStates: (projectId: string, apiKey: string, teamId: string) =>
-    request<LinearState[]>(
-      `/projects/${projectId}/board-connection/states?apiKey=${encodeURIComponent(apiKey)}&teamId=${encodeURIComponent(teamId)}`,
-    ),
+  listBoardContainers: (
+    projectId: string,
+    opts: { provider?: string; apiKey?: string; config?: Record<string, string> },
+  ) => {
+    const qs = new URLSearchParams();
+    if (opts.provider) qs.set('provider', opts.provider);
+    if (opts.apiKey) qs.set('apiKey', opts.apiKey);
+    if (opts.config && Object.keys(opts.config).length) qs.set('config', JSON.stringify(opts.config));
+    return request<RemoteContainer[]>(
+      `/projects/${projectId}/board-connection/containers?${qs.toString()}`,
+    );
+  },
+  listBoardStates: (
+    projectId: string,
+    teamId: string,
+    opts: { provider?: string; apiKey?: string; config?: Record<string, string> },
+  ) => {
+    const qs = new URLSearchParams();
+    qs.set('teamId', teamId);
+    if (opts.provider) qs.set('provider', opts.provider);
+    if (opts.apiKey) qs.set('apiKey', opts.apiKey);
+    if (opts.config && Object.keys(opts.config).length) qs.set('config', JSON.stringify(opts.config));
+    return request<RemoteState[]>(
+      `/projects/${projectId}/board-connection/states?${qs.toString()}`,
+    );
+  },
   listRuns: (params?: { projectId?: string; status?: string; from?: string; to?: string; search?: string; limit?: number }) => {
     const qs = new URLSearchParams();
     if (params?.projectId) qs.set('projectId', params.projectId);
@@ -303,6 +379,8 @@ export const api = {
     request<{ skills: SkillCatalogEntry[] }>(`/projects/${projectId}/skills`),
   listGlobalSkills: () =>
     request<{ skills: SkillCatalogEntry[] }>('/skills'),
+  listRecommendedSkills: () =>
+    request<{ skills: RecommendedSkill[] }>('/skills/recommended'),
   getSkill: (projectId: string, name: string) =>
     request<SkillDetail>(`/projects/${projectId}/skills/${encodeURIComponent(name)}`),
   getGlobalSkill: (name: string) =>
@@ -345,24 +423,55 @@ export const api = {
     request<{ deleted: boolean }>(`/skills/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     }),
+  listMcpServers: () => request<McpServer[]>('/mcp-servers'),
+  createMcpServer: (input: CreateMcpServerInput) =>
+    request<McpServer>('/mcp-servers', { method: 'POST', body: JSON.stringify(input) }),
+  updateMcpServer: (id: string, input: UpdateMcpServerInput) =>
+    request<McpServer>(`/mcp-servers/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  deleteMcpServer: (id: string) =>
+    request<{ deleted: boolean }>(`/mcp-servers/${id}`, { method: 'DELETE' }),
+  startMcpOauth: (id: string, redirectUri?: string) =>
+    request<{ authorizationUrl: string }>(`/mcp-servers/${id}/oauth/start`, {
+      method: 'POST',
+      body: JSON.stringify({ redirectUri }),
+    }),
+  getSettings: () => request<AppSettings>('/settings'),
+  updateSettings: (input: { branding?: Partial<AppBranding>; preferences?: Partial<AppPreferences> }) =>
+    request<AppSettings>('/settings', { method: 'PUT', body: JSON.stringify(input) }),
 };
 
 export interface BoardConnectionResponse {
   connected?: boolean;
   provider?: string;
   teamId?: string;
+  config?: Record<string, string>;
   enabled?: boolean;
   stateMap?: Record<string, string>;
+  direction?: BoardSyncDirection;
+  autoPush?: boolean;
+  importNew?: boolean;
+  updateExisting?: boolean;
+  syncIntervalMs?: number;
+  hasApiKey?: boolean;
   lastSyncedAt?: string;
   id?: string;
   projectId?: string;
   apiKey?: string;
 }
 
+export type BoardSyncDirection = 'pull' | 'push' | 'both';
+
 export interface BoardConnectionInput {
+  provider?: string;
   apiKey?: string;
   teamId?: string;
+  config?: Record<string, string>;
   stateMap?: Record<string, string>;
+  direction?: BoardSyncDirection;
+  autoPush?: boolean;
+  importNew?: boolean;
+  updateExisting?: boolean;
+  syncIntervalMs?: number | null;
   enabled?: boolean;
 }
 
@@ -385,31 +494,31 @@ export interface SyncSummary {
   updated: number;
 }
 
-export interface LinearTeam {
+export interface RemoteContainer {
   id: string;
   name: string;
-  key: string;
+  key?: string;
 }
 
-export interface LinearState {
+export interface RemoteState {
   id: string;
   name: string;
-  type: string;
+  type?: string;
 }
+
+/** @deprecated use {@link RemoteContainer}. */
+export type LinearTeam = RemoteContainer;
+/** @deprecated use {@link RemoteState}. */
+export type LinearState = RemoteState;
 
 export function runStreamUrl(runId: string): string {
-  return `${API_URL}/runs/${runId}/stream`;
+  return `${getApiBaseUrl()}/runs/${runId}/stream`;
 }
 
 export function chatStreamUrl(conversationId: string): string {
-  return `${API_URL}/conversations/${conversationId}/stream`;
+  return `${getApiBaseUrl()}/conversations/${conversationId}/stream`;
 }
 
 export function boardStreamUrl(projectId: string): string {
-  return `${API_URL}/projects/${projectId}/board/stream`;
-}
-
-/** Public endpoint a webhook trigger fires on: `<orchestrator>/api/webhooks/triggers/<token>`. */
-export function triggerWebhookUrl(token: string): string {
-  return `${API_URL}/webhooks/triggers/${token}`;
+  return `${getApiBaseUrl()}/projects/${projectId}/board/stream`;
 }

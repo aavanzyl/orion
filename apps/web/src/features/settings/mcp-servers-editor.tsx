@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { PlusIcon, Trash2Icon } from 'lucide-react';
+import { toast } from 'sonner';
 import type { McpServerConfig } from '@orion/models';
+import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -43,6 +45,27 @@ export interface McpServersEditorProps {
 
 function isStdio(c: McpServerConfig) {
   return typeof c.command === 'string' && c.command.length > 0;
+}
+
+/**
+ * Best-effort registration of a custom MCP server into Orion's global list of
+ * available servers. Called when a user adds a custom MCP to an agent in a
+ * workflow so the same server becomes reusable elsewhere. Silently skips when a
+ * server with the same name already exists and never blocks the node edit.
+ */
+export async function registerAvailableMcpServer(name: string, config: McpServerConfig): Promise<void> {
+  try {
+    const existing = await api.listMcpServers();
+    if (existing.some((s) => s.name === name)) return;
+    await api.createMcpServer({
+      name,
+      config,
+      authType: config.bearerToken ? 'bearer' : 'none',
+    });
+    toast.success(`Added “${name}” to available MCP servers`);
+  } catch {
+    // Non-fatal: the server may already exist or be created concurrently.
+  }
 }
 
 function summary(c: McpServerConfig) {
@@ -128,6 +151,7 @@ export function McpCustomForm({
         ? { command: customCommand.trim(), args: customArgs.trim() ? customArgs.trim().split(/\s+/) : [] }
         : { url: customUrl.trim(), ...(customToken.trim() ? { bearerToken: customToken.trim() } : {}) };
     onAdd(name, config);
+    void registerAvailableMcpServer(name, config);
   };
 
   return (

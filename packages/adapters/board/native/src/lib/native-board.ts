@@ -3,7 +3,6 @@ import type { LabelRepository, TicketRepository } from '@orion/db';
 import type {
   Board,
   BoardSwimlane,
-  BoardConfig,
   CreateLabelInput,
   CreateTicketInput,
   Label,
@@ -38,7 +37,11 @@ export class NativeBoardProvider implements BoardProvider {
     private readonly labels: LabelRepository,
   ) {}
 
-  async getBoard(projectId: ProjectId, swimlanes: string[], triggers?: BoardConfig['triggers']): Promise<Board> {
+  async getBoard(
+    projectId: ProjectId,
+    swimlanes: string[],
+    triggers?: Record<string, string[]>,
+  ): Promise<Board> {
     const all = await this.tickets.listByProject(projectId);
     const bySwimlane = new Map<string, Ticket[]>();
     for (const swimlane of swimlanes) {
@@ -50,18 +53,13 @@ export class NativeBoardProvider implements BoardProvider {
     }
 
     const boardSwimlanes: BoardSwimlane[] = swimlanes.map((key) => {
-      const triggerValue = triggers?.[key];
-      const workflows = triggerValue
-        ? Array.isArray(triggerValue)
-          ? triggerValue
-          : [triggerValue]
-        : undefined;
+      const workflows = triggers?.[key];
 
       return {
         key,
         title: titleize(key),
         tickets: (bySwimlane.get(key) ?? []).sort((a, b) => a.order - b.order),
-        workflows,
+        workflows: workflows && workflows.length > 0 ? workflows : undefined,
       };
     });
 

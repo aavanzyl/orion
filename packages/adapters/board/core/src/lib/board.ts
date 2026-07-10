@@ -14,7 +14,6 @@ import type {
   TicketRelation,
   UpdateTicketInput,
 } from '@orion/models';
-import type { BoardConfig } from '@orion/models';
 
 /**
  * Task-board adapter. The native provider stores tickets in Postgres; future
@@ -22,7 +21,11 @@ import type { BoardConfig } from '@orion/models';
  * same interface.
  */
 export interface BoardProvider extends Keyed {
-  getBoard(projectId: ProjectId, swimlanes: string[], triggers?: BoardConfig['triggers']): Promise<Board>;
+  getBoard(
+    projectId: ProjectId,
+    swimlanes: string[],
+    triggers?: Record<string, string[]>,
+  ): Promise<Board>;
   createTicket(input: CreateTicketInput): Promise<Ticket>;
   updateTicket(ticketId: TicketId, input: UpdateTicketInput): Promise<Ticket>;
   moveTicket(input: MoveTicketInput): Promise<Ticket>;

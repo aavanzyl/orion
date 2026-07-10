@@ -295,7 +295,6 @@ export class RunRepository {
         attempts: null,
         timedOut: null,
         durationMs: null,
-        structuredOutputValid: null,
         startedAt: null,
         completedAt: null,
       })
@@ -321,7 +320,6 @@ export class RunRepository {
         durationMs: patch.durationMs,
         model: patch.model,
         agentId: patch.agentId,
-        structuredOutputValid: patch.structuredOutputValid,
         startedAt: patch.startedAt ? new Date(patch.startedAt) : undefined,
         completedAt: patch.completedAt ? new Date(patch.completedAt) : undefined,
       })

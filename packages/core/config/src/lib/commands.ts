@@ -3,30 +3,11 @@ import type { Dirent } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { DEFAULT_CONFIG_PATH } from './load-config.js';
 import { ConfigError } from './errors.js';
+import { resolveNodeReference } from './resolve-ref.js';
+
+export { resolveNodeReference } from './resolve-ref.js';
 
 export type CommandVariables = Record<string, string>;
-
-/**
- * Resolve a `{{ nodes.<id>[.<path>] }}` reference against an outputs map.
- * Returns the value (primitives as-is, objects serialized), or `undefined`
- * when the id is missing or the path doesn't exist.
- */
-export function resolveNodeReference(
-  nodeOutputs: Record<string, unknown>,
-  id: string,
-  pathSegments: string[],
-): unknown {
-  const output = nodeOutputs[id];
-  if (output === undefined || output === null) return undefined;
-  if (pathSegments.length === 0) return output;
-  let current: unknown = output;
-  for (const seg of pathSegments) {
-    if (current === null || current === undefined) return undefined;
-    if (typeof current !== 'object') return undefined;
-    current = (current as Record<string, unknown>)[seg];
-  }
-  return current;
-}
 
 const NODES_REF_RE = /\{\{\s*([A-Za-z0-9_]+)\.([A-Za-z0-9_-]+)((?:\.[A-Za-z0-9_]+)*)\s*\}\}/g;
 

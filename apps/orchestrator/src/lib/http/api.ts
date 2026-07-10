@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
-import type { ApiResponse, RunStatus } from '@orion/models';
+import type { ApiResponse, CreateMcpServerInput, McpOAuthStored, McpServerConfig, McpServerMap, RunStatus, UpdateMcpServerInput } from '@orion/models';
 import {
   ConfigError,
   getWorkflowTemplate,
@@ -9,6 +10,7 @@ import {
   installSkillFromGitHub,
   listGlobalSkillCatalog,
   getGlobalSkillDetail,
+  RECOMMENDED_SKILLS,
   updateSkillLockEntry,
   uninstallSkill,
   syncSkill,
@@ -17,7 +19,7 @@ import type { Container } from '../container.js';
 import { ProjectService } from '../services/project.service.js';
 import { RunService } from '../services/run.service.js';
 import { ChatService } from '../services/chat.service.js';
-import { TriggerService, TriggerNotFoundError, type TriggerFireResult } from '../services/trigger.service.js';
+import { ScheduleService } from '../services/schedule.service.js';
 import { FilesystemService } from '../services/filesystem.service.js';
 import { encrypt, decrypt } from '../crypto.js';
 
@@ -27,16 +29,110 @@ function parseSkillTags(raw: unknown): string[] | undefined {
   return tags.length > 0 ? tags : undefined;
 }
 
+/** Parse an optional string[] request field, returning undefined when absent. */
+function parseStringArray(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return raw.filter((v: unknown): v is string => typeof v === 'string').map((v: string) => v.trim()).filter(Boolean);
+}
+
+/**
+ * Coerce a value into a `Record<string, string>`. Accepts either an object
+ * (JSON body) or a JSON-encoded string (query param). Returns `undefined` when
+ * the input is absent or malformed so callers can skip the field on upsert.
+ */
+function parseStringMap(raw: unknown): Record<string, string> | undefined {
+  let value = raw;
+  if (typeof value === 'string') {
+    if (!value) return undefined;
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === 'string') out[k] = v;
+  }
+  return out;
+}
+
+/** Parse a per-connection cadence: a positive number, or `null` to clear it. */
+function parseSyncInterval(raw: unknown): number | null | undefined {
+  if (raw === null) return null;
+  if (raw === undefined || raw === '') return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return Math.floor(n);
+}
+
+/**
+ * Parse an optional map of inline MCP server definitions from a request body.
+ * Each entry must define either a `command` (stdio) or a `url` (http); malformed
+ * entries are dropped. Returns undefined when absent so callers skip the field.
+ */
+function parseMcpServerConfigs(raw: unknown): McpServerMap | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: McpServerMap = {};
+  for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!name || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const v = value as Record<string, unknown>;
+    const config: McpServerConfig = {};
+    if (typeof v.command === 'string' && v.command) config.command = v.command;
+    if (Array.isArray(v.args)) config.args = v.args.filter((a): a is string => typeof a === 'string');
+    if (v.env && typeof v.env === 'object' && !Array.isArray(v.env)) {
+      const env: Record<string, string> = {};
+      for (const [k, val] of Object.entries(v.env as Record<string, unknown>)) {
+        if (typeof val === 'string') env[k] = val;
+      }
+      config.env = env;
+    }
+    if (typeof v.url === 'string' && v.url) config.url = v.url;
+    if (typeof v.bearerToken === 'string' && v.bearerToken) config.bearerToken = v.bearerToken;
+    if (config.command || config.url) out[name] = config;
+  }
+  return out;
+}
+
+/** Parse a single MCP server config from a request body. */
+function parseMcpServerConfigForCreate(raw: unknown): McpServerConfig {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const v = raw as Record<string, unknown>;
+  const config: McpServerConfig = {};
+  if (typeof v.command === 'string' && v.command) config.command = v.command;
+  if (Array.isArray(v.args)) config.args = v.args.filter((a): a is string => typeof a === 'string');
+  if (v.env && typeof v.env === 'object' && !Array.isArray(v.env)) {
+    const env: Record<string, string> = {};
+    for (const [k, val] of Object.entries(v.env as Record<string, unknown>)) {
+      if (typeof val === 'string') env[k] = val;
+    }
+    config.env = env;
+  }
+  if (typeof v.url === 'string' && v.url) config.url = v.url;
+  if (typeof v.bearerToken === 'string' && v.bearerToken) config.bearerToken = v.bearerToken;
+  return config;
+}
+
+/** Encrypt sensitive fields (clientSecret, accessToken, refreshToken) in an oauth config. */
+function encryptOauthSecrets(oauth: McpOAuthStored, salt?: string): McpOAuthStored {
+  const out = { ...oauth };
+  if (salt) {
+    if (out.clientSecret) out.clientSecret = encrypt(out.clientSecret, salt);
+    if (out.accessToken) out.accessToken = encrypt(out.accessToken, salt);
+    if (out.refreshToken) out.refreshToken = encrypt(out.refreshToken, salt);
+  }
+  return out;
+}
+
 function ok<T>(res: Response, data: T, status = 200): void {
   const body: ApiResponse<T> = { data, success: true };
   res.status(status).json(body);
 }
 
-/** Shape a trigger fire result for HTTP: a run id for workflows, text for agents. */
-function fireResponse(result: TriggerFireResult): Record<string, unknown> {
-  return result.kind === 'agent'
-    ? { agentResponse: result.agentResponse }
-    : { runId: result.run.id };
+/** Shape a schedule fire result for HTTP: the agent's final text response. */
+function fireResponse(agentResponse: string): Record<string, unknown> {
+  return { agentResponse };
 }
 
 function fail(res: Response, error: string, status = 400): void {
@@ -70,7 +166,7 @@ export function createApiRouter(
   c: Container,
   runs: RunService,
   chat: ChatService,
-  triggers: TriggerService,
+  schedules: ScheduleService,
 ): Router {
   const router = Router();
   const projects = new ProjectService(c);
@@ -244,6 +340,13 @@ export function createApiRouter(
     '/skills',
     asyncHandler(async (_req, res) => {
       ok(res, { skills: await skills.listGlobal() });
+    }),
+  );
+
+  router.get(
+    '/skills/recommended',
+    asyncHandler(async (_req, res) => {
+      ok(res, { skills: RECOMMENDED_SKILLS });
     }),
   );
 
@@ -697,9 +800,9 @@ export function createApiRouter(
         swimlane: req.body?.swimlane,
         order: req.body?.order,
       });
-      c.linearSync.pushTicketState(req.params.id).catch(() => undefined);
+      c.boardSync.pushTicketState(req.params.id).catch(() => undefined);
       if (req.body?.swimlane) {
-        void runs.handleSwimlaneEntry(req.params.id, req.body.swimlane);
+        void runs.handleSwimlaneEntry(req.params.id, req.body.swimlane, req.body?.workflowName);
       }
       ok(res, result);
     }),
@@ -940,40 +1043,50 @@ export function createApiRouter(
     }),
   );
 
-  // --- Triggers: schedules + inbound webhooks that auto-start workflow runs --
+  // --- Schedules: recurring cron jobs that run a one-off agent turn ---------
 
   router.get(
-    '/projects/:id/triggers',
+    '/schedules',
+    asyncHandler(async (_req, res) => {
+      ok(res, await schedules.listAll());
+    }),
+  );
+
+  router.get(
+    '/projects/:id/schedules',
     asyncHandler(async (req, res) => {
       const project = await projects.get(req.params.id);
       if (!project) return fail(res, 'Project not found', 404);
-      ok(res, await triggers.list(req.params.id));
+      ok(res, await schedules.list(req.params.id));
+    }),
+  );
+
+  router.get(
+    '/projects/:id/schedules/options',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      ok(res, await schedules.options(project));
     }),
   );
 
   router.post(
-    '/projects/:id/triggers',
+    '/projects/:id/schedules',
     asyncHandler(async (req, res) => {
       const project = await projects.get(req.params.id);
       if (!project) return fail(res, 'Project not found', 404);
       const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
       if (!name) return fail(res, 'name is required');
-      const type = req.body?.type === 'webhook' ? 'webhook' : 'cron';
-      const action = req.body?.action === 'agent' ? 'agent' : 'workflow';
       try {
-        const created = await triggers.create({
+        const created = await schedules.create({
           projectId: req.params.id,
           name,
-          type,
-          action,
+          cron: typeof req.body?.cron === 'string' ? req.body.cron : '',
+          instruction: typeof req.body?.instruction === 'string' ? req.body.instruction : '',
           enabled: typeof req.body?.enabled === 'boolean' ? req.body.enabled : undefined,
-          cron: typeof req.body?.cron === 'string' ? req.body.cron : undefined,
-          ticketTitle: typeof req.body?.ticketTitle === 'string' ? req.body.ticketTitle : undefined,
-          ticketDescription:
-            typeof req.body?.ticketDescription === 'string' ? req.body.ticketDescription : undefined,
-          swimlane: typeof req.body?.swimlane === 'string' ? req.body.swimlane : undefined,
-          agentId: typeof req.body?.agentId === 'string' ? req.body.agentId : undefined,
-          prompt: typeof req.body?.prompt === 'string' ? req.body.prompt : undefined,
+          skills: parseStringArray(req.body?.skills),
+          mcpServers: parseStringArray(req.body?.mcpServers),
+          mcpServerConfigs: parseMcpServerConfigs(req.body?.mcpServerConfigs),
         });
         ok(res, created, 201);
       } catch (err) {
@@ -983,13 +1096,21 @@ export function createApiRouter(
   );
 
   router.patch(
-    '/triggers/:id',
+    '/schedules/:id',
     asyncHandler(async (req, res) => {
-      const existing = await triggers.get(req.params.id);
-      if (!existing) return fail(res, 'Trigger not found', 404);
+      const existing = await schedules.get(req.params.id);
+      if (!existing) return fail(res, 'Schedule not found', 404);
       try {
-        const updated = await triggers.update(req.params.id, req.body ?? {});
-        if (!updated) return fail(res, 'Trigger not found', 404);
+        const updated = await schedules.update(req.params.id, {
+          name: typeof req.body?.name === 'string' ? req.body.name : undefined,
+          enabled: typeof req.body?.enabled === 'boolean' ? req.body.enabled : undefined,
+          cron: typeof req.body?.cron === 'string' ? req.body.cron : undefined,
+          instruction: typeof req.body?.instruction === 'string' ? req.body.instruction : undefined,
+          skills: parseStringArray(req.body?.skills),
+          mcpServers: parseStringArray(req.body?.mcpServers),
+          mcpServerConfigs: parseMcpServerConfigs(req.body?.mcpServerConfigs),
+        });
+        if (!updated) return fail(res, 'Schedule not found', 404);
         ok(res, updated);
       } catch (err) {
         return fail(res, err instanceof Error ? err.message : String(err), 422);
@@ -998,52 +1119,246 @@ export function createApiRouter(
   );
 
   router.delete(
-    '/triggers/:id',
+    '/schedules/:id',
     asyncHandler(async (req, res) => {
-      const existing = await triggers.get(req.params.id);
-      if (!existing) return fail(res, 'Trigger not found', 404);
-      await triggers.delete(req.params.id);
+      const existing = await schedules.get(req.params.id);
+      if (!existing) return fail(res, 'Schedule not found', 404);
+      await schedules.delete(req.params.id);
       ok(res, { deleted: true });
     }),
   );
 
   router.post(
-    '/triggers/:id/fire',
+    '/schedules/:id/fire',
     asyncHandler(async (req, res) => {
-      const trigger = await triggers.get(req.params.id);
-      if (!trigger) return fail(res, 'Trigger not found', 404);
-      ok(res, fireResponse(await triggers.fire(trigger, req.body ?? {})), 201);
+      const schedule = await schedules.get(req.params.id);
+      if (!schedule) return fail(res, 'Schedule not found', 404);
+      ok(res, fireResponse(await schedules.fire(schedule, req.body ?? {})), 201);
     }),
   );
 
+  // --- Global MCP servers: persisted in the database ------------------------
+
+  router.get(
+    '/mcp-servers',
+    asyncHandler(async (_req, res) => ok(res, await c.mcpServers.list())),
+  );
+
   router.post(
-    '/webhooks/triggers/:token',
+    '/mcp-servers',
     asyncHandler(async (req, res) => {
+      const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+      if (!name) return fail(res, 'name is required');
+      const existing = await c.mcpServers.getByName(name);
+      if (existing) return fail(res, `MCP server '${name}' already exists`, 409);
+      const config = parseMcpServerConfigForCreate(req.body?.config);
+      const input: CreateMcpServerInput = {
+        name,
+        config,
+        authType: req.body?.authType ?? 'none',
+      };
+      if (req.body?.oauth) {
+        input.oauth = encryptOauthSecrets(req.body.oauth as McpOAuthStored, c.env.providerEncryptionSalt);
+      }
+      ok(res, await c.mcpServers.create(input), 201);
+    }),
+  );
+
+  router.patch(
+    '/mcp-servers/:id',
+    asyncHandler(async (req, res) => {
+      const existing = await c.mcpServers.get(req.params.id);
+      if (!existing) return fail(res, 'MCP server not found', 404);
+      const patch: UpdateMcpServerInput = {};
+      if (typeof req.body?.name === 'string') {
+        const name = req.body.name.trim();
+        if (name && name !== existing.name) {
+          const conflict = await c.mcpServers.getByName(name);
+          if (conflict) return fail(res, `MCP server '${name}' already exists`, 409);
+          patch.name = name;
+        }
+      }
+      if (req.body?.config !== undefined) {
+        patch.config = parseMcpServerConfigForCreate(req.body.config);
+      }
+      if (req.body?.authType !== undefined) {
+        patch.authType = req.body.authType;
+      }
+      if (req.body?.oauth !== undefined) {
+        const mergedOauth: McpOAuthStored = req.body.oauth === null
+          ? {}
+          : { ...((existing.oauth as unknown as Record<string, unknown>) ?? {}), ...(req.body.oauth as Record<string, unknown>) };
+        patch.oauth = encryptOauthSecrets(mergedOauth, c.env.providerEncryptionSalt);
+      }
+      const updated = await c.mcpServers.update(req.params.id, patch);
+      if (!updated) return fail(res, 'MCP server not found', 404);
+      ok(res, updated);
+    }),
+  );
+
+  router.delete(
+    '/mcp-servers/:id',
+    asyncHandler(async (req, res) => {
+      const existing = await c.mcpServers.get(req.params.id);
+      if (!existing) return fail(res, 'MCP server not found', 404);
+      await c.mcpServers.delete(req.params.id);
+      ok(res, { deleted: true });
+    }),
+  );
+
+  // --- MCP OAuth flow -------------------------------------------------------
+
+  router.post(
+    '/mcp-servers/:id/oauth/start',
+    asyncHandler(async (req, res) => {
+      const server = await c.mcpServers.get(req.params.id);
+      if (!server) return fail(res, 'MCP server not found', 404);
+      if (server.authType !== 'oauth') return fail(res, 'Server does not use OAuth', 400);
+
+      const rawOauth = await c.mcpServers.getRawOauth(server.name);
+      if (!rawOauth?.authorizationUrl || !rawOauth?.tokenUrl || !rawOauth?.clientId) {
+        return fail(res, 'OAuth configuration is incomplete (authorizationUrl, tokenUrl, clientId required)', 400);
+      }
+
+      const state = randomUUID();
+      const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+      c.oauthStates.set(state, { mcpServerId: server.id, expiresAt });
+
+      // Clean expired states
+      for (const [key, entry] of c.oauthStates) {
+        if (entry.expiresAt < Date.now()) c.oauthStates.delete(key);
+      }
+
+      const redirectUri = req.body?.redirectUri ?? `${c.env.publicUrl}/api/mcp-servers/oauth/callback`;
+      const params = new URLSearchParams({
+        client_id: rawOauth.clientId,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        state,
+      });
+      if (rawOauth.scopes) params.set('scope', rawOauth.scopes);
+
+      const authorizationUrl = `${rawOauth.authorizationUrl}?${params.toString()}`;
+      ok(res, { authorizationUrl });
+    }),
+  );
+
+  router.get(
+    '/mcp-servers/oauth/callback',
+    asyncHandler(async (req, res) => {
+      const code = typeof req.query.code === 'string' ? req.query.code : '';
+      const state = typeof req.query.state === 'string' ? req.query.state : '';
+      if (!code || !state) {
+        return fail(res, 'Missing code or state parameter', 400);
+      }
+
+      const entry = c.oauthStates.get(state);
+      if (!entry || entry.expiresAt < Date.now()) {
+        c.oauthStates.delete(state);
+        return fail(res, 'Invalid or expired OAuth state', 400);
+      }
+      c.oauthStates.delete(state);
+
+      const server = await c.mcpServers.get(entry.mcpServerId);
+      if (!server) return fail(res, 'MCP server not found', 404);
+
+      const rawOauth = await c.mcpServers.getRawOauth(server.name);
+      if (!rawOauth?.tokenUrl || !rawOauth?.clientId || !rawOauth?.clientSecret) {
+        return fail(res, 'OAuth configuration is incomplete', 400);
+      }
+
+      const clientSecret = c.env.providerEncryptionSalt
+        ? decrypt(rawOauth.clientSecret, c.env.providerEncryptionSalt)
+        : rawOauth.clientSecret;
+
       try {
-        const result = await triggers.fireByWebhookToken(req.params.token, req.body ?? {});
-        ok(res, fireResponse(result), 202);
+        const tokenResponse = await fetch(rawOauth.tokenUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+          body: new URLSearchParams({
+            grant_type: 'authorization_code',
+            code,
+            client_id: rawOauth.clientId,
+            client_secret: clientSecret,
+            redirect_uri: rawOauth.redirectUri ?? `${c.env.publicUrl}/api/mcp-servers/oauth/callback`,
+          }).toString(),
+        });
+
+        if (!tokenResponse.ok) {
+          const errorText = await tokenResponse.text().catch(() => '');
+          return fail(res, `Token exchange failed: ${tokenResponse.status} ${errorText.slice(0, 200)}`, 502);
+        }
+
+        const tokenData = (await tokenResponse.json()) as Record<string, unknown>;
+        const accessToken = typeof tokenData.access_token === 'string' ? tokenData.access_token : '';
+        const refreshToken = typeof tokenData.refresh_token === 'string' ? tokenData.refresh_token : undefined;
+        const expiresIn = typeof tokenData.expires_in === 'number' ? tokenData.expires_in : undefined;
+
+        if (!accessToken) return fail(res, 'No access_token in token response', 502);
+
+        const updatedOauth: McpOAuthStored = {
+          ...rawOauth,
+          accessToken: accessToken,
+          refreshToken: refreshToken,
+          expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
+        };
+
+        await c.mcpServers.update(server.id, {
+          oauth: encryptOauthSecrets(updatedOauth, c.env.providerEncryptionSalt),
+        });
+
+        res.status(200).type('html').send(
+          '<html><body><script>window.close();</script><p>Authorization successful. You may close this window.</p></body></html>',
+        );
       } catch (err) {
-        if (err instanceof TriggerNotFoundError) return fail(res, err.message, 404);
-        throw err;
+        fail(res, err instanceof Error ? err.message : 'Token exchange failed', 502);
       }
     }),
   );
 
-  // --- Linear board sync ----------------------------------------------------
+  // --- App settings: branding and preferences -------------------------------
+
+  router.get(
+    '/settings',
+    asyncHandler(async (_req, res) => ok(res, await c.settings.get())),
+  );
+
+  router.put(
+    '/settings',
+    asyncHandler(async (req, res) => {
+      const patch: { branding?: Record<string, unknown>; preferences?: Record<string, unknown> } = {};
+      if (req.body?.branding && typeof req.body.branding === 'object') {
+        patch.branding = req.body.branding as Record<string, unknown>;
+      }
+      if (req.body?.preferences && typeof req.body.preferences === 'object') {
+        patch.preferences = req.body.preferences as Record<string, unknown>;
+      }
+      ok(res, await c.settings.update(patch));
+    }),
+  );
+
+  // --- Board sync (Linear / Jira / Trello) ----------------------------------
 
   router.get(
     '/projects/:id/board-connection',
     asyncHandler(async (req, res) => {
       const project = await projects.get(req.params.id);
       if (!project) return fail(res, 'Project not found', 404);
-      const conn = await c.linearSync.getConnection(req.params.id);
+      const conn = await c.boardSync.getConnection(req.params.id);
       if (!conn) return ok(res, { connected: false });
       ok(res, {
         connected: true,
         provider: conn.provider,
         teamId: conn.teamId,
+        config: conn.config,
         enabled: conn.enabled,
         stateMap: conn.stateMap,
+        direction: conn.direction,
+        autoPush: conn.autoPush,
+        importNew: conn.importNew,
+        updateExisting: conn.updateExisting,
+        syncIntervalMs: conn.syncIntervalMs,
+        hasApiKey: Boolean(conn.apiKey),
         lastSyncedAt: conn.lastSyncedAt,
       });
     }),
@@ -1054,14 +1369,27 @@ export function createApiRouter(
     asyncHandler(async (req, res) => {
       const project = await projects.get(req.params.id);
       if (!project) return fail(res, 'Project not found', 404);
+      const body = req.body ?? {};
+      if (body.direction !== undefined && !['pull', 'push', 'both'].includes(body.direction)) {
+        return fail(res, 'direction must be pull, push, or both');
+      }
       try {
-        const conn = await c.linearSync.upsertConnection(req.params.id, {
-          apiKey: typeof req.body?.apiKey === 'string' ? req.body.apiKey : undefined,
-          teamId: typeof req.body?.teamId === 'string' ? req.body.teamId : undefined,
-          stateMap: req.body?.stateMap ?? undefined,
-          enabled: typeof req.body?.enabled === 'boolean' ? req.body.enabled : undefined,
+        const conn = await c.boardSync.upsertConnection(req.params.id, {
+          provider: typeof body.provider === 'string' ? body.provider : undefined,
+          apiKey: typeof body.apiKey === 'string' ? body.apiKey : undefined,
+          teamId: typeof body.teamId === 'string' ? body.teamId : undefined,
+          config: parseStringMap(body.config),
+          stateMap: parseStringMap(body.stateMap),
+          direction: body.direction,
+          autoPush: typeof body.autoPush === 'boolean' ? body.autoPush : undefined,
+          importNew: typeof body.importNew === 'boolean' ? body.importNew : undefined,
+          updateExisting:
+            typeof body.updateExisting === 'boolean' ? body.updateExisting : undefined,
+          syncIntervalMs: parseSyncInterval(body.syncIntervalMs),
+          enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
         });
-        ok(res, conn);
+        // Never echo the stored secret back to clients.
+        ok(res, { ...conn, apiKey: undefined, hasApiKey: Boolean(conn.apiKey) });
       } catch (err) {
         fail(res, err instanceof Error ? err.message : String(err), 422);
       }
@@ -1073,7 +1401,7 @@ export function createApiRouter(
     asyncHandler(async (req, res) => {
       const project = await projects.get(req.params.id);
       if (!project) return fail(res, 'Project not found', 404);
-      await c.linearSync.disconnect(req.params.id);
+      await c.boardSync.disconnect(req.params.id);
       ok(res, { deleted: true });
     }),
   );
@@ -1084,7 +1412,7 @@ export function createApiRouter(
       const project = await projects.get(req.params.id);
       if (!project) return fail(res, 'Project not found', 404);
       try {
-        const summary = await c.linearSync.syncNow(req.params.id);
+        const summary = await c.boardSync.syncNow(req.params.id);
         ok(res, summary);
       } catch (err) {
         fail(res, err instanceof Error ? err.message : String(err), 422);
@@ -1092,42 +1420,44 @@ export function createApiRouter(
     }),
   );
 
-  router.get(
-    '/projects/:id/board-connection/teams',
-    asyncHandler(async (req, res) => {
-      const project = await projects.get(req.params.id);
-      if (!project) return fail(res, 'Project not found', 404);
-      const apiKey =
-        typeof req.query.apiKey === 'string'
-          ? req.query.apiKey
-          : (await c.linearSync.getConnection(req.params.id))?.apiKey;
-      if (!apiKey) return fail(res, 'apiKey is required', 400);
-      try {
-        ok(res, await c.linearSync.listTeams(apiKey));
-      } catch (err) {
-        fail(res, err instanceof Error ? err.message : String(err), 422);
-      }
-    }),
-  );
+  // Probe the remote board while (re)configuring. `/teams` is a legacy alias.
+  const listContainers = asyncHandler(async (req, res) => {
+    const project = await projects.get(req.params.id);
+    if (!project) return fail(res, 'Project not found', 404);
+    try {
+      ok(
+        res,
+        await c.boardSync.listContainers(req.params.id, {
+          provider: typeof req.query.provider === 'string' ? req.query.provider : undefined,
+          apiKey: typeof req.query.apiKey === 'string' ? req.query.apiKey : undefined,
+          config: parseStringMap(req.query.config),
+        }),
+      );
+    } catch (err) {
+      fail(res, err instanceof Error ? err.message : String(err), 422);
+    }
+  });
+  router.get('/projects/:id/board-connection/containers', listContainers);
+  router.get('/projects/:id/board-connection/teams', listContainers);
 
   router.get(
     '/projects/:id/board-connection/states',
     asyncHandler(async (req, res) => {
       const project = await projects.get(req.params.id);
       if (!project) return fail(res, 'Project not found', 404);
-      const conn = await c.linearSync.getConnection(req.params.id);
-      const apiKey =
-        typeof req.query.apiKey === 'string'
-          ? req.query.apiKey
-          : conn?.apiKey;
+      const conn = await c.boardSync.getConnection(req.params.id);
       const teamId =
-        typeof req.query.teamId === 'string'
-          ? req.query.teamId
-          : conn?.teamId;
-      if (!apiKey) return fail(res, 'apiKey is required', 400);
+        typeof req.query.teamId === 'string' ? req.query.teamId : conn?.teamId;
       if (!teamId) return fail(res, 'teamId is required', 400);
       try {
-        ok(res, await c.linearSync.listStates(apiKey, teamId));
+        ok(
+          res,
+          await c.boardSync.listStates(req.params.id, teamId, {
+            provider: typeof req.query.provider === 'string' ? req.query.provider : undefined,
+            apiKey: typeof req.query.apiKey === 'string' ? req.query.apiKey : undefined,
+            config: parseStringMap(req.query.config),
+          }),
+        );
       } catch (err) {
         fail(res, err instanceof Error ? err.message : String(err), 422);
       }

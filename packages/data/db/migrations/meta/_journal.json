@@ -120,6 +120,48 @@
       "when": 1783360100000,
       "tag": "0017_rename_column_key_to_swimlane_key",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1783360200000,
+      "tag": "0018_drop_structured_output_valid",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1783360400000,
+      "tag": "0020_schedules",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1783360500000,
+      "tag": "0021_board_sync_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1783360600000,
+      "tag": "0022_schedule_mcp_configs",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1783360700000,
+      "tag": "0023_mcp_servers",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1783360800000,
+      "tag": "0024_app_settings",
+      "breakpoints": true
     }
   ]
 }

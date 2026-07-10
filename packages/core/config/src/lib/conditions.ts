@@ -1,4 +1,4 @@
-import { resolveNodeReference } from './commands.js';
+import { resolveNodeReference } from './resolve-ref.js';
 
 /**
  * Result of a non-throwing condition evaluation. `ok` is false only when the
@@ -368,4 +368,142 @@ function truthy(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0;
   if (typeof value === 'object') return Object.keys(value).length > 0;
   return Boolean(value);
+}
+
+/** A single operand in a {@link SimpleComparison}: a node reference or a literal. */
+export type SimpleOperand =
+  | { kind: 'ref'; id: string; path: string[] }
+  | { kind: 'lit'; value: string | number | boolean | null };
+
+/**
+ * A single comparison row in a {@link SimpleCondition}. When {@link op} is
+ * omitted the row is a bare truthiness check on {@link left}.
+ */
+export interface SimpleComparison {
+  negated: boolean;
+  left: SimpleOperand;
+  op?: CompareOp;
+  right?: SimpleOperand;
+}
+
+/**
+ * The subset of the condition grammar that a guided (form-based) expression
+ * builder can represent losslessly: a flat list of comparisons joined by a
+ * single `&&` or `||` connector, each optionally negated with `!`.
+ */
+export interface SimpleCondition {
+  connector: 'and' | 'or';
+  comparisons: SimpleComparison[];
+}
+
+/**
+ * Attempt to parse an expression into the flat {@link SimpleCondition} shape.
+ *
+ * Returns `null` when the expression is too complex to represent this way
+ * (mixed `&&`/`||` connectors, nested parenthesised groups, or operands that
+ * are not a plain node ref/literal) so callers can fall back to raw text
+ * editing. An empty expression yields an empty comparison list.
+ */
+export function parseSimpleCondition(expr: string): SimpleCondition | null {
+  const trimmed = expr.trim();
+  if (!trimmed) return { connector: 'and', comparisons: [] };
+
+  let ast: Node;
+  try {
+    ast = new Parser(tokenize(trimmed)).parse();
+  } catch {
+    return null;
+  }
+
+  const terms: Node[] = [];
+  let connector: 'and' | 'or' = 'and';
+  if (ast.kind === 'or' || ast.kind === 'and') {
+    connector = ast.kind;
+    if (!flattenConnector(ast, connector, terms)) return null;
+  } else {
+    terms.push(ast);
+  }
+
+  const comparisons: SimpleComparison[] = [];
+  for (const term of terms) {
+    const comparison = astToComparison(term);
+    if (!comparison) return null;
+    comparisons.push(comparison);
+  }
+  return { connector, comparisons };
+}
+
+function flattenConnector(node: Node, connector: 'and' | 'or', out: Node[]): boolean {
+  if (node.kind === connector) {
+    return (
+      flattenConnector(node.left, connector, out) && flattenConnector(node.right, connector, out)
+    );
+  }
+  // A different boolean connector at this level means the expression mixes
+  // `&&` and `||`, which the flat model cannot represent.
+  if (node.kind === 'and' || node.kind === 'or') return false;
+  out.push(node);
+  return true;
+}
+
+function astToComparison(node: Node): SimpleComparison | null {
+  let negated = false;
+  let inner = node;
+  if (inner.kind === 'not') {
+    negated = true;
+    inner = inner.operand;
+  }
+  if (inner.kind === 'cmp') {
+    const left = astToOperand(inner.left);
+    const right = astToOperand(inner.right);
+    if (!left || !right) return null;
+    return { negated, left, op: inner.op, right };
+  }
+  const left = astToOperand(inner);
+  if (!left) return null;
+  return { negated, left };
+}
+
+function astToOperand(node: Node): SimpleOperand | null {
+  if (node.kind === 'ref') return { kind: 'ref', id: node.id, path: node.path };
+  if (node.kind === 'lit') {
+    return { kind: 'lit', value: node.value as string | number | boolean | null };
+  }
+  return null;
+}
+
+/**
+ * Serialise a {@link SimpleCondition} back into an expression string that
+ * {@link evaluateCondition} understands. Incomplete rows (e.g. a ref with no
+ * id) are skipped so a partially-filled builder still yields valid output.
+ */
+export function buildConditionExpression(condition: SimpleCondition): string {
+  const parts = condition.comparisons.map(comparisonToString).filter((part) => part.length > 0);
+  return parts.join(condition.connector === 'or' ? ' || ' : ' && ');
+}
+
+function comparisonToString(comparison: SimpleComparison): string {
+  const left = operandToString(comparison.left);
+  if (!left) return '';
+  const hasRight = comparison.op !== undefined && comparison.right !== undefined;
+  const right = hasRight ? operandToString(comparison.right as SimpleOperand) : '';
+  if (hasRight && !right) return '';
+  const core = hasRight ? `${left} ${comparison.op} ${right}` : left;
+  if (!comparison.negated) return core;
+  return hasRight ? `!(${core})` : `!${core}`;
+}
+
+function operandToString(operand: SimpleOperand): string {
+  if (operand.kind === 'ref') {
+    if (!operand.id) return '';
+    return operand.path.length ? `nodes.${operand.id}.${operand.path.join('.')}` : `nodes.${operand.id}`;
+  }
+  const value = operand.value;
+  if (value === null) return 'null';
+  if (typeof value === 'string') return quoteString(value);
+  return String(value);
+}
+
+function quoteString(value: string): string {
+  return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 }

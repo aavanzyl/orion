@@ -37,6 +37,7 @@ function fakeScm(
 }
 
 const tickets = {} as TicketRepository;
+const agentText = { generate: async () => 'generated' };
 
 const upstreamOutputs = (number: number) => ({
   opened: { pullRequests: [{ repo: 'app', pr: { url: 'https://example/pr', number } }] },
@@ -47,7 +48,7 @@ describe('review scm action', () => {
     const scm = fakeScm();
     const { ctx } = makeCtx({ pr: 42 });
 
-    const outcome = await review(ctx, { scm, tickets });
+    const outcome = await review(ctx, { scm, tickets, agentText });
 
     expect(outcome.status).toBe('completed');
     expect(scm.listPullRequestReviews).toHaveBeenCalledWith('/origin/app', 42);
@@ -57,7 +58,7 @@ describe('review scm action', () => {
     const scm = fakeScm();
     const { ctx } = makeCtx({}, upstreamOutputs(7));
 
-    const outcome = await review(ctx, { scm, tickets });
+    const outcome = await review(ctx, { scm, tickets, agentText });
 
     expect(outcome.status).toBe('completed');
     expect(scm.listPullRequestReviews).toHaveBeenCalledWith('/origin/app', 7);
@@ -67,7 +68,7 @@ describe('review scm action', () => {
     const scm = fakeScm();
     const { ctx } = makeCtx({ pr: 5, reviewers: ['alice'], teamReviewers: ['core'] });
 
-    const outcome = await review(ctx, { scm, tickets });
+    const outcome = await review(ctx, { scm, tickets, agentText });
 
     expect(outcome.status).toBe('completed');
     expect(scm.requestReviewers).toHaveBeenCalledWith('/origin/app', {
@@ -84,7 +85,7 @@ describe('review scm action', () => {
     const scm = fakeScm();
     const { ctx } = makeCtx({ pr: 5 });
 
-    await review(ctx, { scm, tickets });
+    await review(ctx, { scm, tickets, agentText });
 
     expect(scm.requestReviewers).not.toHaveBeenCalled();
   });
@@ -97,7 +98,7 @@ describe('review scm action', () => {
     const scm = fakeScm({ listPullRequestReviews: vi.fn().mockResolvedValue(reviews) });
     const { ctx } = makeCtx({ pr: 9 });
 
-    const outcome = await review(ctx, { scm, tickets });
+    const outcome = await review(ctx, { scm, tickets, agentText });
 
     expect(outcome.status).toBe('completed');
     if (outcome.status === 'completed') {
@@ -116,7 +117,7 @@ describe('review scm action', () => {
     const scm = fakeScm({ listPullRequestReviews: vi.fn().mockResolvedValue(reviews) });
     const { ctx } = makeCtx({ pr: 9, requireApproval: true });
 
-    const outcome = await review(ctx, { scm, tickets });
+    const outcome = await review(ctx, { scm, tickets, agentText });
 
     expect(outcome.status).toBe('failed');
     if (outcome.status === 'failed') {
@@ -132,7 +133,7 @@ describe('review scm action', () => {
     const scm = fakeScm({ listPullRequestReviews: vi.fn().mockResolvedValue(reviews) });
     const { ctx } = makeCtx({ pr: 9, requireApproval: true });
 
-    const outcome = await review(ctx, { scm, tickets });
+    const outcome = await review(ctx, { scm, tickets, agentText });
 
     expect(outcome.status).toBe('failed');
     if (outcome.status === 'failed') {
@@ -145,7 +146,7 @@ describe('review scm action', () => {
     const scm = fakeScm({ listPullRequestReviews: vi.fn().mockResolvedValue(reviews) });
     const { ctx } = makeCtx({ pr: 9, requireApproval: true });
 
-    const outcome = await review(ctx, { scm, tickets });
+    const outcome = await review(ctx, { scm, tickets, agentText });
 
     expect(outcome.status).toBe('completed');
     if (outcome.status === 'completed') {
@@ -157,7 +158,7 @@ describe('review scm action', () => {
     const scm = fakeScm();
     const { ctx } = makeCtx({});
 
-    const outcome = await review(ctx, { scm, tickets });
+    const outcome = await review(ctx, { scm, tickets, agentText });
 
     expect(outcome.status).toBe('failed');
     if (outcome.status === 'failed') {
@@ -170,7 +171,7 @@ describe('review scm action', () => {
     const scm = {} as ScmProvider;
     const { ctx } = makeCtx({ pr: 1 });
 
-    const outcome = await review(ctx, { scm, tickets });
+    const outcome = await review(ctx, { scm, tickets, agentText });
 
     expect(outcome.status).toBe('failed');
     if (outcome.status === 'failed') {
@@ -182,7 +183,7 @@ describe('review scm action', () => {
     const scm = fakeScm({ listPullRequestReviews: vi.fn().mockRejectedValue(new Error('boom')) });
     const { ctx } = makeCtx({ pr: 3 });
 
-    const outcome = await review(ctx, { scm, tickets });
+    const outcome = await review(ctx, { scm, tickets, agentText });
 
     expect(outcome.status).toBe('failed');
     if (outcome.status === 'failed') {

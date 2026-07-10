@@ -1,15 +1,12 @@
 import type { NodeExecutor, NodeExecutionContext, NodeOutcome } from '@orion/workflow-engine';
 import type { HarnessRegistry, HarnessUsage } from '@orion/harness-core';
 import type { TicketRepository } from '@orion/db';
-import { buildStructuredOutputInstruction, ConfigError, extractJson, installSkillsIntoWorktree, renderCommand, renderTemplate, validateStructuredOutput } from '@orion/config';
-import type { McpServerMap, SearchResult } from '@orion/models';
+import { ConfigError, installSkillsIntoWorktree, renderCommand, renderTemplate } from '@orion/config';
+import type { McpServerMap } from '@orion/models';
 import type { OrionEnv } from '../env.js';
 
 const DEFAULT_PROMPT =
   'You are working on the following ticket. Investigate the repository and make the necessary code changes.\n\nTitle: $TICKET_TITLE\n\n$ARGUMENTS';
-
-/** Retrieves top-K codebase search results for RAG prompt injection. */
-export type SearchFn = (projectId: string, query: string, topK: number) => Promise<SearchResult[]>;
 
 /**
  * Executes an `agent` node by running the configured harness (e.g. Codex) inside
@@ -22,7 +19,6 @@ export class AgentNodeExecutor implements NodeExecutor {
     private readonly harnesses: HarnessRegistry,
     private readonly tickets: TicketRepository,
     private readonly env: OrionEnv,
-    private readonly search?: SearchFn,
   ) {}
 
   async execute(ctx: NodeExecutionContext): Promise<NodeOutcome> {
@@ -99,20 +95,6 @@ export class AgentNodeExecutor implements NodeExecutor {
       }
     }
 
-    if (ctx.nodeConfig.structuredOutput) {
-      prompt += buildStructuredOutputInstruction(ctx.nodeConfig.structuredOutput);
-    }
-
-    // Optional codebase retrieval: prepend top-K search hits as context. Never
-    // fail the node if search is unavailable, empty or errors — just skip.
-    if (ctx.nodeConfig.retrieval && this.search) {
-      const context = await this.buildRetrievalContext(ctx, `${ticket.title}\n\n${ticket.description}`.trim());
-      if (context) {
-        await ctx.emit('log', { agent: nodeConfig.id, message: 'Injected codebase retrieval context' });
-        prompt = `${context}\n\n${prompt}`;
-      }
-    }
-
     // Materialize the agent's selected skills into the run's worktree so the
     // harness discovers them natively (via .orion/skills/ and AGENTS.md).
     try {
@@ -145,11 +127,20 @@ export class AgentNodeExecutor implements NodeExecutor {
 
     // Global MCP servers apply to every agent; the node's own servers are
     // merged on top so a node can add to or override the shared set by name.
-    const mcpServers = {
+    const mcpServers: McpServerMap = {
       ...injected,
       ...ctx.config.mcpServers,
       ...nodeConfig.mcpServers,
     };
+
+    // Built-in Orion servers (codebase, tickets) can be opted into per node from
+    // the config's MCP catalog. Their stored URL is only a placeholder — always
+    // resolve it to this orchestrator's public URL and bind the run's project so
+    // the agent's tools work without passing an explicit id.
+    for (const name of Object.keys(mcpServers)) {
+      const url = this.builtinMcpUrl(name, ctx.run.projectId);
+      if (url) mcpServers[name] = { url };
+    }
 
     let finalResponse = '';
     const startThreadId = ctx.nodeConfig.loop?.freshContext ? undefined : ctx.run.threadId;
@@ -186,33 +177,6 @@ export class AgentNodeExecutor implements NodeExecutor {
 
     const telemetry = { agentId: nodeConfig.id, model: nodeConfig.model };
 
-    if (ctx.nodeConfig.structuredOutput) {
-      const parsed = extractJson(finalResponse);
-      if (parsed === undefined) {
-        return {
-          status: 'failed',
-          error: 'structured output invalid: no JSON object found in response',
-          telemetry: { ...telemetry, structuredOutputValid: false },
-        };
-      }
-      const validation = validateStructuredOutput(parsed, ctx.nodeConfig.structuredOutput);
-      if (!validation.ok) {
-        return {
-          status: 'failed',
-          error: `structured output invalid: ${validation.error}`,
-          telemetry: { ...telemetry, structuredOutputValid: false },
-        };
-      }
-      await ctx.emit('agent.structured', { agent: nodeConfig.id, data: validation.data });
-      return {
-        status: 'completed',
-        output: { finalResponse, data: validation.data },
-        threadId,
-        usage,
-        telemetry: { ...telemetry, structuredOutputValid: true },
-      };
-    }
-
     return { status: 'completed', output: { finalResponse }, threadId, usage, telemetry };
   }
 
@@ -221,27 +185,16 @@ export class AgentNodeExecutor implements NodeExecutor {
   }
 
   /**
-   * Build a "Relevant code context" block from codebase search, or `undefined`
-   * when disabled, unavailable or empty. Errors are swallowed so retrieval can
-   * never fail the node.
+   * Resolve a built-in Orion MCP server name to its runtime SSE URL, binding the
+   * run's project so the agent's tools work without an explicit id. Returns
+   * `undefined` for any name that is not a built-in server.
    */
-  private async buildRetrievalContext(
-    ctx: NodeExecutionContext,
-    fallbackQuery: string,
-  ): Promise<string | undefined> {
-    const retrieval = ctx.nodeConfig.retrieval;
-    if (!retrieval || !this.search) return undefined;
-    const query = (retrieval.query ?? fallbackQuery).trim();
-    if (!query) return undefined;
-    try {
-      const results = await this.search(ctx.run.projectId, query, retrieval.topK ?? 8);
-      if (results.length === 0) return undefined;
-      const blocks = results.map(
-        (r) => `--- ${r.filePath}:${r.startLine}-${r.endLine} (score ${r.score.toFixed(3)})\n${r.snippet}`,
-      );
-      return `Relevant code context:\n${blocks.join('\n\n')}`;
-    } catch {
-      return undefined;
-    }
+  private builtinMcpUrl(name: string, projectId: string): string | undefined {
+    const kinds: Record<string, string> = {
+      'orion-codebase': 'codebase',
+      'orion-tickets': 'tickets',
+    };
+    const kind = kinds[name];
+    return kind ? `${this.env.publicUrl}/mcp/${kind}?projectId=${projectId}` : undefined;
   }
 }

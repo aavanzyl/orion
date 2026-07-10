@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { LinearSyncService, type LinearClientFactory } from '../lib/services/linear-sync.service.js';
+import type { RemoteBoardClientFactory } from '@orion/board-core';
+import { BoardSyncService } from '../lib/services/board-sync.service.js';
 import { createTestApp, seedProjectRepo, type TestApp } from './app.js';
 
-describe('board connection / linear (integration)', () => {
+describe('board connection / sync (integration)', () => {
   let ctx: TestApp;
   let projectId: string;
 
@@ -15,17 +16,18 @@ describe('board connection / linear (integration)', () => {
       .send({ name: 'Board Conn Project', sourceKind: 'local', rootPath });
     projectId = project.body.data.id;
 
-    // Swap in a Linear client factory that fails offline so the validation path
+    // Swap in provider factories that fail offline so credential validation
     // never touches the network (a bogus key must surface an error, not hang).
-    const failing: LinearClientFactory = () => {
-      throw new Error('invalid Linear API key');
+    const failing: RemoteBoardClientFactory = () => {
+      throw new Error('invalid API key');
     };
-    ctx.container.linearSync = new LinearSyncService(
+    ctx.container.boardSync = new BoardSyncService(
       ctx.container.boardConnections,
       ctx.container.tickets,
       ctx.container.projects,
       ctx.container.boards,
-      failing,
+      undefined,
+      { linear: failing, jira: failing, trello: failing },
     );
   });
 

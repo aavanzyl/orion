@@ -93,6 +93,40 @@ describe('default workflow templates', () => {
     expect(template!.workflow.nodes.some((n) => n.type === 'scm' && n.action === 'open_pull_request')).toBe(true);
   });
 
+  it('gives the investigating agent skills before an agent-drafted PR in context-aware-fix', () => {
+    const template = getWorkflowTemplate('context-aware-fix');
+    expect(template).toBeDefined();
+    const nodes = template!.workflow.nodes;
+    expect(nodes.some((n) => (n.skills?.length ?? 0) > 0)).toBe(true);
+    const pr = nodes.find((n) => n.type === 'scm' && n.action === 'open_pull_request');
+    expect(pr?.agentGenerated).toBe(true);
+    expect(pr?.provider).toBeTruthy();
+  });
+
+  it('fans an agent and a shell node out over a bounded matrix in fan-out-migration', () => {
+    const template = getWorkflowTemplate('fan-out-migration');
+    expect(template).toBeDefined();
+    const matrixNodes = template!.workflow.nodes.filter((n) => n.matrix);
+    expect(matrixNodes.map((n) => n.type).sort()).toEqual(['agent', 'shell']);
+    for (const node of matrixNodes) {
+      expect(Array.isArray(node.matrix!.items)).toBe(true);
+      expect(node.matrix!.as).toBe('package');
+      expect(node.matrix!.maxParallel).toBeGreaterThanOrEqual(1);
+      expect(node.loop).toBeUndefined();
+    }
+  });
+
+  it('announces via notify and comment message nodes in ship-and-announce', () => {
+    const template = getWorkflowTemplate('ship-and-announce');
+    expect(template).toBeDefined();
+    const messages = template!.workflow.nodes.filter((n) => n.type === 'message');
+    const targets = messages.map((n) => n.messageTarget).sort();
+    expect(targets).toEqual(['comment', 'notify']);
+    expect(messages.every((n) => n.agentGenerated && Boolean(n.message))).toBe(true);
+    const pr = template!.workflow.nodes.find((n) => n.type === 'scm');
+    expect(pr?.agentGenerated).toBe(true);
+  });
+
   it('renders a workflow block as YAML that parses back into a config', () => {
     const template = getWorkflowTemplate('default');
     expect(template).toBeDefined();

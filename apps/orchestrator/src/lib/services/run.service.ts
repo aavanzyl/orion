@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { loadProjectConfig, flattenProjectConfig } from '@orion/config';
+import { loadProjectConfig, flattenProjectConfig, deriveSwimlaneTriggers } from '@orion/config';
 import type { CreateRunEventInput, ProjectConfig, RunStatus, WorkflowRun } from '@orion/models';
 import {
   WorkflowEngine,
@@ -12,10 +12,11 @@ import { AgentNodeExecutor } from '../executors/agent.executor.js';
 import { ShellNodeExecutor } from '../executors/shell.executor.js';
 import { ApprovalNodeExecutor } from '../executors/approval.executor.js';
 import { ScmNodeExecutor } from '../executors/scm.executor.js';
-import { NotifyNodeExecutor } from '../executors/notify.executor.js';
-import { CommentNodeExecutor } from '../executors/comment.executor.js';
+import { MessageNodeExecutor } from '../executors/message.executor.js';
 import { ConditionNodeExecutor } from '../executors/condition.executor.js';
 import { HttpNodeExecutor } from '../executors/http.executor.js';
+import { GraphqlNodeExecutor } from '../executors/graphql.executor.js';
+import { HarnessTextGenerator } from '../executors/agent-text.js';
 import { WorkspaceService } from './workspace.service.js';
 
 const execFileAsync = promisify(execFile);
@@ -132,14 +133,19 @@ export class RunService {
   }
 
   /**
-   * React to a ticket entering a board column. If the project config maps that
-   * swimlane to a workflow (`board.triggers`), start a run of that workflow —
-   * unless the ticket already has one in flight. When a column maps to multiple
-   * workflows (an array), the ticket's `workflowName` selects which one fires;
-   * if the ticket has no binding, the first trigger is used. Best-effort: never
-   * throws.
+   * React to a ticket entering a board column. Trigger workflows are derived
+   * from the project config: a workflow is auto-started when a ticket enters the
+   * swimlane of its entry node (`deriveSwimlaneTriggers`). If no workflow maps to
+   * the swimlane, nothing happens. When several workflows map to the same
+   * swimlane, the caller-supplied `workflowName` selects which one fires; absent
+   * that, the first is used. Skips triggering when the ticket already has a run
+   * in flight. Best-effort: never throws.
    */
-  async handleSwimlaneEntry(ticketId: string, swimlane: string): Promise<void> {
+  async handleSwimlaneEntry(
+    ticketId: string,
+    swimlane: string,
+    workflowName?: string,
+  ): Promise<void> {
     try {
       const ticket = await this.c.tickets.get(ticketId);
       if (!ticket) return;
@@ -150,19 +156,18 @@ export class RunService {
         .resolveConfigRoot(project)
         .then((root) => loadProjectConfig(root, project.configPath));
 
-      const raw = config.board.triggers?.[swimlane];
-      if (!raw) return;
+      const triggerNames = deriveSwimlaneTriggers(config)[swimlane];
+      if (!triggerNames || triggerNames.length === 0) return;
 
-      const triggerNames = Array.isArray(raw) ? raw : [raw];
-      const workflowName =
+      const selected =
         triggerNames.length === 1
           ? triggerNames[0]
-          : triggerNames.find((n) => n === ticket.workflowName) ?? triggerNames[0];
+          : triggerNames.find((n) => n === workflowName) ?? triggerNames[0];
 
       const existing = await this.c.runs.getByTicket(ticketId);
       if (existing.some((r) => !TERMINAL_RUN_STATUSES.has(r.status))) return;
 
-      await this.start(ticketId, workflowName);
+      await this.start(ticketId, selected);
     } catch (err) {
       console.error(`[ orion orchestrator ] failed to trigger workflow for swimlane "${swimlane}":`, err);
     }
@@ -285,20 +290,16 @@ export class RunService {
       run = await this.c.runs.update(run.id, { branch, worktreePath: workspace.rootPath });
 
       const controller = new AbortController();
+      const agentText = new HarnessTextGenerator(this.c.harnesses, this.c.env);
       const executors: NodeExecutor[] = [
-        new AgentNodeExecutor(
-          this.c.harnesses,
-          this.c.tickets,
-          this.c.env,
-          (projectId, query, topK) => this.c.ragService.search(projectId, query, topK),
-        ),
+        new AgentNodeExecutor(this.c.harnesses, this.c.tickets, this.c.env),
         new ShellNodeExecutor(),
         new ApprovalNodeExecutor(),
-        new ScmNodeExecutor(scm, this.c.tickets),
-        new NotifyNodeExecutor(this.c.communication),
-        new CommentNodeExecutor(this.c.linearSync),
+        new ScmNodeExecutor(scm, this.c.tickets, agentText),
+        new MessageNodeExecutor(this.c.communication, this.c.boardSync, agentText),
         new ConditionNodeExecutor(),
         new HttpNodeExecutor({ encryptionSalt: this.c.env.providerEncryptionSalt }),
+        new GraphqlNodeExecutor({ encryptionSalt: this.c.env.providerEncryptionSalt }),
       ];
 
       const engine = new WorkflowEngine({
@@ -309,7 +310,7 @@ export class RunService {
         },
         moveTicket: async (id, swimlane) => {
           await this.c.boards.get(project.boardProvider).moveTicket({ ticketId: id, swimlane });
-          this.c.linearSync.pushTicketState(id).catch(() => undefined);
+          this.c.boardSync.pushTicketState(id).catch(() => undefined);
           this.c.bus.emit(`board:${run.projectId}`, { type: 'ticket.updated', ticketId: id, swimlane });
         },
         executors,

@@ -1,4 +1,5 @@
 import {
+  deriveSwimlaneTriggers,
   installSkillFromGitHub,
   listCommandFiles,
   listSkillCatalog,
@@ -84,7 +85,7 @@ export class ProjectService {
   async getBoard(project: Project): Promise<Board> {
     const config = await this.loadConfig(project);
     const board = this.c.boards.get(project.boardProvider);
-    return board.getBoard(project.id, config.board.swimlanes, config.board.triggers);
+    return board.getBoard(project.id, config.board.swimlanes, deriveSwimlaneTriggers(config));
   }
 
   /** List command template files (`.md`) under the project's `.orion/` dir. */

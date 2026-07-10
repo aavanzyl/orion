@@ -134,7 +134,7 @@ Everything integratable sits behind a category adapter interface, so new tools a
 | --- | --- | --- | --- |
 | `harness` | `@orion/harness-core` | **codex** | claude, opencode |
 | `scm` | `@orion/scm-core` | **github** | bitbucket, gitlab |
-| `board` | `@orion/board-core` | **native** | jira, trello, linear |
+| `board` | `@orion/board-core` | **native, linear, jira, trello** | asana, github projects |
 | `communication` | `@orion/communication-core` | **webhook** (Slack/Discord-compatible) | slack, discord, telegram |
 
 ```
@@ -294,12 +294,12 @@ A run fails fast with a clear error if an agent references a skill that is not i
 
 ### Resilient nodes
 
-Any workflow node can opt into retries and a timeout. A failed node is retried up to `retries` times (with an optional `retryDelayMs` pause) before the run fails, and a node that exceeds `timeoutMs` is aborted and treated as a failure (subject to the same retry policy):
+`agent`, `http` and `graphql` nodes can opt into retries and a timeout. A failed node is retried up to `retries` times (with an optional `retryDelayMs` pause) before the run fails, and a node that exceeds `timeoutMs` is aborted and treated as a failure (subject to the same retry policy):
 
 ```yaml
-- id: verify
-  type: shell
-  script: "npm test"
+- id: implement
+  type: agent
+  provider: codex
   retries: 2          # up to 2 extra attempts after the first failure
   retryDelayMs: 5000  # wait 5s between attempts
   timeoutMs: 600000   # abort and fail if it runs longer than 10 minutes

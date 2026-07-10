@@ -11,6 +11,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./conditions": {
+      "types": "./src/lib/conditions.ts",
+      "import": "./src/lib/conditions.ts",
+      "default": "./src/lib/conditions.ts"
+    },
     "./package.json": "./package.json"
   },
   "nx": {

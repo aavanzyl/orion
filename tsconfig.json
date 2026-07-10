@@ -56,6 +56,12 @@
     },
     {
       "path": "./packages/core/rag"
+    },
+    {
+      "path": "./packages/adapters/board/trello"
+    },
+    {
+      "path": "./packages/adapters/board/jira"
     }
   ]
 }

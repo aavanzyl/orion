@@ -10,16 +10,11 @@ interface BoardSwimlaneProps {
   swimlane: BoardSwimlane;
   labelsById: Map<string, Label>;
   onOpenTicket: (ticket: Ticket) => void;
-  triggerWorkflow?: string | string[];
 }
 
-export function BoardSwimlane({ swimlane, labelsById, onOpenTicket, triggerWorkflow }: BoardSwimlaneProps) {
+export function BoardSwimlane({ swimlane, labelsById, onOpenTicket }: BoardSwimlaneProps) {
   const { setNodeRef, isOver } = useDroppable({ id: swimlane.key });
-  const triggerNames = triggerWorkflow
-    ? Array.isArray(triggerWorkflow)
-      ? triggerWorkflow
-      : [triggerWorkflow]
-    : [];
+  const triggerNames = swimlane.workflows ?? [];
 
   return (
     <div

@@ -136,6 +136,28 @@ export interface SyncSkillResult {
   error?: string;
 }
 
+/**
+ * A curated skill Orion recommends. Users can browse these and install them
+ * with a single click; each carries the GitHub source coordinates needed to
+ * install it, plus display metadata.
+ */
+export interface RecommendedSkill {
+  /** Lowercase, hyphen-separated identifier; matches the installed skill name. */
+  name: string;
+  /** One sentence covering what the skill does and when to use it. */
+  description: string;
+  /** Full GitHub repository URL to install from. */
+  source: string;
+  /** Path within the repo to the skill's SKILL.md or directory. */
+  skillPath: string;
+  /** Optional branch, tag, or commit to install from. */
+  ref?: string;
+  /** SDLC tags describing the skill. */
+  tags?: string[];
+  /** Optional short attribution for the skill's author/publisher. */
+  author?: string;
+}
+
 /** Describes a workflow node that references a skill. */
 export interface SkillReference {
   /** ID of the workflow containing the reference. */

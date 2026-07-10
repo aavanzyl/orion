@@ -41,7 +41,6 @@ export function useRunStream(runId: string | null): RunEvent[] {
       'agent.message',
       'agent.item',
       'agent.usage',
-      'agent.structured',
       'ticket.moved',
       'ticket.updated',
       'log',

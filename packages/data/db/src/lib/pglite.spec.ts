@@ -8,7 +8,7 @@ import {
   RunRepository,
   runMigrations,
   TicketRepository,
-  TriggerRepository,
+  ScheduleRepository,
 } from '../index.js';
 describe('embedded PGlite database', () => {
   let handle: DbHandle;
@@ -90,53 +90,70 @@ describe('embedded PGlite database', () => {
     expect(nodes).toHaveLength(1);
   });
 
-  it('round-trips triggers, including webhook lookup and fire bookkeeping', async () => {
+  it('round-trips schedules, including selection lists and fire bookkeeping', async () => {
     const projects = new ProjectRepository(handle.db);
-    const triggers = new TriggerRepository(handle.db);
+    const schedules = new ScheduleRepository(handle.db);
 
     const project = await projects.create({
-      name: 'triggers',
+      name: 'schedules',
       sourceKind: 'local',
-      rootPath: '/tmp/triggers',
+      rootPath: '/tmp/schedules',
     });
 
-    const cron = await triggers.create({
+    const nightly = await schedules.create({
       projectId: project.id,
       name: 'nightly',
-      type: 'cron',
       cron: '0 9 * * *',
+      instruction: 'Review the board and file follow-up tickets.',
+      skills: ['conventional-commits'],
+      mcpServers: ['github'],
+      mcpServerConfigs: { github: { url: 'https://api.githubcopilot.com/mcp/' } },
       nextFireAt: new Date('2030-01-01T09:00:00Z'),
     });
-    expect(cron.enabled).toBe(true);
-    expect(cron.nextFireAt).toBe('2030-01-01T09:00:00.000Z');
-
-    const hook = await triggers.create({
-      projectId: project.id,
-      name: 'inbound',
-      type: 'webhook',
-      webhookToken: 'secret-token',
+    expect(nightly.enabled).toBe(true);
+    expect(nightly.nextFireAt).toBe('2030-01-01T09:00:00.000Z');
+    expect(nightly.instruction).toContain('follow-up tickets');
+    expect(nightly.skills).toEqual(['conventional-commits']);
+    expect(nightly.mcpServers).toEqual(['github']);
+    expect(nightly.mcpServerConfigs).toEqual({
+      github: { url: 'https://api.githubcopilot.com/mcp/' },
     });
 
-    const found = await triggers.getByWebhookToken('secret-token');
-    expect(found?.id).toBe(hook.id);
+    const other = await schedules.create({
+      projectId: project.id,
+      name: 'weekly',
+      cron: '0 9 * * 1',
+      instruction: 'Summarize the week.',
+      nextFireAt: new Date('2030-01-06T09:00:00Z'),
+    });
+    expect(other.skills).toEqual([]);
+    expect(other.mcpServers).toEqual([]);
+    expect(other.mcpServerConfigs).toEqual({});
 
-    const enabled = await triggers.listAllEnabled();
-    expect(enabled.map((t) => t.id)).toEqual(expect.arrayContaining([cron.id, hook.id]));
+    const list = await schedules.list(project.id);
+    expect(list.map((s) => s.id)).toEqual(expect.arrayContaining([nightly.id, other.id]));
 
-    const fired = await triggers.markFired(
-      cron.id,
+    const enabled = await schedules.listAllEnabled();
+    expect(enabled.map((s: { id: string }) => s.id)).toEqual(
+      expect.arrayContaining([nightly.id, other.id]),
+    );
+
+    const fired = await schedules.markFired(
+      nightly.id,
       new Date('2030-01-01T09:00:00Z'),
       new Date('2030-01-02T09:00:00Z'),
     );
     expect(fired?.lastFiredAt).toBe('2030-01-01T09:00:00.000Z');
     expect(fired?.nextFireAt).toBe('2030-01-02T09:00:00.000Z');
 
-    const disabled = await triggers.update(hook.id, { enabled: false });
+    const disabled = await schedules.update(other.id, { enabled: false });
     expect(disabled?.enabled).toBe(false);
-    expect((await triggers.listAllEnabled()).map((t) => t.id)).not.toContain(hook.id);
+    expect((await schedules.listAllEnabled()).map((s: { id: string }) => s.id)).not.toContain(
+      other.id,
+    );
 
-    await triggers.delete(cron.id);
-    expect(await triggers.get(cron.id)).toBeNull();
+    await schedules.delete(nightly.id);
+    expect(await schedules.get(nightly.id)).toBeNull();
   });
 
   it('round-trips a code index and jsonb embedding chunks', async () => {

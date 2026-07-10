@@ -27,6 +27,9 @@
   "references": [
     {
       "path": "../../packages/shared/models/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/core/config/tsconfig.lib.json"
     }
   ]
 }

@@ -51,24 +51,6 @@ export function assertValidConfig(config: ProjectConfig): void {
     }
   }
 
-  if (config.board.triggers) {
-    const workflowNames = new Set(Object.keys(config.workflows ?? {}));
-    workflowNames.add(config.workflow.name);
-    for (const [swimlane, value] of Object.entries(config.board.triggers)) {
-      if (!swimlaneKeys.has(swimlane)) {
-        issues.push(`board trigger references unknown swimlane "${swimlane}"`);
-      }
-      const names = Array.isArray(value) ? value : [value];
-      for (const workflowName of names) {
-        if (!workflowNames.has(workflowName)) {
-          issues.push(
-            `board trigger for swimlane "${swimlane}" references unknown workflow "${workflowName}"`,
-          );
-        }
-      }
-    }
-  }
-
   if (issues.length === 0) {
     try {
       const flattened = flattenProjectConfig(config);
@@ -103,7 +85,7 @@ export function assertValidConfig(config: ProjectConfig): void {
 }
 
 function validateNode(
-  node: { id: string; type: string; provider?: string; action?: string; script?: string; message?: string; condition?: string; url?: string; swimlane?: string; dependsOn?: string[]; when?: string; loop?: unknown; matrix?: unknown; structuredOutput?: { schema: Record<string, unknown>; required?: string[] }; retrieval?: unknown },
+  node: { id: string; type: string; provider?: string; action?: string; agentGenerated?: boolean; script?: string; message?: string; condition?: string; url?: string; query?: string; swimlane?: string; dependsOn?: string[]; retries?: number; retryDelayMs?: number; timeoutMs?: number; loop?: unknown; matrix?: unknown },
   swimlaneKeys: Set<string>,
   nodeIds: Set<string>,
   issues: string[],
@@ -119,8 +101,10 @@ function validateNode(
   if (node.type === 'shell' && !node.script) {
     issues.push(`node "${node.id}" is type shell but has no script set`);
   }
-  if ((node.type === 'notify' || node.type === 'comment') && !node.message) {
-    issues.push(`node "${node.id}" is type ${node.type} but has no message set`);
+  if (node.type === 'message') {
+    if (!node.agentGenerated && !node.message) {
+      issues.push(`node "${node.id}" is type message but has no message set`);
+    }
   }
   if (node.type === 'condition') {
     if (!node.condition) {
@@ -132,6 +116,14 @@ function validateNode(
   if (node.type === 'http' && !node.url) {
     issues.push(`node "${node.id}" is type http but has no url set`);
   }
+  if (node.type === 'graphql') {
+    if (!node.url) {
+      issues.push(`node "${node.id}" is type graphql but has no url set`);
+    }
+    if (!node.query) {
+      issues.push(`node "${node.id}" is type graphql but has no query set`);
+    }
+  }
   if (node.swimlane && !swimlaneKeys.has(node.swimlane)) {
     issues.push(`node "${node.id}" references unknown swimlane "${node.swimlane}"`);
   }
@@ -140,35 +132,29 @@ function validateNode(
       issues.push(`node "${node.id}" depends on unknown node "${dep}"`);
     }
   }
-  if (node.when !== undefined && !tryEvaluateCondition(node.when, {}).ok) {
-    issues.push(`node "${node.id}" has a malformed "when" condition: ${node.when}`);
+  const supportsRetryPolicy =
+    node.type === 'agent' || node.type === 'http' || node.type === 'graphql';
+  if (!supportsRetryPolicy) {
+    if (node.retries !== undefined) {
+      issues.push(`node "${node.id}" sets retries but only agent, http and graphql nodes support retries`);
+    }
+    if (node.retryDelayMs !== undefined) {
+      issues.push(`node "${node.id}" sets retryDelayMs but only agent, http and graphql nodes support it`);
+    }
+    if (node.timeoutMs !== undefined) {
+      issues.push(`node "${node.id}" sets timeoutMs but only agent, http and graphql nodes support it`);
+    }
   }
-  if ((node as any).loop && node.type !== 'agent' && node.type !== 'shell') {
-    issues.push(`node "${node.id}" has a loop but only agent and shell nodes may loop`);
+  if ((node as { loop?: unknown }).loop && node.type !== 'agent') {
+    issues.push(`node "${node.id}" has a loop but only agent nodes may loop`);
   }
-  if ((node as any).matrix) {
+  if ((node as { matrix?: unknown }).matrix) {
     if (node.type !== 'agent' && node.type !== 'shell') {
       issues.push(`node "${node.id}" has a matrix but only agent and shell nodes may fan out`);
     }
-    if ((node as any).loop) {
+    if ((node as { loop?: unknown }).loop) {
       issues.push(`node "${node.id}" cannot combine matrix with loop`);
     }
-  }
-  if ((node as any).structuredOutput) {
-    if (node.type !== 'agent') {
-      issues.push(`node "${node.id}" has structuredOutput but only agent nodes may declare structured output`);
-    }
-    const schemaKeys = new Set(Object.keys((node as any).structuredOutput.schema));
-    for (const key of ((node as any).structuredOutput.required ?? [])) {
-      if (!schemaKeys.has(key)) {
-        issues.push(
-          `node "${node.id}" has structuredOutput.required key "${key}" which is not in the schema`,
-        );
-      }
-    }
-  }
-  if (node.retrieval && node.type !== 'agent') {
-    issues.push(`node "${node.id}" has retrieval but only agent nodes may inject codebase context`);
   }
 }
 

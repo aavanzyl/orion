@@ -1,4 +1,4 @@
-import { BoardConnectionRepository, ChatRepository, createDb, type DbHandle, EvaluationRepository, EventRepository, LabelRepository, ProjectRepository, ProviderRepository, RagRepository, RunRepository, TicketRepository, TriggerRepository } from '@orion/db';
+import { BoardConnectionRepository, ChatRepository, createDb, type DbHandle, EvaluationRepository, EventRepository, LabelRepository, McpServerRepository, ProjectRepository, ProviderRepository, RagRepository, RunRepository, TicketRepository, ScheduleRepository, SettingsRepository } from '@orion/db';
 import { HarnessRegistry } from '@orion/harness-core';
 import { CodexHarness } from '@orion/harness-codex';
 import { ScmRegistry } from '@orion/scm-core';
@@ -7,8 +7,9 @@ import { BoardRegistry } from '@orion/board-core';
 import { NativeBoardProvider } from '@orion/board-native';
 import { CommunicationRegistry } from '@orion/communication-core';
 import { WebhookNotifier, SlackNotifier } from '@orion/communication-webhook';
-import { LinearSyncService } from './services/linear-sync.service.js';
+import { BoardSyncService } from './services/board-sync.service.js';
 import { RagService } from './services/rag.service.js';
+import { SecretCipher } from './crypto.js';
 import type { OrionEnv } from './env.js';
 import { RunEventBus } from './event-bus.js';
 import { ChatEventBus } from './chat-event-bus.js';
@@ -24,7 +25,7 @@ export interface Container {
   events: EventRepository;
   evaluations: EvaluationRepository;
   chat: ChatRepository;
-  triggers: TriggerRepository;
+  schedules: ScheduleRepository;
   harnesses: HarnessRegistry;
   scm: ScmRegistry;
   boards: BoardRegistry;
@@ -32,9 +33,12 @@ export interface Container {
   bus: RunEventBus;
   chatBus: ChatEventBus;
   boardConnections: BoardConnectionRepository;
-  linearSync: LinearSyncService;
+  boardSync: BoardSyncService;
   rag: RagRepository;
   ragService: RagService;
+  mcpServers: McpServerRepository;
+  settings: SettingsRepository;
+  oauthStates: Map<string, { mcpServerId: string; expiresAt: number }>;
 }
 
 /** Compose all dependencies and register the in-scope adapter implementations. */
@@ -50,9 +54,11 @@ export function createContainer(env: OrionEnv): Container {
   const events = new EventRepository(db);
   const evaluations = new EvaluationRepository(db);
   const chat = new ChatRepository(db);
-  const triggers = new TriggerRepository(db);
+  const schedules = new ScheduleRepository(db);
   const boardConnections = new BoardConnectionRepository(db);
   const rag = new RagRepository(db);
+  const mcpServers = new McpServerRepository(db);
+  const settings = new SettingsRepository(db);
 
   const harnesses = new HarnessRegistry().register(
     new CodexHarness({ apiKey: env.codexApiKey, baseUrl: env.codexBaseUrl }),
@@ -81,7 +87,7 @@ export function createContainer(env: OrionEnv): Container {
     events,
     evaluations,
     chat,
-    triggers,
+    schedules,
     harnesses,
     scm,
     boards,
@@ -89,10 +95,19 @@ export function createContainer(env: OrionEnv): Container {
     bus: new RunEventBus(),
     chatBus: new ChatEventBus(),
     boardConnections,
-    linearSync: new LinearSyncService(boardConnections, tickets, projects, boards),
+    boardSync: new BoardSyncService(
+      boardConnections,
+      tickets,
+      projects,
+      boards,
+      new SecretCipher(env.providerEncryptionSalt),
+    ),
     rag,
     // Assigned below; RagService needs the assembled container.
     ragService: undefined as unknown as RagService,
+    mcpServers,
+    settings,
+    oauthStates: new Map(),
   };
 
   container.ragService = new RagService(container);

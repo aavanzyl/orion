@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type {
+  ConditionBranch,
   ProjectConfig,
   RunNode,
   RunNodeStatus,
@@ -164,5 +165,185 @@ describe('condition node gating', () => {
     expect(status('downstream')).toBe('skipped');
     const gate = store.nodes.find((n) => n.nodeKey === 'gate');
     expect(isConditionSkipped(gate!)).toBe(true);
+  });
+});
+
+describe('multi-branch condition routing', () => {
+  let store: InMemoryStore;
+
+  beforeEach(() => {
+    store = new InMemoryStore({ ...baseRun });
+  });
+
+  const status = (key: string) => store.nodes.find((n) => n.nodeKey === key)?.status;
+
+  const conditionExecutor: NodeExecutor = {
+    type: 'condition',
+    execute: async () => ({ status: 'completed', output: { result: true } }),
+  };
+
+  it('routes to the first matching branch and skips the others', async () => {
+    const branches: ConditionBranch[] = [
+      { expression: 'nodes.src.value == 0', target: 'zero' },
+      { expression: 'nodes.src.value > 0', target: 'positive' },
+      { expression: 'nodes.src.value < 0', target: 'negative' },
+    ];
+    const cfg = config([
+      { id: 'src', type: 'shell', script: 'x', swimlane: 'doing' },
+      { id: 'gate', type: 'condition', dependsOn: ['src'], branches },
+      { id: 'zero', type: 'shell', script: 'x', dependsOn: ['gate'] },
+      { id: 'positive', type: 'shell', script: 'x', dependsOn: ['gate'] },
+      { id: 'negative', type: 'shell', script: 'x', dependsOn: ['gate'] },
+    ]);
+    const skipped: string[] = [];
+
+    const engine = new WorkflowEngine({
+      store,
+      emit: async (e) => {
+        if (e.type === 'node.skipped')
+          skipped.push((e.payload as { nodeKey: string }).nodeKey);
+      },
+      moveTicket: async () => undefined,
+      executors: [
+        {
+          type: 'shell',
+          execute: async (ctx) => {
+            if (ctx.node.nodeKey === 'src') return { status: 'completed', output: { value: 0 } };
+            return { status: 'completed', output: { ok: true } };
+          },
+        },
+        conditionExecutor,
+      ],
+    });
+
+    await engine.initializeNodes('run1', cfg);
+    const run = await engine.advance({ ...store.run }, cfg, workspace);
+
+    expect(run.status).toBe('completed');
+    expect(status('gate')).toBe('completed');
+    expect(status('zero')).toBe('completed');
+    expect(status('positive')).toBe('skipped');
+    expect(status('negative')).toBe('skipped');
+    expect(isConditionSkipped(store.nodes.find((n) => n.nodeKey === 'positive')!)).toBe(true);
+    expect(skipped.sort()).toEqual(['negative', 'positive']);
+  });
+
+  it('falls through to else branch when no expression matches', async () => {
+    const branches: ConditionBranch[] = [
+      { expression: 'nodes.src.value > 100', target: 'high' },
+      { target: 'defaultPath' },
+    ];
+    const cfg = config([
+      { id: 'src', type: 'shell', script: 'x', swimlane: 'doing' },
+      { id: 'gate', type: 'condition', dependsOn: ['src'], branches },
+      { id: 'high', type: 'shell', script: 'x', dependsOn: ['gate'] },
+      { id: 'defaultPath', type: 'shell', script: 'x', dependsOn: ['gate'] },
+    ]);
+    const skipped: string[] = [];
+
+    const engine = new WorkflowEngine({
+      store,
+      emit: async (e) => {
+        if (e.type === 'node.skipped')
+          skipped.push((e.payload as { nodeKey: string }).nodeKey);
+      },
+      moveTicket: async () => undefined,
+      executors: [
+        {
+          type: 'shell',
+          execute: async (ctx) => {
+            if (ctx.node.nodeKey === 'src') return { status: 'completed', output: { value: 50 } };
+            return { status: 'completed', output: { ok: true } };
+          },
+        },
+        conditionExecutor,
+      ],
+    });
+
+    await engine.initializeNodes('run1', cfg);
+    const run = await engine.advance({ ...store.run }, cfg, workspace);
+
+    expect(run.status).toBe('completed');
+    expect(status('gate')).toBe('completed');
+    expect(status('high')).toBe('skipped');
+    expect(status('defaultPath')).toBe('completed');
+    expect(skipped).toEqual(['high']);
+  });
+
+  it('allows all dependents when no branch matches and there is no else', async () => {
+    const branches: ConditionBranch[] = [
+      { expression: 'nodes.src.value > 100', target: 'high' },
+    ];
+    const cfg = config([
+      { id: 'src', type: 'shell', script: 'x', swimlane: 'doing' },
+      { id: 'gate', type: 'condition', dependsOn: ['src'], branches },
+      { id: 'high', type: 'shell', script: 'x', dependsOn: ['gate'] },
+      { id: 'other', type: 'shell', script: 'x', dependsOn: ['gate'] },
+    ]);
+    const skipped: string[] = [];
+
+    const engine = new WorkflowEngine({
+      store,
+      emit: async (e) => {
+        if (e.type === 'node.skipped')
+          skipped.push((e.payload as { nodeKey: string }).nodeKey);
+      },
+      moveTicket: async () => undefined,
+      executors: [
+        {
+          type: 'shell',
+          execute: async (ctx) => {
+            if (ctx.node.nodeKey === 'src') return { status: 'completed', output: { value: 5 } };
+            return { status: 'completed', output: { ok: true } };
+          },
+        },
+        conditionExecutor,
+      ],
+    });
+
+    await engine.initializeNodes('run1', cfg);
+    const run = await engine.advance({ ...store.run }, cfg, workspace);
+
+    expect(run.status).toBe('completed');
+    expect(status('gate')).toBe('completed');
+    expect(status('high')).toBe('skipped');
+    expect(status('other')).toBe('completed');
+    expect(skipped).toEqual(['high']);
+  });
+
+  it('legacy single condition still gates when no branches are present', async () => {
+    const cfg = config([
+      { id: 'src', type: 'shell', script: 'x', swimlane: 'doing' },
+      { id: 'gate', type: 'condition', dependsOn: ['src'], condition: 'nodes.src.value > 10' },
+      { id: 'downstream', type: 'shell', script: 'x', dependsOn: ['gate'] },
+    ]);
+    const skipped: string[] = [];
+
+    const engine = new WorkflowEngine({
+      store,
+      emit: async (e) => {
+        if (e.type === 'node.skipped')
+          skipped.push((e.payload as { nodeKey: string }).nodeKey);
+      },
+      moveTicket: async () => undefined,
+      executors: [
+        {
+          type: 'shell',
+          execute: async (ctx) => {
+            if (ctx.node.nodeKey === 'src') return { status: 'completed', output: { value: 5 } };
+            return { status: 'completed', output: { ok: true } };
+          },
+        },
+        conditionExecutor,
+      ],
+    });
+
+    await engine.initializeNodes('run1', cfg);
+    const run = await engine.advance({ ...store.run }, cfg, workspace);
+
+    expect(run.status).toBe('completed');
+    expect(status('gate')).toBe('skipped');
+    expect(status('downstream')).toBe('skipped');
+    expect(skipped.sort()).toEqual(['downstream', 'gate']);
   });
 });

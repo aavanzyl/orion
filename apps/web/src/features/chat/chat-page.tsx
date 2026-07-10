@@ -163,7 +163,7 @@ export function ChatPage() {
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">
-          <aside className="flex w-64 shrink-0 flex-col border-r bg-muted/20">
+          <aside className="flex min-h-0 w-64 shrink-0 flex-col border-r bg-muted/20">
             <div className="p-3">
               <Button size="sm" className="w-full shadow-sm" onClick={newConversation}>
                 <PlusIcon data-icon="inline-start" />
@@ -198,7 +198,7 @@ export function ChatPage() {
             </ScrollArea>
           </aside>
 
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <ScrollArea className="flex-1">
               <div className="mx-auto flex max-w-3xl flex-col gap-4 p-6">
                 {messages.length === 0 && !streaming ? (

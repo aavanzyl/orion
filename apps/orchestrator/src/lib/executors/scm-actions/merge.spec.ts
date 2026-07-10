@@ -29,13 +29,14 @@ function makeCtx(
 }
 
 const tickets = {} as TicketRepository;
+const agentText = { generate: async () => 'generated' };
 
 describe('merge scm action', () => {
   it('merges the explicit config.pr number', async () => {
     const { scm, spy } = makeScm();
     const { ctx, emit } = makeCtx({ pr: 7 });
 
-    const outcome = await merge(ctx, { scm, tickets });
+    const outcome = await merge(ctx, { scm, tickets, agentText });
 
     expect(outcome).toMatchObject({ status: 'completed', output: { merged: true, sha: 'deadbeef', number: 7 } });
     expect(spy).toHaveBeenCalledWith('/origin/r', {
@@ -53,7 +54,7 @@ describe('merge scm action', () => {
       openPr: { pullRequests: [{ repo: 'r', pr: { url: 'https://gh/pr/42', number: 42 } }] },
     });
 
-    const outcome = await merge(ctx, { scm, tickets });
+    const outcome = await merge(ctx, { scm, tickets, agentText });
 
     expect(outcome).toMatchObject({ status: 'completed', output: { number: 42 } });
     expect(spy).toHaveBeenCalledWith('/origin/r', expect.objectContaining({ number: 42 }));
@@ -63,7 +64,7 @@ describe('merge scm action', () => {
     const { scm, spy } = makeScm();
     const { ctx } = makeCtx(undefined, {});
 
-    const outcome = await merge(ctx, { scm, tickets });
+    const outcome = await merge(ctx, { scm, tickets, agentText });
 
     expect(outcome.status).toBe('failed');
     expect(spy).not.toHaveBeenCalled();
@@ -73,7 +74,7 @@ describe('merge scm action', () => {
     const { scm } = makeScm(async () => ({ merged: false, message: 'not mergeable' }));
     const { ctx } = makeCtx({ pr: 1 });
 
-    const outcome = await merge(ctx, { scm, tickets });
+    const outcome = await merge(ctx, { scm, tickets, agentText });
 
     expect(outcome).toEqual({ status: 'failed', error: 'not mergeable' });
   });
@@ -82,7 +83,7 @@ describe('merge scm action', () => {
     const scm = {} as unknown as ScmProvider;
     const { ctx } = makeCtx({ pr: 1 });
 
-    const outcome = await merge(ctx, { scm, tickets });
+    const outcome = await merge(ctx, { scm, tickets, agentText });
 
     expect(outcome).toEqual({ status: 'failed', error: 'scm provider does not support merging' });
   });
@@ -91,7 +92,7 @@ describe('merge scm action', () => {
     const { scm, spy } = makeScm();
     const { ctx } = makeCtx({ pr: 9, method: 'squash', commitTitle: 'T', commitMessage: 'M' });
 
-    const outcome = await merge(ctx, { scm, tickets });
+    const outcome = await merge(ctx, { scm, tickets, agentText });
 
     expect(outcome.status).toBe('completed');
     expect(spy).toHaveBeenCalledWith('/origin/r', {

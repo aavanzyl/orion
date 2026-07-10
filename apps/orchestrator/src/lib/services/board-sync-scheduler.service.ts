@@ -1,14 +1,20 @@
 import type { Container } from '../container.js';
 
-/** Default cadence for the continuous Linear board sync heartbeat. */
+/** Default cadence for the continuous board sync heartbeat (10 minutes). */
 export const BOARD_SYNC_INTERVAL_MS = 10 * 60_000;
 
 /**
- * Periodically reconciles every project with an enabled Linear connection by
- * pulling remote issues via {@link LinearSyncService.syncNow}. Push-on-change is
- * handled elsewhere (when a ticket moves); this heartbeat covers the pull side
- * and periodic reconcile. Modeled after the cron trigger scheduler: a single
- * `unref`'d interval guarded against overlapping ticks.
+ * Resolution the heartbeat ticks at. Per-connection cadences finer than the
+ * global default are honored down to this granularity (1 minute).
+ */
+export const BOARD_SYNC_TICK_MS = 60_000;
+
+/**
+ * Periodically reconciles every project with an enabled board connection by
+ * pulling remote issues via {@link BoardSyncService.syncNow}. Each connection is
+ * gated by its own `syncIntervalMs` (falling back to the global default) and its
+ * `direction` (push-only connections are skipped). Push-on-change is handled
+ * elsewhere. A single `unref`'d interval, guarded against overlapping ticks.
  */
 export class BoardSyncScheduler {
   private interval?: ReturnType<typeof setInterval>;
@@ -20,7 +26,8 @@ export class BoardSyncScheduler {
   /** Start the heartbeat. Idempotent. */
   startScheduler(): void {
     if (this.interval) return;
-    const period = this.c.env.boardSyncIntervalMs || BOARD_SYNC_INTERVAL_MS;
+    const configured = this.c.env.boardSyncIntervalMs || BOARD_SYNC_INTERVAL_MS;
+    const period = Math.max(1_000, Math.min(configured, BOARD_SYNC_TICK_MS));
     this.interval = setInterval(() => {
       void this.tick();
     }, period);
@@ -35,16 +42,29 @@ export class BoardSyncScheduler {
     }
   }
 
-  /** One heartbeat: sync every project with an enabled Linear connection. */
+  /** How long until a connection is due for its next pull. `<= 0` means now. */
+  private dueIn(conn: { syncIntervalMs?: number; lastSyncedAt?: string }, now: number): number {
+    const cadence =
+      conn.syncIntervalMs && conn.syncIntervalMs > 0
+        ? conn.syncIntervalMs
+        : this.c.env.boardSyncIntervalMs || BOARD_SYNC_INTERVAL_MS;
+    if (!conn.lastSyncedAt) return 0;
+    return new Date(conn.lastSyncedAt).getTime() + cadence - now;
+  }
+
+  /** One heartbeat: pull every due, enabled, pull-capable connection. */
   private async tick(): Promise<void> {
     if (this.ticking) return;
     this.ticking = true;
     try {
+      const now = Date.now();
       const connections = await this.c.boardConnections.listEnabled();
       for (const conn of connections) {
         if (!conn.apiKey) continue;
+        if (conn.direction === 'push') continue;
+        if (this.dueIn(conn, now) > 0) continue;
         try {
-          await this.c.linearSync.syncNow(conn.projectId);
+          await this.c.boardSync.syncNow(conn.projectId);
         } catch (err) {
           console.error(
             `[ orion orchestrator ] board sync failed for project ${conn.projectId}:`,

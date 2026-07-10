@@ -1,6 +1,7 @@
 import type { NodeExecutor, NodeExecutionContext, NodeOutcome } from '@orion/workflow-engine';
 import type { ScmProvider } from '@orion/scm-core';
 import type { TicketRepository } from '@orion/db';
+import type { AgentTextGenerator } from './agent-text.js';
 import { SCM_ACTIONS } from './scm-actions/index.js';
 
 /**
@@ -14,6 +15,7 @@ export class ScmNodeExecutor implements NodeExecutor {
   constructor(
     private readonly scm: ScmProvider,
     private readonly tickets: TicketRepository,
+    private readonly agentText: AgentTextGenerator,
   ) {}
 
   async execute(ctx: NodeExecutionContext): Promise<NodeOutcome> {
@@ -25,6 +27,6 @@ export class ScmNodeExecutor implements NodeExecutor {
     if (!handler) {
       return { status: 'failed', error: `Unsupported scm action "${action}"` };
     }
-    return handler(ctx, { scm: this.scm, tickets: this.tickets });
+    return handler(ctx, { scm: this.scm, tickets: this.tickets, agentText: this.agentText });
   }
 }

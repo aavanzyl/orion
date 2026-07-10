@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  CheckIcon,
-  CopyIcon,
   TerminalIcon,
   PlusIcon,
   Trash2Icon,
@@ -9,19 +7,13 @@ import {
   KeyIcon,
   ShieldIcon,
   InfoIcon,
+  CheckCircleIcon,
+  Loader2Icon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import YAML from 'yaml';
-import { copyToClipboard } from '@/lib/utils';
 import { api } from '@/lib/api';
-import type { McpServerConfig } from '@orion/models';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import type { McpServerConfig, McpServer, McpAuthType, McpOAuthInfo } from '@orion/models';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,88 +36,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { MCP_CATALOG, type McpCatalogEntry } from './mcp-catalog';
-
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3333/api';
-
-const GLOBAL_MCP_STORAGE_KEY = 'orion_global_mcp_servers';
-
-function serverOrigin(): string {
-  try {
-    return new URL(API_URL).origin;
-  } catch {
-    return API_URL.replace(/\/api\/?$/, '');
-  }
-}
-
-interface BuiltinServer {
-  key: string;
-  title: string;
-  description: string;
-  path: string;
-  tools: string[];
-  resources: string[];
-  prompts: string[];
-}
-
-const BUILTIN_SERVERS: BuiltinServer[] = [
-  {
-    key: 'orion-codebase',
-    title: 'Codebase',
-    description: 'Semantic search over an indexed project codebase (RAG).',
-    path: '/mcp/codebase',
-    tools: ['list_projects', 'search_code', 'index_status'],
-    resources: [],
-    prompts: [],
-  },
-  {
-    key: 'orion-tickets',
-    title: 'Tickets',
-    description: 'Read and manage the Orion board: tickets, swimlanes and labels.',
-    path: '/mcp/tickets',
-    tools: [
-      'list_projects',
-      'list_tickets',
-      'get_ticket',
-      'create_ticket',
-      'update_ticket',
-      'move_ticket',
-      'list_labels',
-    ],
-    resources: [],
-    prompts: [],
-  },
-];
-
-function CopyButton({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try {
-      await copyToClipboard(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // ignore
-    }
-  };
-  return (
-    <Button variant="ghost" size="icon-sm" onClick={copy} aria-label="Copy">
-      {copied ? <CheckIcon className="text-emerald-500" /> : <CopyIcon />}
-    </Button>
-  );
-}
-
-function CodeBlock({ code }: { code: string }) {
-  return (
-    <div className="relative rounded-md border bg-muted/50">
-      <div className="absolute right-1.5 top-1.5">
-        <CopyButton value={code} />
-      </div>
-      <pre className="overflow-auto p-3 pr-10 text-xs leading-relaxed">
-        <code className="font-mono">{code}</code>
-      </pre>
-    </div>
-  );
-}
+import {
+  serverOrigin,
+  BUILTIN_SERVERS,
+  CopyButton,
+} from './mcp-shared';
 
 function getCatalogEntry(key: string): McpCatalogEntry | undefined {
   return MCP_CATALOG.find((e) => e.key === key);
@@ -137,22 +52,6 @@ function getServerDisplayInfo(key: string): { name: string; description: string 
   return { name: key, description: '' };
 }
 
-function getServerAuthInfo(key: string): {
-  authType: string;
-  authUrl?: string;
-  oauthGuide?: string;
-  setupNote?: string;
-} {
-  const entry = getCatalogEntry(key);
-  if (!entry) return { authType: 'unknown' };
-  return {
-    authType: entry.authType,
-    authUrl: entry.authUrl,
-    oauthGuide: entry.oauthGuide,
-    setupNote: entry.setupNote,
-  };
-}
-
 function authBadge(authType: string) {
   switch (authType) {
     case 'oauth':
@@ -160,6 +59,7 @@ function authBadge(authType: string) {
     case 'api_key':
       return <Badge variant="secondary" className="text-[10px]">API Key</Badge>;
     case 'bearer_token':
+    case 'bearer':
       return <Badge variant="secondary" className="text-[10px]">Bearer Token</Badge>;
     case 'none':
       return <Badge variant="outline" className="text-[10px] text-muted-foreground">No auth</Badge>;
@@ -175,11 +75,41 @@ interface McpSectionProps {
 
 export function McpSection({ projectId, global = true }: McpSectionProps) {
   const origin = serverOrigin();
+
   const [mcpServers, setMcpServers] = useState<Record<string, McpServerConfig>>({});
   const [rawConfig, setRawConfig] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const [globalServerList, setGlobalServerList] = useState<McpServer[]>([]);
+
+  const serverMeta = useCallback(
+    (name: string): McpServer | undefined => globalServerList.find((s) => s.name === name),
+    [globalServerList],
+  );
+
+  const deriveConfigs = useCallback((servers: McpServer[]): Record<string, McpServerConfig> => {
+    return Object.fromEntries(servers.map((s) => [s.name, s.config]));
+  }, []);
+
+  const loadGlobal = useCallback(async () => {
+    setLoading(true);
+    try {
+      const servers = await api.listMcpServers();
+      setGlobalServerList(servers);
+      setMcpServers(deriveConfigs(servers));
+      setRawConfig(null);
+    } catch {
+      toast.error('Failed to load MCP servers');
+      setGlobalServerList([]);
+      setMcpServers({});
+    } finally {
+      setLoading(false);
+    }
+  }, [deriveConfigs]);
 
   const loadProjectMcp = useCallback(async () => {
     if (!projectId) return;
+    setLoading(true);
     try {
       const raw = await api.getRawConfig(projectId);
       setRawConfig(raw.content);
@@ -190,16 +120,10 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
       }
     } catch {
       toast.error('Failed to load MCP configuration');
+    } finally {
+      setLoading(false);
     }
   }, [projectId]);
-
-  const saveGlobalMcp = useCallback((servers: Record<string, McpServerConfig>) => {
-    try {
-      localStorage.setItem(GLOBAL_MCP_STORAGE_KEY, JSON.stringify(servers));
-    } catch {
-      toast.error('Failed to save global MCP configuration');
-    }
-  }, []);
 
   const saveProjectMcp = useCallback(async (servers: Record<string, McpServerConfig>) => {
     if (!projectId) return;
@@ -218,27 +142,13 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
     }
   }, [projectId, rawConfig]);
 
-  const persistMcp = useCallback((servers: Record<string, McpServerConfig>) => {
-    if (global) {
-      saveGlobalMcp(servers);
-    } else {
-      saveProjectMcp(servers);
-    }
-  }, [global, saveGlobalMcp, saveProjectMcp]);
-
   useEffect(() => {
     if (global) {
-      try {
-        const stored = localStorage.getItem(GLOBAL_MCP_STORAGE_KEY);
-        setMcpServers(stored ? JSON.parse(stored) : {});
-      } catch {
-        setMcpServers({});
-      }
-      setRawConfig(null);
+      loadGlobal();
     } else {
       loadProjectMcp();
     }
-  }, [global, loadProjectMcp]);
+  }, [global, loadGlobal, loadProjectMcp]);
 
   const [addOpen, setAddOpen] = useState(false);
   const [addTab, setAddTab] = useState<'catalog' | 'custom'>('catalog');
@@ -248,11 +158,25 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
   const [customCommand, setCustomCommand] = useState('');
   const [customArgs, setCustomArgs] = useState('');
   const [customUrl, setCustomUrl] = useState('');
-  const [customToken, setCustomToken] = useState('');
+
+  const [customAuthType, setCustomAuthType] = useState<McpAuthType | 'api_key' | 'bearer_token'>('none');
+  const [customBearerToken, setCustomBearerToken] = useState('');
+
+  const [customOauthAuthUrl, setCustomOauthAuthUrl] = useState('');
+  const [customOauthTokenUrl, setCustomOauthTokenUrl] = useState('');
+  const [customOauthClientId, setCustomOauthClientId] = useState('');
+  const [customOauthClientSecret, setCustomOauthClientSecret] = useState('');
+  const [customOauthScopes, setCustomOauthScopes] = useState('');
 
   const [selectedCatalogEntry, setSelectedCatalogEntry] = useState<McpCatalogEntry | null>(null);
   const [credentialValue, setCredentialValue] = useState('');
   const [oauthStep, setOauthStep] = useState<'select' | 'configure' | 'done'>('select');
+
+  const [catalogOauthAuthUrl, setCatalogOauthAuthUrl] = useState('');
+  const [catalogOauthTokenUrl, setCatalogOauthTokenUrl] = useState('');
+  const [catalogOauthClientId, setCatalogOauthClientId] = useState('');
+  const [catalogOauthClientSecret, setCatalogOauthClientSecret] = useState('');
+  const [catalogOauthScopes, setCatalogOauthScopes] = useState('');
 
   const [editOpen, setEditOpen] = useState(false);
   const [editKey, setEditKey] = useState('');
@@ -261,27 +185,34 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
   const [editUrl, setEditUrl] = useState('');
   const [editBearerToken, setEditBearerToken] = useState('');
   const [editMode, setEditMode] = useState<'stdio' | 'http'>('stdio');
+  const [editAuthType, setEditAuthType] = useState<McpAuthType>('none');
+  const [editOauthAuthUrl, setEditOauthAuthUrl] = useState('');
+  const [editOauthTokenUrl, setEditOauthTokenUrl] = useState('');
+  const [editOauthClientId, setEditOauthClientId] = useState('');
+  const [editOauthClientSecret, setEditOauthClientSecret] = useState('');
+  const [editOauthScopes, setEditOauthScopes] = useState('');
 
   const entries = Object.entries(mcpServers);
 
-  const remove = (key: string) => {
-    const next = { ...mcpServers };
-    delete next[key];
-    setMcpServers(next);
-    persistMcp(next);
-  };
-
-  const addCustom = () => {
-    const name = customName.trim();
-    if (!name) return;
-    const config: McpServerConfig =
-      customMode === 'stdio'
-        ? { command: customCommand.trim(), args: customArgs.trim() ? customArgs.trim().split(/\s+/) : [] }
-        : { url: customUrl.trim(), ...(customToken.trim() ? { bearerToken: customToken.trim() } : {}) };
-    const next = { ...mcpServers, [name]: config };
-    setMcpServers(next);
-    persistMcp(next);
-    resetAddDialog();
+  const remove = async (key: string) => {
+    if (global) {
+      const meta = serverMeta(key);
+      if (!meta) return;
+      try {
+        await api.deleteMcpServer(meta.id);
+        const updated = globalServerList.filter((s) => s.id !== meta.id);
+        setGlobalServerList(updated);
+        setMcpServers(deriveConfigs(updated));
+        toast.success(`Removed ${key}`);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to delete server');
+      }
+    } else {
+      const next = { ...mcpServers };
+      delete next[key];
+      setMcpServers(next);
+      saveProjectMcp(next);
+    }
   };
 
   const resetAddDialog = () => {
@@ -291,49 +222,209 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
     setCustomCommand('');
     setCustomArgs('');
     setCustomUrl('');
-    setCustomToken('');
+    setCustomAuthType('none');
+    setCustomBearerToken('');
+    setCustomOauthAuthUrl('');
+    setCustomOauthTokenUrl('');
+    setCustomOauthClientId('');
+    setCustomOauthClientSecret('');
+    setCustomOauthScopes('');
     setSelectedCatalogEntry(null);
     setCredentialValue('');
     setOauthStep('select');
+    setCatalogOauthAuthUrl('');
+    setCatalogOauthTokenUrl('');
+    setCatalogOauthClientId('');
+    setCatalogOauthClientSecret('');
+    setCatalogOauthScopes('');
   };
 
   const beginCatalogEntry = (entry: McpCatalogEntry) => {
-    if (entry.key in mcpServers) return;
-    if (entry.authType === 'none') {
-      const next = { ...mcpServers, [entry.key]: entry.config };
-      setMcpServers(next);
-      persistMcp(next);
-      resetAddDialog();
-    } else {
+    if (global && entry.key in mcpServers) return;
+    if (!global && entry.key in mcpServers) return;
+    if (global) {
+      if (entry.authType === 'none') {
+        addGlobalFromCatalog(entry, {});
+        return;
+      }
       setSelectedCatalogEntry(entry);
       setCredentialValue('');
+      setCatalogOauthAuthUrl('');
+      setCatalogOauthTokenUrl('');
+      setCatalogOauthClientId('');
+      setCatalogOauthClientSecret('');
+      setCatalogOauthScopes('');
       setOauthStep('configure');
+    } else {
+      if (entry.authType === 'none') {
+        const next = { ...mcpServers, [entry.key]: entry.config };
+        setMcpServers(next);
+        saveProjectMcp(next);
+        resetAddDialog();
+      } else {
+        setSelectedCatalogEntry(entry);
+        setCredentialValue('');
+        setOauthStep('configure');
+      }
     }
   };
 
-  const finishCatalogEntry = () => {
+  const addGlobalFromCatalog = async (entry: McpCatalogEntry, oauthFields: Record<string, string>) => {
+    const isOauth = entry.authType === 'oauth';
+    try {
+      const created = await api.createMcpServer({
+        name: entry.key,
+        config: entry.config,
+        authType: isOauth ? 'oauth' : 'none',
+        ...(isOauth && Object.keys(oauthFields).length > 0
+          ? {
+              oauth: {
+                authorizationUrl: oauthFields.authorizationUrl || entry.authUrl || '',
+                tokenUrl: oauthFields.tokenUrl || '',
+                clientId: oauthFields.clientId || '',
+                clientSecret: oauthFields.clientSecret || '',
+                scopes: oauthFields.scopes || '',
+              },
+            }
+          : {}),
+      });
+      const updated = [...globalServerList, created];
+      setGlobalServerList(updated);
+      setMcpServers(deriveConfigs(updated));
+      toast.success(`Added ${entry.key}`);
+      resetAddDialog();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to add server');
+    }
+  };
+
+  const finishCatalogEntry = async () => {
     if (!selectedCatalogEntry) return;
     const entry = selectedCatalogEntry;
 
-    let config = { ...entry.config };
-
-    if (credentialValue.trim()) {
-      if (entry.authType === 'bearer_token' || entry.authType === 'api_key') {
-        if (config.url) {
-          config = { ...config, bearerToken: credentialValue.trim() };
-        } else if (config.env) {
-          const envKey = Object.keys(config.env)[0];
-          if (envKey) {
-            config = { ...config, env: { [envKey]: credentialValue.trim() } };
+    if (global) {
+      if (entry.authType === 'oauth') {
+        await addGlobalFromCatalog(entry, {
+          authorizationUrl: catalogOauthAuthUrl,
+          tokenUrl: catalogOauthTokenUrl,
+          clientId: catalogOauthClientId,
+          clientSecret: catalogOauthClientSecret,
+          scopes: catalogOauthScopes,
+        });
+      } else if (entry.authType === 'bearer_token' || entry.authType === 'api_key') {
+        let config = { ...entry.config };
+        if (credentialValue.trim()) {
+          if (config.url) {
+            config = { ...config, bearerToken: credentialValue.trim() };
+          } else if (config.env) {
+            const envKey = Object.keys(config.env)[0];
+            if (envKey) {
+              config = { ...config, env: { [envKey]: credentialValue.trim() } };
+            }
+          }
+        }
+        try {
+          const created = await api.createMcpServer({
+            name: entry.key,
+            config,
+            authType: 'bearer',
+          });
+          const updated = [...globalServerList, created];
+          setGlobalServerList(updated);
+          setMcpServers(deriveConfigs(updated));
+          toast.success(`Added ${entry.key}`);
+          resetAddDialog();
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : 'Failed to add server');
+        }
+      } else {
+        try {
+          const created = await api.createMcpServer({
+            name: entry.key,
+            config: entry.config,
+            authType: 'none',
+          });
+          const updated = [...globalServerList, created];
+          setGlobalServerList(updated);
+          setMcpServers(deriveConfigs(updated));
+          toast.success(`Added ${entry.key}`);
+          resetAddDialog();
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : 'Failed to add server');
+        }
+      }
+    } else {
+      let config = { ...entry.config };
+      if (credentialValue.trim()) {
+        if (entry.authType === 'bearer_token' || entry.authType === 'api_key') {
+          if (config.url) {
+            config = { ...config, bearerToken: credentialValue.trim() };
+          } else if (config.env) {
+            const envKey = Object.keys(config.env)[0];
+            if (envKey) {
+              config = { ...config, env: { [envKey]: credentialValue.trim() } };
+            }
           }
         }
       }
+      const next = { ...mcpServers, [entry.key]: config };
+      setMcpServers(next);
+      saveProjectMcp(next);
+      resetAddDialog();
     }
+  };
 
-    const next = { ...mcpServers, [entry.key]: config };
-    setMcpServers(next);
-    persistMcp(next);
-    resetAddDialog();
+  const addCustom = async () => {
+    const name = customName.trim();
+    if (!name) return;
+    if (global) {
+      const config: McpServerConfig =
+        customMode === 'stdio'
+          ? { command: customCommand.trim(), args: customArgs.trim() ? customArgs.trim().split(/\s+/) : [] }
+          : {
+              url: customUrl.trim(),
+              ...(customBearerToken.trim() ? { bearerToken: customBearerToken.trim() } : {}),
+            };
+      const resolveAuthType = (): McpAuthType => {
+        if (customAuthType === 'oauth') return 'oauth';
+        if (customAuthType === 'bearer' || customAuthType === 'bearer_token') return 'bearer';
+        return 'none';
+      };
+      try {
+        const created = await api.createMcpServer({
+          name,
+          config,
+          authType: resolveAuthType(),
+          ...(customAuthType === 'oauth'
+            ? {
+                oauth: {
+                  authorizationUrl: customOauthAuthUrl.trim(),
+                  tokenUrl: customOauthTokenUrl.trim(),
+                  clientId: customOauthClientId.trim(),
+                  clientSecret: customOauthClientSecret.trim(),
+                  scopes: customOauthScopes.trim(),
+                },
+              }
+            : {}),
+        });
+        const updated = [...globalServerList, created];
+        setGlobalServerList(updated);
+        setMcpServers(deriveConfigs(updated));
+        toast.success(`Added ${name}`);
+        resetAddDialog();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to create server');
+      }
+    } else {
+      const config: McpServerConfig =
+        customMode === 'stdio'
+          ? { command: customCommand.trim(), args: customArgs.trim() ? customArgs.trim().split(/\s+/) : [] }
+          : { url: customUrl.trim(), ...(customBearerToken.trim() ? { bearerToken: customBearerToken.trim() } : {}) };
+      const next = { ...mcpServers, [name]: config };
+      setMcpServers(next);
+      saveProjectMcp(next);
+      resetAddDialog();
+    }
   };
 
   const openAddDialog = () => {
@@ -341,6 +432,13 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
     setSelectedCatalogEntry(null);
     setCredentialValue('');
     setOauthStep('select');
+    setCustomAuthType('none');
+    setCustomBearerToken('');
+    setCustomOauthAuthUrl('');
+    setCustomOauthTokenUrl('');
+    setCustomOauthClientId('');
+    setCustomOauthClientSecret('');
+    setCustomOauthScopes('');
     setAddOpen(true);
   };
 
@@ -359,58 +457,75 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
       setEditCommand('');
       setEditArgs('');
     }
+    if (global) {
+      const meta = serverMeta(key);
+      if (meta) {
+        setEditAuthType(meta.authType);
+        setEditOauthAuthUrl(meta.oauth.authorizationUrl ?? '');
+        setEditOauthTokenUrl(meta.oauth.tokenUrl ?? '');
+        setEditOauthClientId(meta.oauth.clientId ?? '');
+        setEditOauthClientSecret('');
+        setEditOauthScopes(meta.oauth.scopes ?? '');
+      } else {
+        setEditAuthType('none');
+        setEditOauthAuthUrl('');
+        setEditOauthTokenUrl('');
+        setEditOauthClientId('');
+        setEditOauthClientSecret('');
+        setEditOauthScopes('');
+      }
+    }
     setEditOpen(true);
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (!editKey) return;
-    const config: McpServerConfig =
-      editMode === 'stdio'
-        ? { command: editCommand.trim(), args: editArgs.trim() ? editArgs.trim().split(/\s+/) : [] }
-        : { url: editUrl.trim(), ...(editBearerToken.trim() ? { bearerToken: editBearerToken.trim() } : {}) };
-    const next = { ...mcpServers, [editKey]: config };
-    setMcpServers(next);
-    persistMcp(next);
+    if (global) {
+      const meta = serverMeta(editKey);
+      if (!meta) return;
+      const config: McpServerConfig =
+        editMode === 'stdio'
+          ? { command: editCommand.trim(), args: editArgs.trim() ? editArgs.trim().split(/\s+/) : [] }
+          : { url: editUrl.trim(), ...(editBearerToken.trim() ? { bearerToken: editBearerToken.trim() } : {}) };
+      const patchAuthType = editAuthType;
+      const oauthPatch =
+        patchAuthType === 'oauth'
+          ? {
+              authorizationUrl: editOauthAuthUrl.trim(),
+              tokenUrl: editOauthTokenUrl.trim(),
+              clientId: editOauthClientId.trim(),
+              ...(editOauthClientSecret.trim() ? { clientSecret: editOauthClientSecret.trim() } : {}),
+              scopes: editOauthScopes.trim(),
+            }
+          : null;
+      try {
+        const updated = await api.updateMcpServer(meta.id, {
+          config,
+          authType: patchAuthType,
+          ...(oauthPatch !== null ? { oauth: oauthPatch } : {}),
+        });
+        const list = globalServerList.map((s) => (s.id === updated.id ? updated : s));
+        setGlobalServerList(list);
+        setMcpServers(deriveConfigs(list));
+        toast.success(`Updated ${editKey}`);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to update server');
+      }
+    } else {
+      const config: McpServerConfig =
+        editMode === 'stdio'
+          ? { command: editCommand.trim(), args: editArgs.trim() ? editArgs.trim().split(/\s+/) : [] }
+          : { url: editUrl.trim(), ...(editBearerToken.trim() ? { bearerToken: editBearerToken.trim() } : {}) };
+      const next = { ...mcpServers, [editKey]: config };
+      setMcpServers(next);
+      saveProjectMcp(next);
+    }
     setEditOpen(false);
     setEditKey('');
   };
 
   const isStdio = (c: McpServerConfig) => typeof c.command === 'string' && c.command.length > 0;
   const isHttp = (c: McpServerConfig) => typeof c.url === 'string' && c.url.length > 0;
-
-  const clientConfig = JSON.stringify(
-    {
-      mcpServers: Object.fromEntries(
-        BUILTIN_SERVERS.map((s) => [
-          s.key,
-          { url: `${origin}${s.path}?projectId=<PROJECT_ID>` },
-        ]),
-      ),
-    },
-    null,
-    2,
-  );
-
-  const agentYaml = `# .orion/config.yaml
-workflow:
-  nodes:
-    - id: implement
-      type: agent
-      provider: codex
-      # MCP servers unique to this node (merged with project-wide servers)
-      mcpServers:
-        context7:
-          command: npx
-          args: ['-y', '@upstash/context7-mcp']
-        github:
-          url: https://api.githubcopilot.com/mcp/
-          bearerToken: \${GITHUB_TOKEN}
-
-# Shared by every agent node in the project
-mcpServers:
-  linear:
-    command: npx
-    args: ['-y', 'mcp-remote', 'https://mcp.linear.app/sse']`;
 
   const badgeList = (items: string[] | undefined) => {
     if (!items || items.length === 0) return <span className="text-xs text-muted-foreground/50">&mdash;</span>;
@@ -425,6 +540,14 @@ mcpServers:
     );
   };
 
+  if (loading && entries.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
@@ -438,7 +561,7 @@ mcpServers:
               : 'Shared by every agent node in the project.'}
           </p>
         </div>
-        <Button size="sm" onClick={openAddDialog}>
+        <Button size="sm" onClick={openAddDialog} disabled={loading}>
           <PlusIcon data-icon="inline-start" />
           Add MCP
         </Button>
@@ -449,18 +572,17 @@ mcpServers:
           <TableHeader>
             <TableRow>
               <TableHead className="w-[140px]">Name</TableHead>
+              <TableHead className="w-[140px]">Key</TableHead>
               <TableHead>Description</TableHead>
               <TableHead className="w-[90px]">Type</TableHead>
               <TableHead className="w-[100px]">Auth</TableHead>
-              <TableHead className="w-[200px]">Tools</TableHead>
-              <TableHead className="w-[200px]">Resources</TableHead>
-              <TableHead className="w-[200px]">Prompts</TableHead>
+              <TableHead className="w-[240px]">Tools</TableHead>
               <TableHead className="w-0" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {BUILTIN_SERVERS.map((s) => {
-              const url = `${origin}${s.path}?projectId=<PROJECT_ID>`;
+              const url = `${origin}${s.path}`;
               return (
                 <TableRow key={s.key}>
                   <TableCell className="font-medium align-top">
@@ -468,7 +590,9 @@ mcpServers:
                       <TerminalIcon className="size-3.5 shrink-0 text-muted-foreground" />
                       {s.title}
                     </div>
-                    <Badge variant="secondary" className="font-mono mt-1 text-[10px]">
+                  </TableCell>
+                  <TableCell className="align-top">
+                    <Badge variant="secondary" className="font-mono text-[10px]">
                       {s.key}
                     </Badge>
                   </TableCell>
@@ -481,9 +605,7 @@ mcpServers:
                   <TableCell className="align-top">
                     <Badge variant="outline" className="text-[10px] text-muted-foreground">No auth</Badge>
                   </TableCell>
-                  <TableCell className="align-top">{badgeList(s.tools)}</TableCell>
-                  <TableCell className="align-top">{badgeList(s.resources)}</TableCell>
-                  <TableCell className="align-top">{badgeList(s.prompts)}</TableCell>
+                  <TableCell className="align-top">{badgeList([...s.tools, ...s.resources, ...s.prompts])}</TableCell>
                   <TableCell className="align-top">
                     <CopyButton value={url} />
                   </TableCell>
@@ -493,7 +615,7 @@ mcpServers:
 
             {entries.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-sm text-muted-foreground py-6">
+                <TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-6">
                   {global
                     ? 'No global MCP servers configured.'
                     : 'No project-wide MCP servers configured.'}
@@ -503,8 +625,20 @@ mcpServers:
 
             {entries.map(([key, config]) => {
               const info = getServerDisplayInfo(key);
-              const authInfo = getServerAuthInfo(key);
               const catalogEntry = getCatalogEntry(key);
+              const meta = global ? serverMeta(key) : undefined;
+              const displayAuthType = (() => {
+                if (meta) {
+                  if (meta.authType === 'oauth') return 'oauth';
+                  if (meta.authType === 'bearer') return 'bearer';
+                  return 'none';
+                }
+                const authInfo = catalogEntry?.authType;
+                if (!authInfo) return 'none';
+                return authInfo;
+              })();
+              const oauthInfo = meta?.oauth as McpOAuthInfo | undefined;
+              const setupNote = catalogEntry?.setupNote;
               return (
                 <TableRow key={key} className="cursor-pointer hover:bg-muted/50" onClick={() => openEditDialog(key, config)}>
                   <TableCell className="font-medium align-top">
@@ -513,11 +647,16 @@ mcpServers:
                       <span>{info.name}</span>
                     </div>
                   </TableCell>
+                  <TableCell className="align-top">
+                    <Badge variant="secondary" className="font-mono text-[10px]">
+                      {key}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="text-muted-foreground text-sm align-top">
                     {info.description || <span className="text-muted-foreground/50">&mdash;</span>}
-                    {authInfo.setupNote && (
+                    {setupNote && (
                       <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
-                        {authInfo.setupNote}
+                        {setupNote}
                       </p>
                     )}
                   </TableCell>
@@ -526,21 +665,62 @@ mcpServers:
                     {isHttp(config) && <Badge variant="secondary" className="font-mono text-[10px]">http</Badge>}
                   </TableCell>
                   <TableCell className="align-top">
-                    {authInfo.authType !== 'unknown' ? authBadge(authInfo.authType) : <Badge variant="outline" className="text-[10px] text-muted-foreground">No auth</Badge>}
+                    {authBadge(displayAuthType)}
                   </TableCell>
-                  <TableCell className="align-top">{badgeList(catalogEntry?.tools)}</TableCell>
-                  <TableCell className="align-top">{badgeList(catalogEntry?.resources)}</TableCell>
-                  <TableCell className="align-top">{badgeList(catalogEntry?.prompts)}</TableCell>
+                  <TableCell className="align-top">{badgeList([...(catalogEntry?.tools ?? []), ...(catalogEntry?.resources ?? []), ...(catalogEntry?.prompts ?? [])])}</TableCell>
                   <TableCell className="align-top">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={(e) => { e.stopPropagation(); remove(key); }}
-                      aria-label={`Remove ${key}`}
-                      className="text-destructive hover:text-destructive"
-                    >
-                      <Trash2Icon className="size-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      {global && meta && meta.authType === 'oauth' && (
+                        <Button
+                          variant={oauthInfo?.hasAccessToken ? 'outline' : 'default'}
+                          size="sm"
+                          className="h-7 text-[11px]"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (oauthInfo?.hasAccessToken) return;
+                            api
+                              .startMcpOauth(meta.id)
+                              .then((res) => {
+                                const popup = window.open(
+                                  res.authorizationUrl,
+                                  'oauth',
+                                  'width=600,height=700',
+                                );
+                                const timer = setInterval(() => {
+                                  if (!popup || popup.closed) {
+                                    clearInterval(timer);
+                                    loadGlobal();
+                                  }
+                                }, 500);
+                              })
+                              .catch((err) => {
+                                toast.error(err instanceof Error ? err.message : 'OAuth start failed');
+                              });
+                          }}
+                        >
+                          {oauthInfo?.hasAccessToken ? (
+                            <>
+                              <CheckCircleIcon className="size-3 text-emerald-500 mr-1" />
+                              Connected
+                            </>
+                          ) : (
+                            <>
+                              <ShieldIcon className="size-3 mr-1" />
+                              Authorize
+                            </>
+                          )}
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={(e) => { e.stopPropagation(); remove(key); }}
+                        aria-label={`Remove ${key}`}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2Icon className="size-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               );
@@ -548,34 +728,6 @@ mcpServers:
           </TableBody>
         </Table>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Connect an external MCP client</CardTitle>
-          <CardDescription>
-            Point any MCP-capable client (Claude Desktop, Cursor, another agent) at the built-in
-            servers. Replace <code>&lt;PROJECT_ID&gt;</code> with a real project id.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <CodeBlock code={clientConfig} />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Give an agent its own MCP servers</CardTitle>
-          <CardDescription>
-            Add <code>mcpServers</code> to an agent (or project-wide) in{' '}
-            <code>.orion/config.yaml</code>. Agent-level entries win on a name conflict. Use{' '}
-            <code>command</code>/<code>args</code>/<code>env</code> for stdio servers, or{' '}
-            <code>url</code>/<code>bearerToken</code> for HTTP servers.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <CodeBlock code={agentYaml} />
-        </CardContent>
-      </Card>
 
       {/* Add MCP Dialog */}
       <Dialog open={addOpen} onOpenChange={(open) => { if (!open) resetAddDialog(); else setAddOpen(true); }}>
@@ -653,7 +805,7 @@ mcpServers:
                 })}
               </TabsContent>
 
-              <TabsContent value="custom" className="flex flex-col gap-3 mt-3 flex-1 min-h-0">
+              <TabsContent value="custom" className="flex flex-col gap-3 mt-3 flex-1 min-h-0 overflow-y-auto">
                 <div className="flex flex-col gap-1.5">
                   <Label className="text-xs text-muted-foreground">Server name</Label>
                   <Input
@@ -711,31 +863,102 @@ mcpServers:
                         className="h-8"
                       />
                     </div>
-                    <div className="flex flex-col gap-1.5">
-                      <Label className="text-xs text-muted-foreground">Bearer token (optional)</Label>
-                      <Input
-                        value={customToken}
-                        onChange={(e) => setCustomToken(e.target.value)}
-                        placeholder="${TOKEN}"
-                        className="h-8"
-                      />
-                    </div>
-                    <div className="rounded-md border bg-muted/50 p-4 mt-2">
-                      <p className="text-xs text-muted-foreground flex items-start gap-1.5">
-                        <ShieldIcon className="size-3.5 shrink-0 mt-0.5" />
-                        For OAuth-secured HTTP MCP servers, enter the server URL and your bearer token above.
-                        The token is sent as an{' '}
-                        <code className="rounded bg-muted px-1 py-0.5 text-[11px] font-mono">Authorization: Bearer</code>
-                        {' '}header on every request.
-                      </p>
-                    </div>
+                    {global && (
+                      <>
+                        <div className="flex flex-col gap-1.5">
+                          <Label className="text-xs text-muted-foreground">Authentication</Label>
+                          <div className="flex gap-2 text-xs">
+                            {(['none', 'bearer', 'oauth'] as const).map((t) => (
+                              <button
+                                key={t}
+                                type="button"
+                                className={`rounded px-2 py-1 capitalize ${customAuthType === t ? 'bg-primary/10 text-primary' : 'text-muted-foreground'}`}
+                                onClick={() => setCustomAuthType(t)}
+                              >
+                                {t === 'none' ? 'None' : t === 'bearer' ? 'Bearer Token' : 'OAuth 2.0'}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {customAuthType === 'bearer' && (
+                          <div className="flex flex-col gap-1.5">
+                            <Label className="text-xs text-muted-foreground">Bearer token</Label>
+                            <Input
+                              value={customBearerToken}
+                              onChange={(e) => setCustomBearerToken(e.target.value)}
+                              placeholder="${TOKEN}"
+                              className="h-8"
+                            />
+                          </div>
+                        )}
+                        {customAuthType === 'oauth' && (
+                          <div className="flex flex-col gap-2 rounded-md border p-3 bg-muted/30">
+                            <p className="text-xs text-muted-foreground font-medium">OAuth Configuration</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="flex flex-col gap-1">
+                                <Label className="text-[11px] text-muted-foreground">Authorization URL</Label>
+                                <Input value={customOauthAuthUrl} onChange={(e) => setCustomOauthAuthUrl(e.target.value)} placeholder="https://..." className="h-7 text-xs" />
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <Label className="text-[11px] text-muted-foreground">Token URL</Label>
+                                <Input value={customOauthTokenUrl} onChange={(e) => setCustomOauthTokenUrl(e.target.value)} placeholder="https://..." className="h-7 text-xs" />
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <Label className="text-[11px] text-muted-foreground">Client ID</Label>
+                                <Input value={customOauthClientId} onChange={(e) => setCustomOauthClientId(e.target.value)} placeholder="..." className="h-7 text-xs" />
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <Label className="text-[11px] text-muted-foreground">Client Secret</Label>
+                                <Input value={customOauthClientSecret} onChange={(e) => setCustomOauthClientSecret(e.target.value)} placeholder="..." className="h-7 text-xs" type="password" />
+                              </div>
+                              <div className="flex flex-col gap-1 col-span-2">
+                                <Label className="text-[11px] text-muted-foreground">Scopes (space-separated)</Label>
+                                <Input value={customOauthScopes} onChange={(e) => setCustomOauthScopes(e.target.value)} placeholder="read write" className="h-7 text-xs" />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {!global && (
+                      <>
+                        <div className="flex flex-col gap-1.5">
+                          <Label className="text-xs text-muted-foreground">Bearer token (optional)</Label>
+                          <Input
+                            value={customBearerToken}
+                            onChange={(e) => setCustomBearerToken(e.target.value)}
+                            placeholder="${TOKEN}"
+                            className="h-8"
+                          />
+                        </div>
+                        <div className="rounded-md border bg-muted/50 p-4 mt-2">
+                          <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+                            <ShieldIcon className="size-3.5 shrink-0 mt-0.5" />
+                            For OAuth-secured HTTP MCP servers, enter the server URL and your bearer token above.
+                            The token is sent as an{' '}
+                            <code className="rounded bg-muted px-1 py-0.5 text-[11px] font-mono">Authorization: Bearer</code>
+                            {' '}header on every request.
+                          </p>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
-                <DialogFooter className="mt-auto">
+                <DialogFooter className="mt-auto shrink-0">
                   <Button variant="outline" size="sm" onClick={resetAddDialog}>
                     Cancel
                   </Button>
-                  <Button size="sm" onClick={addCustom} disabled={!customName.trim()}>
+                  <Button
+                    size="sm"
+                    onClick={addCustom}
+                    disabled={
+                      !customName.trim() ||
+                      (customMode === 'stdio'
+                        ? !customCommand.trim()
+                        : !customUrl.trim()) ||
+                      (global && customAuthType === 'oauth' && (!customOauthAuthUrl.trim() || !customOauthTokenUrl.trim() || !customOauthClientId.trim()))
+                    }
+                  >
                     Add Server
                   </Button>
                 </DialogFooter>
@@ -751,63 +974,135 @@ mcpServers:
                 <p className="text-xs text-muted-foreground">{selectedCatalogEntry.description}</p>
               </div>
 
-              {selectedCatalogEntry.oauthGuide && (
-                <div className="rounded-md border border-blue-500/30 bg-blue-500/5 p-3">
-                  <p className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-2 flex items-center gap-1.5">
-                    <ShieldIcon className="size-3.5" />
-                    Authentication Required
+              {global && selectedCatalogEntry.authType === 'oauth' ? (
+                <div className="flex flex-col gap-2 rounded-md border p-3 bg-muted/30">
+                  <p className="text-xs text-muted-foreground font-medium">OAuth Configuration</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[11px] text-muted-foreground">Authorization URL</Label>
+                      <Input
+                        value={catalogOauthAuthUrl}
+                        onChange={(e) => setCatalogOauthAuthUrl(e.target.value)}
+                        placeholder="https://..."
+                        className="h-7 text-xs"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[11px] text-muted-foreground">Token URL</Label>
+                      <Input
+                        value={catalogOauthTokenUrl}
+                        onChange={(e) => setCatalogOauthTokenUrl(e.target.value)}
+                        placeholder="https://..."
+                        className="h-7 text-xs"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[11px] text-muted-foreground">Client ID</Label>
+                      <Input
+                        value={catalogOauthClientId}
+                        onChange={(e) => setCatalogOauthClientId(e.target.value)}
+                        placeholder="..."
+                        className="h-7 text-xs"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[11px] text-muted-foreground">Client Secret</Label>
+                      <Input
+                        value={catalogOauthClientSecret}
+                        onChange={(e) => setCatalogOauthClientSecret(e.target.value)}
+                        placeholder="..."
+                        className="h-7 text-xs"
+                        type="password"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1 col-span-2">
+                      <Label className="text-[11px] text-muted-foreground">Scopes (space-separated)</Label>
+                      <Input
+                        value={catalogOauthScopes}
+                        onChange={(e) => setCatalogOauthScopes(e.target.value)}
+                        placeholder="read write"
+                        className="h-7 text-xs"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    The auth URL is pre-filled from the catalog. Fill in Token URL, Client ID, Client Secret,
+                    and Scopes for this OAuth provider. You will authorize via popup after adding the server.
                   </p>
-                  <pre className="text-xs text-blue-700/80 dark:text-blue-300/80 whitespace-pre-wrap leading-relaxed">
-                    {selectedCatalogEntry.oauthGuide}
-                  </pre>
+                  {selectedCatalogEntry.authUrl && (
+                    <a
+                      href={selectedCatalogEntry.authUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline w-fit"
+                    >
+                      <ExternalLinkIcon className="size-3.5" />
+                      Open provider setup page
+                    </a>
+                  )}
                 </div>
-              )}
+              ) : (
+                <>
+                  {selectedCatalogEntry.oauthGuide && (
+                    <div className="rounded-md border border-blue-500/30 bg-blue-500/5 p-3">
+                      <p className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-2 flex items-center gap-1.5">
+                        <ShieldIcon className="size-3.5" />
+                        Authentication Required
+                      </p>
+                      <pre className="text-xs text-blue-700/80 dark:text-blue-300/80 whitespace-pre-wrap leading-relaxed">
+                        {selectedCatalogEntry.oauthGuide}
+                      </pre>
+                    </div>
+                  )}
 
-              {selectedCatalogEntry.authUrl && (
-                <a
-                  href={selectedCatalogEntry.authUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline w-fit"
-                >
-                  <ExternalLinkIcon className="size-3.5" />
-                  Open credential setup page
-                </a>
-              )}
+                  {selectedCatalogEntry.authUrl && (
+                    <a
+                      href={selectedCatalogEntry.authUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline w-fit"
+                    >
+                      <ExternalLinkIcon className="size-3.5" />
+                      Open credential setup page
+                    </a>
+                  )}
 
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-xs text-muted-foreground">
-                  {selectedCatalogEntry.authType === 'bearer_token'
-                    ? 'Bearer Token'
-                    : selectedCatalogEntry.authType === 'api_key'
-                      ? 'API Key'
-                      : 'Credential'}
-                </Label>
-                <Input
-                  value={credentialValue}
-                  onChange={(e) => setCredentialValue(e.target.value)}
-                  placeholder={
-                    selectedCatalogEntry.authType === 'bearer_token'
-                      ? 'ghp_...'
-                      : selectedCatalogEntry.authType === 'api_key'
-                        ? 'sk_...'
-                        : 'Paste your credential here'
-                  }
-                  className="h-8"
-                  type="password"
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  Your credential is stored in-memory only and is never sent to Orion&apos;s servers.
-                  To verify this server works, run a quick test after adding it.
-                </p>
-              </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label className="text-xs text-muted-foreground">
+                      {selectedCatalogEntry.authType === 'bearer_token'
+                        ? 'Bearer Token'
+                        : selectedCatalogEntry.authType === 'api_key'
+                          ? 'API Key'
+                          : 'Credential'}
+                    </Label>
+                    <Input
+                      value={credentialValue}
+                      onChange={(e) => setCredentialValue(e.target.value)}
+                      placeholder={
+                        selectedCatalogEntry.authType === 'bearer_token'
+                          ? 'ghp_...'
+                          : selectedCatalogEntry.authType === 'api_key'
+                            ? 'sk_...'
+                            : 'Paste your credential here'
+                      }
+                      className="h-8"
+                      type="password"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Your credential is stored in-memory only and is never sent to Orion&apos;s servers.
+                      To verify this server works, run a quick test after adding it.
+                    </p>
+                  </div>
+                </>
+              )}
 
               <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
                 <p className="text-xs text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
                   <InfoIcon className="size-3.5 shrink-0 mt-0.5" />
                   After adding this server, agents will call its tools automatically during runs.
-                  You can verify connectivity by running an agent ticket with this server enabled
-                  and checking the run logs for MCP tool invocations.
+                  {global && selectedCatalogEntry.authType === 'oauth' && (
+                    ' Use the Authorize button on the server after adding it to complete the OAuth flow.'
+                  )}
                 </p>
               </div>
 
@@ -815,8 +1110,18 @@ mcpServers:
                 <Button variant="outline" size="sm" onClick={() => setOauthStep('select')}>
                   Back
                 </Button>
-                <Button size="sm" onClick={finishCatalogEntry}>
-                  Connect &amp; Add Server
+                <Button
+                  size="sm"
+                  onClick={finishCatalogEntry}
+                  disabled={
+                    global &&
+                    selectedCatalogEntry.authType === 'oauth' &&
+                    (!catalogOauthAuthUrl.trim() || !catalogOauthTokenUrl.trim() || !catalogOauthClientId.trim())
+                  }
+                >
+                  {global && selectedCatalogEntry.authType === 'oauth'
+                    ? 'Add Server (then authorize)'
+                    : 'Connect &amp; Add Server'}
                 </Button>
               </DialogFooter>
             </div>
@@ -881,15 +1186,74 @@ mcpServers:
                   className="h-8"
                 />
               </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-xs text-muted-foreground">Bearer token (optional)</Label>
-                <Input
-                  value={editBearerToken}
-                  onChange={(e) => setEditBearerToken(e.target.value)}
-                  placeholder="${TOKEN}"
-                  className="h-8"
-                />
-              </div>
+              {global && (
+                <>
+                  <div className="flex flex-col gap-1.5">
+                    <Label className="text-xs text-muted-foreground">Authentication</Label>
+                    <div className="flex gap-2 text-xs">
+                      {(['none', 'bearer', 'oauth'] as const).map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          className={`rounded px-2 py-1 capitalize ${editAuthType === t ? 'bg-primary/10 text-primary' : 'text-muted-foreground'}`}
+                          onClick={() => setEditAuthType(t)}
+                        >
+                          {t === 'none' ? 'None' : t === 'bearer' ? 'Bearer Token' : 'OAuth 2.0'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {editAuthType === 'bearer' && (
+                    <div className="flex flex-col gap-1.5">
+                      <Label className="text-xs text-muted-foreground">Bearer token</Label>
+                      <Input
+                        value={editBearerToken}
+                        onChange={(e) => setEditBearerToken(e.target.value)}
+                        placeholder="${TOKEN}"
+                        className="h-8"
+                      />
+                    </div>
+                  )}
+                  {editAuthType === 'oauth' && (
+                    <div className="flex flex-col gap-2 rounded-md border p-3 bg-muted/30">
+                      <p className="text-xs text-muted-foreground font-medium">OAuth Configuration</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="flex flex-col gap-1">
+                          <Label className="text-[11px] text-muted-foreground">Authorization URL</Label>
+                          <Input value={editOauthAuthUrl} onChange={(e) => setEditOauthAuthUrl(e.target.value)} placeholder="https://..." className="h-7 text-xs" />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <Label className="text-[11px] text-muted-foreground">Token URL</Label>
+                          <Input value={editOauthTokenUrl} onChange={(e) => setEditOauthTokenUrl(e.target.value)} placeholder="https://..." className="h-7 text-xs" />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <Label className="text-[11px] text-muted-foreground">Client ID</Label>
+                          <Input value={editOauthClientId} onChange={(e) => setEditOauthClientId(e.target.value)} placeholder="..." className="h-7 text-xs" />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <Label className="text-[11px] text-muted-foreground">Client Secret</Label>
+                          <Input value={editOauthClientSecret} onChange={(e) => setEditOauthClientSecret(e.target.value)} placeholder="..." className="h-7 text-xs" type="password" />
+                        </div>
+                        <div className="flex flex-col gap-1 col-span-2">
+                          <Label className="text-[11px] text-muted-foreground">Scopes (space-separated)</Label>
+                          <Input value={editOauthScopes} onChange={(e) => setEditOauthScopes(e.target.value)} placeholder="read write" className="h-7 text-xs" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+              {!global && (
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs text-muted-foreground">Bearer token (optional)</Label>
+                  <Input
+                    value={editBearerToken}
+                    onChange={(e) => setEditBearerToken(e.target.value)}
+                    placeholder="${TOKEN}"
+                    className="h-8"
+                  />
+                </div>
+              )}
             </>
           )}
           <DialogFooter>

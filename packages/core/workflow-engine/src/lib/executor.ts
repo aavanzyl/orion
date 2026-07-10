@@ -72,8 +72,6 @@ export interface NodeTelemetry {
   model?: string;
   /** Agent id the node ran as (agent nodes). */
   agentId?: string;
-  /** For structured-output agent nodes: whether validation passed. */
-  structuredOutputValid?: boolean;
 }
 
 export type NodeOutcome =

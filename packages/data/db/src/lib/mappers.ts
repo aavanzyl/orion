@@ -8,6 +8,9 @@ import type {
   Conversation,
   IndexStatus,
   Label,
+  McpAuthType,
+  McpOAuthInfo,
+  McpServer,
   Project,
   ProjectSourceKind,
   RunConfigSnapshot,
@@ -15,27 +18,27 @@ import type {
   RunEvent,
   RunNode,
   RunNodeUsage,
+  Schedule,
   Ticket,
   TicketPriority,
   TicketRelation,
   TicketRelationType,
-  Trigger,
-  TriggerType,
   WorkflowRun,
 } from '@orion/models';
-import type { TriggerAction } from '@orion/models';
-import type { Provider } from '@orion/models';
+import type { AppSettings, Provider } from '@orion/models';
 import type { EvaluationRating, RunNodeStatus, RunStatus } from '@orion/models';
 import type { WorkflowNodeType } from '@orion/models';
 import type { TicketSource } from '@orion/models';
 import type { RunEventType } from '@orion/models';
 import type {
+  appSettings,
   boardConnections,
   chatMessages,
   codeChunks,
   codeIndexes,
   conversations,
   labels,
+  mcpServers,
   projects,
   providers,
   runEvaluations,
@@ -43,7 +46,7 @@ import type {
   runNodes,
   ticketRelations,
   tickets,
-  triggers,
+  schedules,
   workflowRuns,
 } from './schema.js';
 
@@ -59,9 +62,11 @@ type EvaluationRow = typeof runEvaluations.$inferSelect;
 type ConversationRow = typeof conversations.$inferSelect;
 type ChatMessageRow = typeof chatMessages.$inferSelect;
 type BoardConnectionRow = typeof boardConnections.$inferSelect;
-type TriggerRow = typeof triggers.$inferSelect;
+type ScheduleRow = typeof schedules.$inferSelect;
 type CodeChunkRow = typeof codeChunks.$inferSelect;
 type CodeIndexRow = typeof codeIndexes.$inferSelect;
+type McpServerRow = typeof mcpServers.$inferSelect;
+type AppSettingsRow = typeof appSettings.$inferSelect;
 
 const iso = (d: Date): string => d.toISOString();
 const opt = <T>(v: T | null): T | undefined => (v === null ? undefined : v);
@@ -183,7 +188,6 @@ export function toRunNode(row: NodeRow): RunNode {
         : undefined),
     model: opt(row.model),
     agentId: opt(row.agentId),
-    structuredOutputValid: opt(row.structuredOutputValid),
     startedAt: row.startedAt ? iso(row.startedAt) : undefined,
     completedAt: row.completedAt ? iso(row.completedAt) : undefined,
   };
@@ -280,7 +284,13 @@ export function toBoardConnection(row: BoardConnectionRow): BoardConnection {
     provider: row.provider,
     apiKey: row.apiKey,
     teamId: row.teamId,
+    config: row.config,
     stateMap: row.stateMap,
+    direction: row.direction as BoardConnection['direction'],
+    autoPush: row.autoPush,
+    importNew: row.importNew,
+    updateExisting: row.updateExisting,
+    syncIntervalMs: opt(row.syncIntervalMs),
     enabled: row.enabled,
     lastSyncedAt: row.lastSyncedAt ? iso(row.lastSyncedAt) : undefined,
     createdAt: iso(row.createdAt),
@@ -288,21 +298,17 @@ export function toBoardConnection(row: BoardConnectionRow): BoardConnection {
   };
 }
 
-export function toTrigger(row: TriggerRow): Trigger {
+export function toSchedule(row: ScheduleRow): Schedule {
   return {
     id: row.id,
     projectId: row.projectId,
     name: row.name,
-    type: row.type as TriggerType,
     enabled: row.enabled,
-    action: row.action as TriggerAction,
-    cron: opt(row.cron),
-    webhookToken: opt(row.webhookToken),
-    ticketTitle: opt(row.ticketTitle),
-    ticketDescription: opt(row.ticketDescription),
-    swimlane: opt(row.swimlaneKey),
-    agentId: opt(row.agentId),
-    prompt: opt(row.prompt),
+    cron: row.cron,
+    instruction: row.instruction,
+    skills: row.skills ?? [],
+    mcpServers: row.mcpServers ?? [],
+    mcpServerConfigs: row.mcpServerConfigs ?? {},
     lastFiredAt: row.lastFiredAt ? iso(row.lastFiredAt) : undefined,
     nextFireAt: row.nextFireAt ? iso(row.nextFireAt) : undefined,
     createdAt: iso(row.createdAt),
@@ -337,5 +343,33 @@ export function toCodeIndex(row: CodeIndexRow): CodeIndex {
     lastIndexedAt: row.lastIndexedAt ? iso(row.lastIndexedAt) : undefined,
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
+  };
+}
+
+export function toMcpServer(row: McpServerRow): McpServer {
+  const oauth = (row.oauth ?? {}) as Record<string, unknown>;
+  return {
+    id: row.id,
+    name: row.name,
+    config: row.config as McpServer['config'],
+    authType: row.authType as McpAuthType,
+    oauth: {
+      authorizationUrl: typeof oauth.authorizationUrl === 'string' ? oauth.authorizationUrl : undefined,
+      tokenUrl: typeof oauth.tokenUrl === 'string' ? oauth.tokenUrl : undefined,
+      clientId: typeof oauth.clientId === 'string' ? oauth.clientId : undefined,
+      hasClientSecret: typeof oauth.clientSecret === 'string' && oauth.clientSecret.length > 0,
+      scopes: typeof oauth.scopes === 'string' ? oauth.scopes : undefined,
+      hasAccessToken: typeof oauth.accessToken === 'string' && oauth.accessToken.length > 0,
+      expiresAt: typeof oauth.expiresAt === 'string' ? oauth.expiresAt : undefined,
+    } satisfies McpOAuthInfo,
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
+  };
+}
+
+export function toAppSettings(row: AppSettingsRow): AppSettings {
+  return {
+    branding: (row.branding ?? {}) as unknown as AppSettings['branding'],
+    preferences: (row.preferences ?? {}) as unknown as AppSettings['preferences'],
   };
 }

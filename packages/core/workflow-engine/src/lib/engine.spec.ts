@@ -457,19 +457,24 @@ describe('WorkflowEngine', () => {
     expect(seenThreadIds).toEqual([undefined, 'thread-1', 'thread-2']);
   });
 
-  it('skips a node whose when condition is false and emits node.skipped', async () => {
+  it('skips a branch gated by a false condition node and emits node.skipped', async () => {
     const cfg = config([
       { id: 'check', type: 'shell', script: 'x', swimlane: 'doing' },
-      { id: 'guarded', type: 'shell', script: 'x', dependsOn: ['check'], when: 'nodes.check.value > 10' },
+      { id: 'gate', type: 'condition', dependsOn: ['check'], condition: 'nodes.check.value > 10' },
+      { id: 'guarded', type: 'shell', script: 'x', dependsOn: ['gate'] },
     ]);
     const skipped: string[] = [];
     const executed: string[] = [];
-    const executor: NodeExecutor = {
+    const shell: NodeExecutor = {
       type: 'shell',
       execute: async (ctx) => {
         executed.push(ctx.node.nodeKey);
         return { status: 'completed', output: { value: 5 } };
       },
+    };
+    const conditionExecutor: NodeExecutor = {
+      type: 'condition',
+      execute: async () => ({ status: 'completed', output: { result: true } }),
     };
     const engine = new WorkflowEngine({
       store,
@@ -477,7 +482,7 @@ describe('WorkflowEngine', () => {
         if (e.type === 'node.skipped') skipped.push((e.payload as { nodeKey: string }).nodeKey);
       },
       moveTicket: async () => undefined,
-      executors: [executor],
+      executors: [shell, conditionExecutor],
     });
 
     await engine.initializeNodes('run1', cfg);
@@ -485,7 +490,7 @@ describe('WorkflowEngine', () => {
 
     expect(run.status).toBe('completed');
     expect(executed).toEqual(['check']);
-    expect(skipped).toEqual(['guarded']);
+    expect(skipped.sort()).toEqual(['gate', 'guarded']);
     const guarded = store.nodes.find((n) => n.nodeKey === 'guarded');
     expect(guarded?.status).toBe('skipped');
     expect(isConditionSkipped(guarded!)).toBe(true);
@@ -493,20 +498,24 @@ describe('WorkflowEngine', () => {
 
   it('skips a not-taken branch while a completed branch joins and the run completes', async () => {
     const cfg = config([
-      { id: 'A', type: 'shell', script: 'x', when: 'true' },
-      { id: 'A2', type: 'shell', script: 'x', dependsOn: ['A'] },
-      { id: 'B', type: 'shell', script: 'x', when: 'false' },
-      { id: 'B2', type: 'shell', script: 'x', dependsOn: ['B'] },
+      { id: 'gateA', type: 'condition', condition: 'true' },
+      { id: 'A2', type: 'shell', script: 'x', dependsOn: ['gateA'] },
+      { id: 'gateB', type: 'condition', condition: 'false' },
+      { id: 'B2', type: 'shell', script: 'x', dependsOn: ['gateB'] },
       { id: 'J', type: 'shell', script: 'x', dependsOn: ['A2', 'B2'] },
     ]);
     const executed: string[] = [];
     const skipped: string[] = [];
-    const executor: NodeExecutor = {
+    const shell: NodeExecutor = {
       type: 'shell',
       execute: async (ctx) => {
         executed.push(ctx.node.nodeKey);
         return { status: 'completed', output: { ok: true } };
       },
+    };
+    const conditionExecutor: NodeExecutor = {
+      type: 'condition',
+      execute: async () => ({ status: 'completed', output: { result: true } }),
     };
     const engine = new WorkflowEngine({
       store,
@@ -514,20 +523,20 @@ describe('WorkflowEngine', () => {
         if (e.type === 'node.skipped') skipped.push((e.payload as { nodeKey: string }).nodeKey);
       },
       moveTicket: async () => undefined,
-      executors: [executor],
+      executors: [shell, conditionExecutor],
     });
 
     await engine.initializeNodes('run1', cfg);
     const run = await engine.advance({ ...store.run }, cfg, workspace);
 
     expect(run.status).toBe('completed');
-    expect(executed.sort()).toEqual(['A', 'A2', 'J']);
-    expect(skipped.sort()).toEqual(['B', 'B2']);
+    expect(executed.sort()).toEqual(['A2', 'J']);
+    expect(skipped.sort()).toEqual(['B2', 'gateB']);
     const status = (key: string) => store.nodes.find((n) => n.nodeKey === key)?.status;
-    expect(status('A')).toBe('completed');
+    expect(status('gateA')).toBe('completed');
     expect(status('A2')).toBe('completed');
     expect(status('J')).toBe('completed');
-    expect(status('B')).toBe('skipped');
+    expect(status('gateB')).toBe('skipped');
     expect(status('B2')).toBe('skipped');
   });
 

@@ -164,7 +164,7 @@ export function NewTicketSheet({
                 id="ticket-description"
                 value={description}
                 onChange={setDescription}
-                rows={12}
+                rows={36}
                 placeholder="Context, acceptance criteria, links… Markdown supported."
               />
             </div>

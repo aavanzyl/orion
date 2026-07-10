@@ -14,13 +14,19 @@ import {
   SearchIcon,
   ArrowUpDownIcon,
 } from 'lucide-react';
-import type { SkillCatalogEntry, SkillDetail, SkillReference } from '@orion/models';
+import type { RecommendedSkill, SkillCatalogEntry, SkillDetail, SkillReference } from '@orion/models';
 import { api } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs';
 import {
   Dialog,
   DialogContent,
@@ -47,7 +53,7 @@ interface SkillsSectionProps {
   global?: boolean;
 }
 
-type SortField = 'name' | 'source' | 'scope' | 'lastSyncedAt';
+type SortField = 'name' | 'lastSyncedAt';
 type SortDir = 'asc' | 'desc';
 
 function formatDate(iso?: string): string {
@@ -103,12 +109,18 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
 
   // Install dialog
   const [installOpen, setInstallOpen] = useState(false);
+  const [installTab, setInstallTab] = useState<'recommended' | 'github'>('recommended');
   const [source, setSource] = useState('');
   const [skillPath, setSkillPath] = useState('');
   const [ref, setRef] = useState('');
   const [tagsInput, setTagsInput] = useState('');
   const [syncInstall, setSyncInstall] = useState(true);
   const [installing, setInstalling] = useState(false);
+
+  // Recommended catalog
+  const [recommended, setRecommended] = useState<RecommendedSkill[]>([]);
+  const [recommendedLoading, setRecommendedLoading] = useState(false);
+  const [installingName, setInstallingName] = useState<string | null>(null);
 
   // View detail dialog
   const [viewOpen, setViewOpen] = useState(false);
@@ -133,8 +145,6 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [filterText, setFilterText] = useState('');
-  const [filterSource, setFilterSource] = useState<string>('all');
-  const [filterScope, setFilterScope] = useState<string>('all');
 
   const load = useCallback(() => {
     setLoading(true);
@@ -150,6 +160,61 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!installOpen || recommended.length > 0) return;
+    setRecommendedLoading(true);
+    api
+      .listRecommendedSkills()
+      .then((res) => setRecommended(res.skills))
+      .catch(() => toast.error('Failed to load recommended skills'))
+      .finally(() => setRecommendedLoading(false));
+  }, [installOpen, recommended.length]);
+
+  const installedNames = useMemo(
+    () => new Set(skills.filter((s) => s.source === 'project').map((s) => s.name)),
+    [skills],
+  );
+
+  const runInstall = async (
+    input: Parameters<typeof api.installGlobalSkill>[0],
+  ): Promise<boolean> => {
+    const result = global
+      ? await api.installGlobalSkill(input)
+      : await api.installSkill(projectId ?? '', input);
+    const names = result.skills.map((s) => s.name).join(', ');
+    let message = `Installed ${names}`;
+    if (result.scan.scanned) {
+      if (result.scan.issueCount && result.scan.issueCount > 0) {
+        message += ` — scan found ${result.scan.issueCount} potential issue(s).`;
+      } else {
+        message += ' — scan passed with no issues.';
+      }
+    } else {
+      message += ' — security scan was unavailable.';
+    }
+    toast.success(message, { duration: 8000 });
+    return true;
+  };
+
+  const installRecommended = async (skill: RecommendedSkill) => {
+    setInstallingName(skill.name);
+    try {
+      await runInstall({
+        source: skill.source,
+        skillPath: skill.skillPath,
+        ref: skill.ref,
+        ...(skill.tags?.length ? { tags: skill.tags } : {}),
+        scope: global ? ('global' as const) : ('project' as const),
+        syncEnabled: true,
+      });
+      load();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setInstallingName(null);
+    }
+  };
 
   const view = async (name: string) => {
     setViewLoading(true);
@@ -175,29 +240,14 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
         .split(',')
         .map((t) => t.trim())
         .filter(Boolean);
-      const input = {
+      await runInstall({
         source: source.trim(),
         skillPath: skillPath.trim(),
         ref: ref.trim() || undefined,
         ...(tagList.length > 0 ? { tags: tagList } : {}),
         scope: global ? ('global' as const) : ('project' as const),
         syncEnabled: syncInstall,
-      };
-      const result = global
-        ? await api.installGlobalSkill(input)
-        : await api.installSkill((projectId ?? ''), input);
-      const names = result.skills.map((s) => s.name).join(', ');
-      let message = `Installed ${names}`;
-      if (result.scan.scanned) {
-        if (result.scan.issueCount && result.scan.issueCount > 0) {
-          message += ` — scan found ${result.scan.issueCount} potential issue(s).`;
-        } else {
-          message += ' — scan passed with no issues.';
-        }
-      } else {
-        message += ' — security scan was unavailable.';
-      }
-      toast.success(message, { duration: 8000 });
+      });
       setInstallOpen(false);
       setSource('');
       setSkillPath('');
@@ -344,28 +394,12 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
       );
     }
 
-    // Filter by source
-    if (filterSource !== 'all') {
-      list = list.filter((s) => s.source === filterSource);
-    }
-
-    // Filter by scope
-    if (filterScope !== 'all') {
-      list = list.filter((s) => (s.scope ?? '') === filterScope);
-    }
-
     // Sort
     list.sort((a, b) => {
       let cmp = 0;
       switch (sortField) {
         case 'name':
           cmp = a.name.localeCompare(b.name);
-          break;
-        case 'source':
-          cmp = a.source.localeCompare(b.source);
-          break;
-        case 'scope':
-          cmp = (a.scope ?? '').localeCompare(b.scope ?? '');
           break;
         case 'lastSyncedAt':
           cmp = (a.lastSyncedAt ?? '').localeCompare(b.lastSyncedAt ?? '');
@@ -375,7 +409,7 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
     });
 
     return list;
-  }, [skills, filterText, filterSource, filterScope, sortField, sortDir]);
+  }, [skills, filterText, sortField, sortDir]);
 
   const sortIcon = (field: SortField) => {
     if (sortField !== field) return <ArrowUpDownIcon className="ml-1 size-3 opacity-30" />;
@@ -393,8 +427,8 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="rounded-xl border border-border/50 bg-card shadow-sm">
-        <div className="flex flex-row items-center justify-between px-6 py-5">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-row items-center justify-between">
           <div>
             <div className="flex items-center gap-2 font-semibold">
               <WrenchIcon className="size-4" />
@@ -408,11 +442,11 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
           </div>
           <Button size="sm" onClick={() => setInstallOpen(true)}>
             <DownloadIcon data-icon="inline-start" />
-            Install
+            Add skill
           </Button>
         </div>
-        <div className="px-6 pb-5">
-          {/* Filter bar */}
+        <div>
+          {/* Sorting and filtering controls */}
           <div className="flex items-center gap-3 mb-4 flex-wrap">
             <div className="relative flex-1 min-w-[180px] max-w-[260px]">
               <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
@@ -423,24 +457,6 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
                 className="pl-8 h-8 text-sm"
               />
             </div>
-            <select
-              value={filterSource}
-              onChange={(e) => setFilterSource(e.target.value)}
-              className="h-8 rounded-md border bg-background px-2 text-sm"
-            >
-              <option value="all">All sources</option>
-              <option value="builtin">Built-in</option>
-              <option value="project">Installed</option>
-            </select>
-            <select
-              value={filterScope}
-              onChange={(e) => setFilterScope(e.target.value)}
-              className="h-8 rounded-md border bg-background px-2 text-sm"
-            >
-              <option value="all">All scopes</option>
-              <option value="global">Global</option>
-              <option value="project">Project</option>
-            </select>
           </div>
 
           {loading ? (
@@ -452,7 +468,8 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
                 : 'No skills match the current filters.'}
             </p>
           ) : (
-            <Table>
+            <div className="max-h-[60vh] overflow-y-auto rounded-md border">
+              <Table className="min-w-[900px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead
@@ -462,11 +479,8 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
                       <span className="inline-flex items-center">Name{sortIcon('name')}</span>
                     </TableHead>
                     <TableHead>Description</TableHead>
-                    <TableHead
-                      className="w-[80px] cursor-pointer select-none"
-                      onClick={() => toggleSort('source')}
-                    >
-                      <span className="inline-flex items-center">Source{sortIcon('source')}</span>
+                    <TableHead className="w-[80px]">
+                      Source
                     </TableHead>
                     <TableHead className="w-[100px]">
                       Scope
@@ -614,6 +628,7 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
                   ))}
                 </TableBody>
               </Table>
+            </div>
           )}
         </div>
       </div>
@@ -709,94 +724,180 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
 
       {/* Install skill dialog */}
       <Dialog open={installOpen} onOpenChange={setInstallOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle>Install skill from GitHub</DialogTitle>
+            <DialogTitle>Install a skill</DialogTitle>
             <DialogDescription>
-              Install a skill from a GitHub repository. The skill must have a{' '}
-              <code>SKILL.md</code> file. Default scope is {global ? 'global' : 'project'}.
+              Browse the recommended catalog or install any skill from a GitHub
+              repository. Default scope is {global ? 'global' : 'project'}.
             </DialogDescription>
           </DialogHeader>
-          <div className="rounded-lg border-2 border-red-500/50 bg-red-500/5 p-3">
-            <div className="flex items-start gap-3">
-              <AlertTriangleIcon className="mt-0.5 size-5 shrink-0 text-red-500" />
-              <div className="flex flex-col gap-1">
-                <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">
-                  Security Warning: Malicious Skills
-                </h3>
-                <p className="text-xs text-red-700/80 dark:text-red-300/80">
-                  Skills can contain arbitrary instructions, commands, and scripts that execute in
-                  your environment. Malicious skills may exfiltrate data, modify files without consent,
-                  or execute harmful commands. Orion scans every installed skill with{' '}
-                  <a
-                    href="https://github.com/snyk/agent-scan"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="underline underline-offset-2"
-                  >
-                    Snyk agent-scan
-                  </a>
-                  {' '}to detect known malicious patterns, but{' '}
-                  <strong>no automated scan is a substitute for human review</strong>.
-                  Always inspect a skill&rsquo;s source repository and content before installing.
+          <Tabs
+            className="flex-1 flex flex-col min-h-0"
+            value={installTab}
+            onValueChange={(v) => setInstallTab(v as 'recommended' | 'github')}
+          >
+            <TabsList className="w-full">
+              <TabsTrigger value="recommended">Recommended</TabsTrigger>
+              <TabsTrigger value="github">From GitHub</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="recommended" className="mt-4 flex-1 flex flex-col min-h-0">
+              {recommendedLoading ? (
+                <p className="text-sm text-muted-foreground py-4">Loading recommended skills...</p>
+              ) : recommended.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4">
+                  No recommended skills are available.
                 </p>
+              ) : (
+                <div className="flex-1 overflow-y-auto min-h-0">
+                  <div className="flex flex-col gap-2 pr-3">
+                    {recommended.map((skill) => {
+                      const already = installedNames.has(skill.name);
+                      return (
+                        <div
+                          key={skill.name}
+                          className="flex items-start justify-between gap-3 rounded-md border bg-card p-3"
+                        >
+                          <div className="flex flex-col gap-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium">{skill.name}</span>
+                              {skill.author && (
+                                <span className="text-[11px] text-muted-foreground">
+                                  by {skill.author}
+                                </span>
+                              )}
+                              {skill.tags?.map((tag) => (
+                                <Badge key={tag} variant="secondary" className="text-[10px]">
+                                  {tag}
+                                </Badge>
+                              ))}
+                            </div>
+                            <p className="text-xs text-muted-foreground">{skill.description}</p>
+                            <a
+                              href={sourceLink(skill.source) ?? skill.source}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:underline w-fit"
+                            >
+                              <ExternalLinkIcon className="size-3" />
+                              {skill.skillPath}
+                            </a>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant={already ? 'outline' : 'default'}
+                            disabled={already || installingName === skill.name}
+                            onClick={() => installRecommended(skill)}
+                            className="shrink-0"
+                          >
+                            {already ? (
+                              <>
+                                <CheckIcon data-icon="inline-start" />
+                                Installed
+                              </>
+                            ) : installingName === skill.name ? (
+                              'Installing...'
+                            ) : (
+                              <>
+                                <DownloadIcon data-icon="inline-start" />
+                                Install
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="github" className="mt-4 flex-1 flex flex-col min-h-0">
+              <div className="flex-1 overflow-y-auto min-h-0">
+                <div className="rounded-lg border-2 border-red-500/50 bg-red-500/5 p-3">
+                  <div className="flex items-start gap-3">
+                  <AlertTriangleIcon className="mt-0.5 size-5 shrink-0 text-red-500" />
+                  <div className="flex flex-col gap-1">
+                    <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">
+                      Security Warning: Malicious Skills
+                    </h3>
+                    <p className="text-xs text-red-700/80 dark:text-red-300/80">
+                      Skills can contain arbitrary instructions, commands, and scripts that execute in
+                      your environment. Malicious skills may exfiltrate data, modify files without consent,
+                      or execute harmful commands. Orion scans every installed skill with{' '}
+                      <a
+                        href="https://github.com/snyk/agent-scan"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline underline-offset-2"
+                      >
+                        Snyk agent-scan
+                      </a>
+                      {' '}to detect known malicious patterns, but{' '}
+                      <strong>no automated scan is a substitute for human review</strong>.
+                      Always inspect a skill&rsquo;s source repository and content before installing.
+                    </p>
+                  </div>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-3 mt-3">
+                <div className="flex flex-col gap-1.5">
+                  <Label>GitHub repository URL</Label>
+                  <Input
+                    value={source}
+                    onChange={(e) => setSource(e.target.value)}
+                    placeholder="https://github.com/owner/repo"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Skill path</Label>
+                  <Input
+                    value={skillPath}
+                    onChange={(e) => setSkillPath(e.target.value)}
+                    placeholder="skills/my-skill/SKILL.md"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Branch / tag / ref (optional)</Label>
+                  <Input
+                    value={ref}
+                    onChange={(e) => setRef(e.target.value)}
+                    placeholder="main"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Tags (optional)</Label>
+                  <Input
+                    value={tagsInput}
+                    onChange={(e) => setTagsInput(e.target.value)}
+                    placeholder="plan, implement"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Comma-separated SDLC tags, e.g. <code>plan, review, implement</code>.
+                  </p>
+                </div>
+                <div className="flex items-center justify-between rounded-md border bg-card px-3 py-2.5">
+                  <div className="flex flex-col gap-0.5">
+                    <Label className="text-sm">Enable auto-sync</Label>
+                    <p className="text-[11px] text-muted-foreground">
+                      Periodically check for updates from the source repository.
+                    </p>
+                  </div>
+                  <Switch checked={syncInstall} onCheckedChange={setSyncInstall} />
+                </div>
+                </div>
               </div>
-            </div>
-          </div>
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label>GitHub repository URL</Label>
-              <Input
-                value={source}
-                onChange={(e) => setSource(e.target.value)}
-                placeholder="https://github.com/owner/repo"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Skill path</Label>
-              <Input
-                value={skillPath}
-                onChange={(e) => setSkillPath(e.target.value)}
-                placeholder="skills/my-skill/SKILL.md"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Branch / tag / ref (optional)</Label>
-              <Input
-                value={ref}
-                onChange={(e) => setRef(e.target.value)}
-                placeholder="main"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Tags (optional)</Label>
-              <Input
-                value={tagsInput}
-                onChange={(e) => setTagsInput(e.target.value)}
-                placeholder="plan, implement"
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Comma-separated SDLC tags, e.g. <code>plan, review, implement</code>.
-              </p>
-            </div>
-            <div className="flex items-center justify-between rounded-md border bg-card px-3 py-2.5">
-              <div className="flex flex-col gap-0.5">
-                <Label className="text-sm">Enable auto-sync</Label>
-                <p className="text-[11px] text-muted-foreground">
-                  Periodically check for updates from the source repository.
-                </p>
-              </div>
-              <Switch checked={syncInstall} onCheckedChange={setSyncInstall} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setInstallOpen(false)} disabled={installing}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={install} disabled={!source.trim() || !skillPath.trim() || installing}>
-              {installing ? 'Installing...' : 'Install'}
-            </Button>
-          </DialogFooter>
+              <DialogFooter className="mt-4">
+                <Button variant="outline" size="sm" onClick={() => setInstallOpen(false)} disabled={installing}>
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={install} disabled={!source.trim() || !skillPath.trim() || installing}>
+                  {installing ? 'Installing...' : 'Install'}
+                </Button>
+              </DialogFooter>
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
 

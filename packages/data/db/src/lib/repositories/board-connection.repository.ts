@@ -32,9 +32,17 @@ export class BoardConnectionRepository {
 
     if (existing) {
       const values: Partial<typeof boardConnections.$inferInsert> = { updatedAt: new Date() };
+      if (input.provider !== undefined) values.provider = input.provider;
       if (input.apiKey !== undefined) values.apiKey = input.apiKey;
       if (input.teamId !== undefined) values.teamId = input.teamId;
+      if (input.config !== undefined) values.config = input.config;
       if (input.stateMap !== undefined) values.stateMap = input.stateMap;
+      if (input.direction !== undefined) values.direction = input.direction;
+      if (input.autoPush !== undefined) values.autoPush = input.autoPush;
+      if (input.importNew !== undefined) values.importNew = input.importNew;
+      if (input.updateExisting !== undefined) values.updateExisting = input.updateExisting;
+      if (input.syncIntervalMs !== undefined)
+        values.syncIntervalMs = input.syncIntervalMs ?? null;
       if (input.enabled !== undefined) values.enabled = input.enabled;
 
       const [row] = await this.db
@@ -49,10 +57,16 @@ export class BoardConnectionRepository {
       .insert(boardConnections)
       .values({
         projectId,
-        provider: 'linear',
+        provider: input.provider ?? 'linear',
         apiKey: input.apiKey ?? '',
         teamId: input.teamId ?? '',
+        config: input.config ?? {},
         stateMap: input.stateMap ?? {},
+        direction: input.direction ?? 'both',
+        autoPush: input.autoPush ?? true,
+        importNew: input.importNew ?? true,
+        updateExisting: input.updateExisting ?? true,
+        syncIntervalMs: input.syncIntervalMs ?? null,
         enabled: input.enabled ?? true,
       })
       .returning();

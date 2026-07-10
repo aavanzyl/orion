@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { evaluateCondition, tryEvaluateCondition } from './conditions.js';
+import {
+  buildConditionExpression,
+  evaluateCondition,
+  parseSimpleCondition,
+  tryEvaluateCondition,
+} from './conditions.js';
 
 const outputs: Record<string, unknown> = {
   review: { data: { approved: true, score: 8, tags: ['urgent', 'backend'], note: 'ship it' } },
@@ -121,5 +126,109 @@ describe('tryEvaluateCondition', () => {
 
   it('treats unknown refs as fine (ok:true) against an empty map', () => {
     expect(tryEvaluateCondition('nodes.whatever.data.x == 1', {}).ok).toBe(true);
+  });
+});
+
+describe('parseSimpleCondition', () => {
+  it('parses a single comparison of a ref against a literal', () => {
+    const parsed = parseSimpleCondition('nodes.review.data.score >= 5');
+    expect(parsed).toEqual({
+      connector: 'and',
+      comparisons: [
+        {
+          negated: false,
+          left: { kind: 'ref', id: 'review', path: ['data', 'score'] },
+          op: '>=',
+          right: { kind: 'lit', value: 5 },
+        },
+      ],
+    });
+  });
+
+  it('parses a bare ref as a truthiness check (no operator)', () => {
+    const parsed = parseSimpleCondition('nodes.review.data.approved');
+    expect(parsed?.comparisons[0]).toEqual({
+      negated: false,
+      left: { kind: 'ref', id: 'review', path: ['data', 'approved'] },
+    });
+  });
+
+  it('parses a negated comparison', () => {
+    const parsed = parseSimpleCondition("!(nodes.a.status == 'done')");
+    expect(parsed?.comparisons[0]).toMatchObject({ negated: true, op: '==' });
+  });
+
+  it('flattens a chain joined by a single connector', () => {
+    const parsed = parseSimpleCondition('nodes.a.x == 1 && nodes.b.y == 2 && nodes.c');
+    expect(parsed?.connector).toBe('and');
+    expect(parsed?.comparisons).toHaveLength(3);
+  });
+
+  it('returns an empty comparison list for an empty expression', () => {
+    expect(parseSimpleCondition('   ')).toEqual({ connector: 'and', comparisons: [] });
+  });
+
+  it('returns null when connectors are mixed', () => {
+    expect(parseSimpleCondition('nodes.a || nodes.b && nodes.c')).toBeNull();
+  });
+
+  it('returns null for a malformed expression', () => {
+    expect(parseSimpleCondition('nodes.a ==')).toBeNull();
+  });
+});
+
+describe('buildConditionExpression', () => {
+  it('serialises a comparison with a quoted string literal', () => {
+    const expr = buildConditionExpression({
+      connector: 'and',
+      comparisons: [
+        {
+          negated: false,
+          left: { kind: 'ref', id: 'review', path: ['status'] },
+          op: '==',
+          right: { kind: 'lit', value: 'done' },
+        },
+      ],
+    });
+    expect(expr).toBe("nodes.review.status == 'done'");
+  });
+
+  it('joins rows with the chosen connector and negates with parentheses', () => {
+    const expr = buildConditionExpression({
+      connector: 'or',
+      comparisons: [
+        {
+          negated: true,
+          left: { kind: 'ref', id: 'a', path: ['ok'] },
+          op: '==',
+          right: { kind: 'lit', value: true },
+        },
+        { negated: false, left: { kind: 'ref', id: 'b', path: [] } },
+      ],
+    });
+    expect(expr).toBe('!(nodes.a.ok == true) || nodes.b');
+  });
+
+  it('skips incomplete rows (ref without an id)', () => {
+    const expr = buildConditionExpression({
+      connector: 'and',
+      comparisons: [
+        { negated: false, left: { kind: 'ref', id: '', path: [] } },
+        { negated: false, left: { kind: 'ref', id: 'b', path: [] } },
+      ],
+    });
+    expect(expr).toBe('nodes.b');
+  });
+
+  it('round-trips parse -> build for representable expressions', () => {
+    for (const expr of [
+      'nodes.review.data.score >= 5',
+      "nodes.a.status == 'done' && nodes.b.ready == true",
+      'nodes.a.tags includes \'urgent\' || nodes.b',
+    ]) {
+      const parsed = parseSimpleCondition(expr);
+      expect(parsed).not.toBeNull();
+      expect(buildConditionExpression(parsed as NonNullable<typeof parsed>)).toBe(expr);
+    }
   });
 });

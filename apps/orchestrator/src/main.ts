@@ -6,7 +6,7 @@ import { createApiRouter } from './lib/http/api.js';
 import { mountMcpRoutes } from './lib/mcp/mcp-routes.js';
 import { RunService } from './lib/services/run.service.js';
 import { ChatService } from './lib/services/chat.service.js';
-import { TriggerService } from './lib/services/trigger.service.js';
+import { ScheduleService } from './lib/services/schedule.service.js';
 import { BoardSyncScheduler } from './lib/services/board-sync-scheduler.service.js';
 
 async function main(): Promise<void> {
@@ -20,7 +20,7 @@ async function main(): Promise<void> {
 
   const runs = new RunService(container);
   const chat = new ChatService(container);
-  const triggers = new TriggerService(container, runs);
+  const schedules = new ScheduleService(container);
   const boardSync = new BoardSyncScheduler(container);
 
   // Surface any runs orphaned by a previous process before accepting traffic.
@@ -28,12 +28,12 @@ async function main(): Promise<void> {
     console.error('[ orion orchestrator ] run recovery failed:', err);
   });
 
-  // Begin polling cron triggers once recovery has settled.
-  await triggers.startScheduler().catch((err: unknown) => {
-    console.error('[ orion orchestrator ] trigger scheduler failed to start:', err);
+  // Begin polling cron schedules once recovery has settled.
+  await schedules.startScheduler().catch((err: unknown) => {
+    console.error('[ orion orchestrator ] schedule scheduler failed to start:', err);
   });
 
-  // Continuously reconcile connected Linear boards on a heartbeat.
+  // Continuously reconcile connected task boards (Linear/Jira/Trello) on a heartbeat.
   boardSync.startScheduler();
 
   const app = express();
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
     res.json({ status: 'ok' });
   });
 
-  app.use('/api', createApiRouter(container, runs, chat, triggers));
+  app.use('/api', createApiRouter(container, runs, chat, schedules));
 
   // Mount the codebase + tickets MCP servers (SSE transport) for external agents.
   mountMcpRoutes(app, container);

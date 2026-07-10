@@ -11,6 +11,7 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core';
+import type { McpServerConfig } from '@orion/models';
 
 export const providers = pgTable('providers', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -155,8 +156,6 @@ export const runNodes = pgTable('run_nodes', {
   model: text('model'),
   /** Agent id the node ran as (agent nodes only). */
   agentId: text('agent_id'),
-  /** For structured-output agent nodes: whether validation passed. */
-  structuredOutputValid: boolean('structured_output_valid'),
   startedAt: timestamp('started_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
 });
@@ -240,35 +239,48 @@ export const boardConnections = pgTable('board_connections', {
   provider: text('provider').notNull().default('linear'),
   apiKey: text('api_key').notNull().default(''),
   teamId: text('team_id').notNull().default(''),
+  /** Non-secret provider extras (Jira base url/email, Trello api key, ...). */
+  config: jsonb('config').$type<Record<string, string>>().notNull().default({}),
   stateMap: jsonb('state_map').$type<Record<string, string>>().notNull().default({}),
+  /** `pull` | `push` | `both`. */
+  direction: text('direction').notNull().default('both'),
+  /** Push a ticket's state upstream immediately when it moves locally. */
+  autoPush: boolean('auto_push').notNull().default(true),
+  /** Import remote issues that don't yet exist locally. */
+  importNew: boolean('import_new').notNull().default(true),
+  /** Update local tickets when their remote source changes. */
+  updateExisting: boolean('update_existing').notNull().default(true),
+  /** Per-connection sync cadence in ms; null falls back to the global default. */
+  syncIntervalMs: integer('sync_interval_ms'),
   enabled: boolean('enabled').notNull().default(true),
   lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const triggers = pgTable('triggers', {
+export const schedules = pgTable('schedules', {
   id: uuid('id').defaultRandom().primaryKey(),
   projectId: uuid('project_id')
     .notNull()
     .references(() => projects.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
-  /** `cron` or `webhook`. */
-  type: text('type').notNull(),
   enabled: boolean('enabled').notNull().default(true),
-  /** `workflow` (create ticket + start run) or `agent` (one-off agent turn). */
-  action: text('action').notNull().default('workflow'),
-  /** Cron expression for `cron` triggers. */
-  cron: text('cron'),
-  /** Secret token authenticating a `webhook` trigger's endpoint. */
-  webhookToken: text('webhook_token').unique(),
-  ticketTitle: text('ticket_title'),
-  ticketDescription: text('ticket_description'),
-  swimlaneKey: text('swimlane_key'),
-  /** Configured agent id to run (for `agent` triggers). */
-  agentId: text('agent_id'),
-  /** Prompt/instruction for the agent turn (`agent` triggers). */
-  prompt: text('prompt'),
+  /** Standard 5-field cron expression. */
+  cron: text('cron').notNull(),
+  /** Custom instruction the agent runs on each fire. */
+  instruction: text('instruction').notNull(),
+  /** Skill names to materialize for the agent (project skill catalog). */
+  skills: jsonb('skills').$type<string[]>().notNull().default([]),
+  /** Registered MCP server names to expose to the agent (project config). */
+  mcpServers: jsonb('mcp_servers').$type<string[]>().notNull().default([]),
+  /**
+   * Inline MCP server definitions keyed by name, captured for selected servers
+   * (e.g. global ones) that are not present in the project config.
+   */
+  mcpServerConfigs: jsonb('mcp_server_configs')
+    .$type<Record<string, McpServerConfig>>()
+    .notNull()
+    .default({}),
   lastFiredAt: timestamp('last_fired_at', { withTimezone: true }),
   nextFireAt: timestamp('next_fire_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -298,6 +310,24 @@ export const codeChunks = pgTable(
   },
   (table) => [index('code_chunks_project_id_idx').on(table.projectId)],
 );
+
+export const mcpServers = pgTable('mcp_servers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull().unique(),
+  config: jsonb('config').$type<McpServerConfig>().notNull(),
+  authType: text('auth_type').notNull().default('none'),
+  oauth: jsonb('oauth').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const appSettings = pgTable('app_settings', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  branding: jsonb('branding').$type<Record<string, unknown>>().notNull().default({}),
+  preferences: jsonb('preferences').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 /** Status + metadata of a project's codebase index (one row per project). */
 export const codeIndexes = pgTable('code_indexes', {

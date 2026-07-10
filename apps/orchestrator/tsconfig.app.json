@@ -57,6 +57,12 @@
       "path": "../../packages/adapters/board/linear/tsconfig.lib.json"
     },
     {
+      "path": "../../packages/adapters/board/jira/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/adapters/board/trello/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/adapters/board/core/tsconfig.lib.json"
     },
     {

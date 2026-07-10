@@ -8,59 +8,98 @@ const base: ProjectConfig = {
   workflow: { name: 'default', nodes: [] },
 };
 
-describe('assertValidConfig – structuredOutput', () => {
-  it('rejects structuredOutput on a non-agent node', () => {
+describe('assertValidConfig – message nodes', () => {
+  it('rejects a message node without a message when not agent-generated', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflow: {
+        name: 'default',
+        nodes: [{ id: 'n1', type: 'message', swimlane: 'todo' }],
+      },
+    };
+    expect(() => assertValidConfig(config)).toThrow(/no message set/);
+  });
+
+  it('accepts an agent-generated message node without a static message', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflow: {
+        name: 'default',
+        nodes: [{ id: 'n1', type: 'message', agentGenerated: true, swimlane: 'todo' }],
+      },
+    };
+    expect(() => assertValidConfig(config)).not.toThrow();
+  });
+
+  it('accepts a notify-target message node with a message', () => {
     const config: ProjectConfig = {
       ...base,
       workflow: {
         name: 'default',
         nodes: [
-          {
-            id: 'n1',
-            type: 'shell',
-            script: 'echo ok',
-            swimlane: 'todo',
-            structuredOutput: { schema: { result: 'string' } },
-          },
+          { id: 'n1', type: 'message', messageTarget: 'notify', message: 'done', swimlane: 'todo' },
         ],
       },
     };
-    expect(() => assertValidConfig(config)).toThrow(/only agent nodes/);
+    expect(() => assertValidConfig(config)).not.toThrow();
+  });
+});
+
+describe('assertValidConfig – graphql nodes', () => {
+  it('rejects a graphql node without a url', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflow: {
+        name: 'default',
+        nodes: [{ id: 'n1', type: 'graphql', query: '{ me { id } }', swimlane: 'todo' }],
+      },
+    };
+    expect(() => assertValidConfig(config)).toThrow(/no url set/);
   });
 
-  it('rejects structuredOutput with a required key not in the schema', () => {
+  it('rejects a graphql node without a query', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflow: {
+        name: 'default',
+        nodes: [{ id: 'n1', type: 'graphql', url: 'https://api/graphql', swimlane: 'todo' }],
+      },
+    };
+    expect(() => assertValidConfig(config)).toThrow(/no query set/);
+  });
+
+  it('accepts a valid graphql node', () => {
     const config: ProjectConfig = {
       ...base,
       workflow: {
         name: 'default',
         nodes: [
-          {
-            id: 'n1',
-            type: 'agent',
-            provider: 'codex',
-            swimlane: 'todo',
-            structuredOutput: { schema: { severity: 'string' }, required: ['nope'] },
-          },
+          { id: 'n1', type: 'graphql', url: 'https://api/graphql', query: '{ me { id } }', swimlane: 'todo' },
         ],
       },
     };
-    expect(() => assertValidConfig(config)).toThrow(/not in the schema/);
+    expect(() => assertValidConfig(config)).not.toThrow();
   });
+});
 
-  it('accepts a valid structuredOutput on an agent node', () => {
+describe('assertValidConfig – retry policy scope', () => {
+  it('rejects retries on a shell node', () => {
     const config: ProjectConfig = {
       ...base,
       workflow: {
         name: 'default',
-        nodes: [
-          {
-            id: 'classify',
-            type: 'agent',
-            provider: 'codex',
-            swimlane: 'todo',
-            structuredOutput: { schema: { severity: 'string', areas: 'array' }, required: ['severity'] },
-          },
-        ],
+        nodes: [{ id: 'n1', type: 'shell', script: 'echo ok', retries: 2, swimlane: 'todo' }],
+      },
+    };
+    expect(() => assertValidConfig(config)).toThrow(/only agent, http and graphql nodes support retries/);
+  });
+
+  it('accepts a timeout on an http node', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflow: {
+        name: 'default',
+        nodes: [{ id: 'n1', type: 'http', url: 'https://api/health', timeoutMs: 5000, swimlane: 'todo' }],
       },
     };
     expect(() => assertValidConfig(config)).not.toThrow();
@@ -231,7 +270,7 @@ describe('assertValidConfig – sub-workflows', () => {
         ],
       },
     };
-    expect(() => assertValidConfig(config)).toThrow(/loop but only agent and shell/);
+    expect(() => assertValidConfig(config)).toThrow(/loop but only agent nodes/);
   });
 
   it('accepts a valid composed config with sub-workflows', () => {

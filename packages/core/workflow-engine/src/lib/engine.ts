@@ -47,12 +47,13 @@ const SATISFIES_DEPENDENCY = new Set(['completed', 'skipped']);
 /** Durable marker stored on a node's `output` when it is condition-skipped,
  * distinguishing it from an advisory (`continueOnError`) skip which carries no
  * marker and therefore never cascades. */
-function conditionSkipMarker(when: string | undefined): { __orionSkipped: 'condition'; when: string | null } {
-  return { __orionSkipped: 'condition', when: when ?? null };
+function conditionSkipMarker(): { __orionSkipped: 'condition' } {
+  return { __orionSkipped: 'condition' };
 }
 
-/** True when a node was skipped because its `when` condition (or its whole
- * incoming branch) was false, as opposed to an advisory `continueOnError` skip. */
+/** True when a node was skipped because a `condition` node upstream (or its
+ * whole incoming branch) was false, as opposed to an advisory `continueOnError`
+ * skip. */
 export function isConditionSkipped(node: Pick<RunNode, 'status' | 'output'>): boolean {
   return (
     node.status === 'skipped' &&
@@ -201,10 +202,26 @@ export class WorkflowEngine {
       return { result: 'failed' };
     }
 
+    // Multi-branch condition routing: evaluate branches before running the
+    // executor, so non-selected downstream targets are skipped immediately.
+    if (
+      nodeConfig.type === 'condition' &&
+      nodeConfig.branches &&
+      nodeConfig.branches.length > 0
+    ) {
+      return this.routeConditionBranches(
+        run,
+        node,
+        nodeConfig,
+        nodeOutputs,
+        byKey,
+      );
+    }
+
     if (this.shouldConditionSkip(node, nodeConfig, nodeOutputs, byKey)) {
       await this.deps.store.updateNode(node.id, {
         status: 'skipped',
-        output: conditionSkipMarker(nodeConfig.when),
+        output: conditionSkipMarker(),
         completedAt: new Date().toISOString(),
       });
       await this.deps.emit({
@@ -282,10 +299,10 @@ export class WorkflowEngine {
 
   /**
    * Decide whether a ready node should be condition-skipped before running its
-   * executor: either its own `when` evaluates false, or it has dependencies and
-   * every one of them was itself condition-skipped (its incoming branch was not
-   * taken). Advisory (`continueOnError`) skips carry no marker so they never
-   * trigger the branch cascade.
+   * executor: either it is a `condition` node whose expression is false, or it
+   * has dependencies and every one of them was itself condition-skipped (its
+   * incoming branch was not taken). Advisory (`continueOnError`) skips carry no
+   * marker so they never trigger the branch cascade.
    */
   private shouldConditionSkip(
     node: RunNode,
@@ -293,14 +310,14 @@ export class WorkflowEngine {
     nodeOutputs: Record<string, unknown>,
     byKey: Map<string, RunNode>,
   ): boolean {
-    if (nodeConfig.when != null && evaluateCondition(nodeConfig.when, nodeOutputs) === false) {
-      return true;
-    }
     // A dedicated `condition` node gates its downstream branch: when its
     // expression is false the node is condition-skipped, cascading to any nodes
     // that depend exclusively on it (via the branch rule below).
+    // Legacy single-expression condition gate. When `branches` is also present
+    // the multi-branch routing handled above takes precedence.
     if (
       nodeConfig.type === 'condition' &&
+      !nodeConfig.branches?.length &&
       nodeConfig.condition != null &&
       evaluateCondition(nodeConfig.condition, nodeOutputs) === false
     ) {
@@ -316,6 +333,72 @@ export class WorkflowEngine {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Evaluate multi-branch condition routing (if / else-if / else). The first
+   * branch whose expression is truthy is selected; a trailing branch without
+   * an expression is the else. Non-selected branches' targets are explicitly
+   * condition-skipped so the cascade picks them up in the next pass. When no
+   * branch matches (including no else), every downstream dependent is allowed
+   * to proceed.
+   */
+  private async routeConditionBranches(
+    run: WorkflowRun,
+    node: RunNode,
+    nodeConfig: WorkflowNodeConfig,
+    nodeOutputs: Record<string, unknown>,
+    byKey: Map<string, RunNode>,
+  ): Promise<NodeStepResult> {
+    const branches = nodeConfig.branches!;
+    let selectedIndex = -1;
+
+    for (let i = 0; i < branches.length; i++) {
+      const b = branches[i];
+      if (b.expression) {
+        if (evaluateCondition(b.expression, nodeOutputs)) {
+          selectedIndex = i;
+          break;
+        }
+      } else {
+        selectedIndex = i;
+        break;
+      }
+    }
+
+    await this.deps.store.updateNode(node.id, {
+      status: 'completed',
+      output: { branchIndex: selectedIndex, branches },
+      completedAt: new Date().toISOString(),
+    });
+    await this.deps.emit({
+      runId: run.id,
+      nodeId: node.id,
+      type: 'node.completed',
+      payload: { nodeKey: node.nodeKey, branchIndex: selectedIndex },
+    });
+
+    for (let i = 0; i < branches.length; i++) {
+      if (i === selectedIndex) continue;
+      const targetKey = branches[i].target;
+      if (!targetKey) continue;
+      const targetNode = byKey.get(targetKey);
+      if (targetNode) {
+        await this.deps.store.updateNode(targetNode.id, {
+          status: 'skipped',
+          output: conditionSkipMarker(),
+          completedAt: new Date().toISOString(),
+        });
+        await this.deps.emit({
+          runId: run.id,
+          nodeId: targetNode.id,
+          type: 'node.skipped',
+          payload: { nodeKey: targetNode.nodeKey, reason: 'condition' },
+        });
+      }
+    }
+
+    return { result: 'completed' };
   }
 
   /** Resolve a waiting approval node and continue the run. */

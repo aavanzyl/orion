@@ -210,7 +210,7 @@ export function TicketSheet({
               <MarkdownEditor
                 value={description}
                 onChange={setDescription}
-                rows={14}
+                rows={42}
                 placeholder="Add a description… Markdown supported."
               />
 

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import {
   LayoutDashboardIcon,
   MessagesSquareIcon,
@@ -12,10 +13,20 @@ import {
   ClockIcon,
   PlugIcon,
   WrenchIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
 } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { ACCENT_PRESETS, useBranding } from '@/lib/use-branding';
+import { useSidebar } from '@/lib/use-sidebar';
 
 type NavItem = {
   to: string;
@@ -65,7 +76,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Automation',
     items: [
-      { to: '/schedule', label: 'Schedule', icon: ClockIcon, description: 'Cron and webhook triggers' },
+      { to: '/schedule', label: 'Schedule', icon: ClockIcon, description: 'Run agents on a cron schedule' },
     ],
   },
   {
@@ -85,47 +96,124 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 export function AppLayout() {
+  const { branding } = useBranding();
+  const { collapsed, toggle } = useSidebar();
+
+  useEffect(() => {
+    document.title = branding.title;
+  }, [branding.title]);
+
+  useEffect(() => {
+    const { hue } = ACCENT_PRESETS[branding.accent] ?? ACCENT_PRESETS.blue;
+    document.documentElement.style.setProperty('--primary-hue', String(hue));
+  }, [branding.accent]);
+
   return (
-    <div className="flex h-screen bg-background">
-      <aside className="flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
-        <div className="flex h-14 items-center gap-2.5 border-b border-sidebar-border px-5">
-          <div className="flex size-7 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-            <img src="/orion-mark.svg" alt="Orion" className="size-4" />
+    <TooltipProvider delayDuration={0}>
+      <div className="flex h-screen bg-background">
+        <aside
+          className={cn(
+            'flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-200',
+            collapsed ? 'w-16' : 'w-56',
+          )}
+        >
+          <div
+            className={cn(
+              'flex h-14 items-center border-b border-sidebar-border',
+              collapsed ? 'justify-center px-2' : 'gap-2.5 px-3',
+            )}
+          >
+            {!collapsed && (
+              <>
+                <img
+                  src={branding.logo || '/orion-mark.svg'}
+                  alt={branding.title}
+                  className="size-10 shrink-0 object-contain"
+                />
+                <span className="flex-1 truncate text-base font-semibold tracking-tight">
+                  {branding.title}
+                </span>
+              </>
+            )}
+            {collapsed && (
+              <img
+                src={branding.logo || '/orion-mark.svg'}
+                alt={branding.title}
+                className="size-10 shrink-0 object-contain"
+              />
+            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={toggle}
+                  aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                  className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-all duration-150 hover:bg-sidebar-accent/50 hover:text-foreground"
+                >
+                  {collapsed ? (
+                    <PanelLeftOpenIcon className="size-4" />
+                  ) : (
+                    <PanelLeftCloseIcon className="size-4" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                {collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              </TooltipContent>
+            </Tooltip>
           </div>
-          <span className="text-base font-semibold tracking-tight">Orion</span>
-        </div>
-        <ScrollArea className="flex-1">
-          <nav className="flex flex-col gap-0.5 px-3 pb-4">
-            {NAV_SECTIONS.map((section) => (
-              <div key={section.title}>
-                <SectionLabel>{section.title}</SectionLabel>
-                {section.items.map(({ to, label, icon: Icon, end, description }) => (
-                  <NavLink
-                    key={to}
-                    to={to}
-                    end={end}
-                    title={description}
-                    className={({ isActive }) =>
-                      cn(
-                        'flex items-center gap-2.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all duration-150',
-                        isActive
-                          ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm'
-                          : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground',
-                      )
+          <ScrollArea className="flex-1">
+            <nav className={cn('flex flex-col px-3 pb-4', collapsed ? 'gap-1.5' : 'gap-0.5')}>
+              {NAV_SECTIONS.map((section) => (
+                <div key={section.title} className={cn(collapsed && 'flex flex-col gap-1.5')}>
+                  {collapsed ? (
+                    <div className="pt-4" aria-hidden />
+                  ) : (
+                    <SectionLabel>{section.title}</SectionLabel>
+                  )}
+                  {section.items.map(({ to, label, icon: Icon, end, description }) => {
+                    const link = (
+                      <NavLink
+                        key={to}
+                        to={to}
+                        end={end}
+                        title={collapsed ? undefined : description}
+                        aria-label={label}
+                        className={({ isActive }) =>
+                          cn(
+                            'flex items-center rounded-md text-sm font-medium transition-all duration-150',
+                            collapsed ? 'justify-center px-2 py-2.5' : 'gap-2.5 px-3 py-1.5',
+                            isActive
+                              ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm'
+                              : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground',
+                          )
+                        }
+                      >
+                        <Icon className="size-4 shrink-0" />
+                        {!collapsed && label}
+                      </NavLink>
+                    );
+
+                    if (!collapsed) {
+                      return link;
                     }
-                  >
-                    <Icon className="size-4 shrink-0" />
-                    {label}
-                  </NavLink>
-                ))}
-              </div>
-            ))}
-          </nav>
-        </ScrollArea>
-      </aside>
-      <div className="min-w-0 flex-1">
-        <Outlet />
+
+                    return (
+                      <Tooltip key={to}>
+                        <TooltipTrigger asChild>{link}</TooltipTrigger>
+                        <TooltipContent side="right">{label}</TooltipContent>
+                      </Tooltip>
+                    );
+                  })}
+                </div>
+              ))}
+            </nav>
+          </ScrollArea>
+        </aside>
+        <div className="min-w-0 flex-1">
+          <Outlet />
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   );
 }

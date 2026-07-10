@@ -16,6 +16,7 @@
     }
   },
   "dependencies": {
+    "@orion/config": "*",
     "@orion/models": "*",
     "yaml": "^2.6.1"
   }

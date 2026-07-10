@@ -106,8 +106,6 @@ export interface RunNode {
   model?: string;
   /** Agent id the node ran as (for agent nodes). */
   agentId?: string;
-  /** For agent nodes with `structuredOutput`: whether validation passed. */
-  structuredOutputValid?: boolean;
   startedAt?: string;
   completedAt?: string;
 }

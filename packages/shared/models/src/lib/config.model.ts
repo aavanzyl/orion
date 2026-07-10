@@ -10,36 +10,23 @@ export type WorkflowNodeType =
   | 'scm'
   | 'shell'
   | 'workflow'
-  | 'notify'
-  | 'comment'
+  | 'message'
   | 'condition'
-  | 'http';
+  | 'http'
+  | 'graphql';
 
 /** Severity of an outbound notification (mirrors the communication adapter). */
 export type NotificationLevel = 'info' | 'warn' | 'error';
 
+/**
+ * Where a `message` node delivers its rendered body: `notify` sends it through
+ * the configured notification providers (Slack, webhook), while `comment` posts
+ * it on the run's ticket in the tracker.
+ */
+export type MessageTarget = 'notify' | 'comment';
+
 /** HTTP verbs supported by an `http` node. */
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
-
-export type StructuredFieldType = 'string' | 'number' | 'boolean' | 'array' | 'object';
-
-export interface StructuredOutputConfig {
-  /** Field name → expected JSON type. */
-  schema: Record<string, StructuredFieldType>;
-  /** Field names that must be present (subset of schema keys). */
-  required?: string[];
-}
-
-/**
- * Codebase retrieval (RAG) settings for an agent node. When set, the top-K
- * codebase search results are prepended to the node's prompt as context.
- */
-export interface RetrievalConfig {
-  /** Query to search for; defaults to the ticket's title + description. */
-  query?: string;
-  /** Number of results to inject (default 8, max 20). */
-  topK?: number;
-}
 
 /**
  * Definition of a single Model Context Protocol (MCP) server made available to
@@ -68,21 +55,12 @@ export type McpServerMap = Record<string, McpServerConfig>;
 export interface BoardConfig {
   /** Ordered swimlane keys that make up the Kanban board. */
   swimlanes: string[];
-  /**
-   * Map of swimlane key → workflow name(s). When a ticket is moved into
-   * the swimlane, Orion automatically starts a run of the referenced workflow, so
-   * the swimlane itself dictates the sequence of events. The name(s) resolve
-   * against `workflows`, or the top-level `workflow` when one matches its name.
-   * When an array is provided, the ticket's `workflowName` selects which trigger
-   * fires; if the ticket has no `workflowName`, the first entry is used.
-   */
-  triggers?: Record<string, string | string[]>;
 }
 
 /**
- * Makes a node iterate: the engine re-runs the node's executor until the
- * `until` sentinel appears in the iteration's stringified output or
- * `maxIterations` is reached.
+ * Makes an `agent` node iterate: the engine re-runs the node's executor until
+ * the `until` sentinel appears in the iteration's stringified output or
+ * `maxIterations` is reached. Only valid on `agent` nodes.
  */
 export interface LoopConfig {
   /** Maximum iterations before the node fails (integer >= 1). */
@@ -113,6 +91,17 @@ export interface MatrixConfig {
    * subsequent waves. Defaults to running every item at once (unbounded).
    */
   maxParallel?: number;
+}
+
+/**
+ * A single branch in a multi-branch `condition` node. The first branch whose
+ * `expression` evaluates truthy is taken; the last branch may omit `expression`
+ * to serve as the `else` (taken when no other branch matched). Each branch may
+ * name a `target` downstream node key that it routes into.
+ */
+export interface ConditionBranch {
+  expression?: string;
+  target?: string;
 }
 
 export interface WorkflowNodeConfig {
@@ -171,48 +160,76 @@ export interface WorkflowNodeConfig {
   workflow?: string;
   /** Action name for `scm` nodes, e.g. `open_pull_request`. */
   action?: string;
+  /**
+   * When true, an `scm` `open_pull_request` node runs an agent to draft the PR
+   * title and description from the run's changes instead of using the static
+   * `config.title` / `config.body`. Requires a `provider` (harness key).
+   */
+  agentGenerated?: boolean;
   /** Shell command for `shell` nodes. */
   script?: string;
   /**
-   * Message template for `notify` and `comment` nodes. Supports `$VARIABLE` and
-   * `{{ nodes.<id>.<path> }}` substitution against upstream node outputs.
+   * Delivery target for a `message` node: `notify` sends the rendered body
+   * through the configured notification providers, `comment` posts it on the
+   * run's ticket. Default `notify`.
+   */
+  messageTarget?: MessageTarget;
+  /**
+   * Message template for `message` nodes. Supports `$VARIABLE` and
+   * `{{ nodes.<id>.<path> }}` substitution against upstream node outputs. When
+   * `agentGenerated` is set, this is treated as optional guidance for the agent
+   * that drafts the message instead of the literal body.
    */
   message?: string;
-  /** Severity for `notify` nodes; also decorates the message. Default `info`. */
+  /** Severity for `message` notify-target nodes; also decorates the message. Default `info`. */
   level?: NotificationLevel;
   /**
-   * Boolean expression for a `condition` node (same grammar as `when`). When it
-   * evaluates false the node — and its exclusive downstream branch — is skipped.
+   * Boolean expression for a `condition` node. When it evaluates false the node
+   * — and its exclusive downstream branch — is skipped. When `branches` is also
+   * present, this field is ignored; use `branches` for multi-way routing.
    */
   condition?: string;
+  /**
+   * Ordered list of if/else-if/else branches for a `condition` node. Each
+   * branch has an optional `expression` (absent for the `else` case) and an
+   * optional `target` downstream node key. The engine evaluates expressions in
+   * order and takes the first truthy branch, skipping the targets of all other
+   * branches.
+   */
+  branches?: ConditionBranch[];
   /** Request URL for `http` nodes. Supports template substitution. */
   url?: string;
   /** HTTP method for `http` nodes. Default `GET`. */
   method?: HttpMethod;
-  /** Extra request headers for `http` nodes. Values support template substitution. */
+  /** Extra request headers for `http`/`graphql` nodes. Values support template substitution. */
   headers?: Record<string, string>;
   /** Request body for `http` nodes (sent for non-GET/HEAD). Supports substitution. */
   body?: string;
+  /** GraphQL query/mutation document for `graphql` nodes. Supports substitution. */
+  query?: string;
   /**
-   * Bearer token for `http` nodes. Stored encrypted at rest (prefixed
+   * GraphQL variables for `graphql` nodes, as a JSON object string. Supports
+   * template substitution before being parsed.
+   */
+  variables?: string;
+  /**
+   * Bearer token for `http`/`graphql` nodes. Stored encrypted at rest (prefixed
    * `aes256:`) when a server encryption salt is configured, and decrypted only
    * in-process at execution time. Sent as `Authorization: Bearer <token>`.
    */
   token?: string;
   /** Ids of nodes that must complete before this node becomes ready. */
   dependsOn?: string[];
-  /**
-   * Condition evaluated against upstream node outputs; when false the node is
-   * skipped and its exclusive downstream branch is skipped too.
-   */
-  when?: string;
   /** Board swimlane the ticket moves to while this node is active. */
   swimlane?: string;
-  /** Extra attempts after the first failure before the run fails (default 0). */
+  /**
+   * Extra attempts after the first failure before the run fails (default 0).
+   * Only honored on `agent`, `http` and `graphql` nodes.
+   */
   retries?: number;
-  /** Delay between retry attempts, in milliseconds (default 0). */
+  /** Delay between retry attempts, in milliseconds (default 0). `agent`/`http`/`graphql` only. */
   retryDelayMs?: number;
-  /** Abort the node and treat it as failed after this many milliseconds. */
+  /** Abort the node after this many milliseconds. `agent`/`http`/`graphql` only. */
   timeoutMs?: number;
   /**
    * When true, a failure of this node (after exhausting retries) is advisory:
@@ -222,7 +239,7 @@ export interface WorkflowNodeConfig {
   continueOnError?: boolean;
   /**
    * When set, re-run this node's executor iteratively until a stop condition is
-   * met. Only valid on `agent` and `shell` nodes.
+   * met. Only valid on `agent` nodes.
    */
   loop?: LoopConfig;
   /**
@@ -231,18 +248,6 @@ export interface WorkflowNodeConfig {
    * cannot be combined with `loop`. The node's output is `{ items: [...] }`.
    */
   matrix?: MatrixConfig;
-  /**
-   * When set on an agent node, the executor instructs the model to return JSON
-   * conforming to the declared schema, then parses + validates it and stores it
-   * at `output.data` so downstream nodes can reference it via data-flow paths
-   * like `{{ nodes.<id>.data.<field> }}`.
-   */
-  structuredOutput?: StructuredOutputConfig;
-  /**
-   * When set on an agent node, top-K codebase search results are prepended to
-   * the prompt as context (see {@link RetrievalConfig}).
-   */
-  retrieval?: RetrievalConfig;
 }
 
 export interface BudgetConfig {

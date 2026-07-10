@@ -8,7 +8,7 @@ import { createContainer, type Container } from '../lib/container.js';
 import { createApiRouter } from '../lib/http/api.js';
 import { RunService } from '../lib/services/run.service.js';
 import { ChatService } from '../lib/services/chat.service.js';
-import { TriggerService } from '../lib/services/trigger.service.js';
+import { ScheduleService } from '../lib/services/schedule.service.js';
 
 /** A test app wired exactly like `main.ts` but backed by in-memory PGlite. */
 export interface TestApp {
@@ -16,7 +16,7 @@ export interface TestApp {
   container: Container;
   runs: RunService;
   chat: ChatService;
-  triggers: TriggerService;
+  schedules: ScheduleService;
   dispose: () => Promise<void>;
 }
 
@@ -100,16 +100,16 @@ export async function createTestApp(): Promise<TestApp> {
 
   const runs = new RunService(container);
   const chat = new ChatService(container);
-  const triggers = new TriggerService(container, runs);
+  const schedules = new ScheduleService(container);
 
   const app = express();
   app.use(express.json());
-  app.use('/api', createApiRouter(container, runs, chat, triggers));
+  app.use('/api', createApiRouter(container, runs, chat, schedules));
 
   const dispose = async (): Promise<void> => {
-    triggers.stopScheduler();
+    schedules.stopScheduler();
     await container.dbHandle.close();
   };
 
-  return { app, container, runs, chat, triggers, dispose };
+  return { app, container, runs, chat, schedules, dispose };
 }

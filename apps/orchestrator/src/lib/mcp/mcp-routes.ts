@@ -196,7 +196,7 @@ function buildTicketsServer(c: Container, defaultProjectId?: string): McpServer 
     },
     async ({ ticketId, swimlane, order }) => {
       const result = await board.moveTicket({ ticketId, swimlane, order });
-      c.linearSync.pushTicketState(ticketId).catch(() => undefined);
+      c.boardSync.pushTicketState(ticketId).catch(() => undefined);
       return text(result);
     },
   );

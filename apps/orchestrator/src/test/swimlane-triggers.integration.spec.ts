@@ -8,8 +8,6 @@ const CONFIG_WITH_SWIMLANE_TRIGGERS = `project:
 
 board:
   swimlanes: [backlog, triage, in_progress, done]
-  triggers:
-    triage: triage-flow
 
 workflows:
   triage-flow:
@@ -17,7 +15,7 @@ workflows:
     nodes:
       - id: assess
         type: approval
-        column: triage
+        swimlane: triage
 
 workflow:
   name: default
@@ -26,7 +24,7 @@ workflow:
       type: agent
       provider: codex
       model: gpt-5-codex
-      column: in_progress
+      swimlane: in_progress
 `;
 
 describe('swimlane triggers (integration)', () => {

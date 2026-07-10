@@ -48,7 +48,8 @@ function makeDeps(overrides: Partial<ScmProvider> = {}): {
   const createRelease = vi.fn(async () => release);
   const scm = { createTag, createRelease, ...overrides } as unknown as ScmProvider;
   const tickets = {} as TicketRepository;
-  return { deps: { scm, tickets }, createTag, createRelease };
+  const agentText = { generate: async () => 'generated' };
+  return { deps: { scm, tickets, agentText }, createTag, createRelease };
 }
 
 describe('tagRelease', () => {
@@ -65,7 +66,7 @@ describe('tagRelease', () => {
   it('fails when the provider does not support tagging', async () => {
     const { ctx } = makeCtx({ tag: 'v1.0.0' });
     const scm = {} as unknown as ScmProvider;
-    const outcome = await tagRelease(ctx, { scm, tickets: {} as TicketRepository });
+    const outcome = await tagRelease(ctx, { scm, tickets: {} as TicketRepository, agentText: { generate: async () => 'generated' } });
 
     expect(outcome.status).toBe('failed');
     expect(outcome).toMatchObject({ error: 'scm provider does not support tagging' });
@@ -154,7 +155,7 @@ describe('tagRelease', () => {
     });
     const scm = { createTag } as unknown as ScmProvider;
 
-    const outcome = await tagRelease(ctx, { scm, tickets: {} as TicketRepository });
+    const outcome = await tagRelease(ctx, { scm, tickets: {} as TicketRepository, agentText: { generate: async () => 'generated' } });
 
     expect(outcome.status).toBe('failed');
     expect((outcome as { error: string }).error).toContain('git boom');

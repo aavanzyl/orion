@@ -17,14 +17,18 @@ import {
 } from '@/components/ui/table';
 import { api } from '@/lib/api';
 import { cn, copyToClipboard } from '@/lib/utils';
-import { NODE_TYPES } from '@/features/workflow-builder/builder-model';
-import { NODE_VISUALS } from '@/features/workflow-builder/workflow-node';
+import { NODE_TYPES } from '@/features/config-management/shared/node-model';
+import { NODE_VISUALS } from '@/features/config-management/builder/workflow-node';
 
 const NODE_TYPE_BLURB: Record<string, string> = {
   agent: 'an AI turn',
   shell: 'a deterministic script',
   approval: 'a human gate',
   scm: 'source-control actions like opening a PR',
+  message: 'a notification or comment',
+  condition: 'an expression gate',
+  http: 'an HTTP request',
+  graphql: 'a GraphQL operation',
 };
 
 export function WorkflowsPage() {
@@ -78,9 +82,11 @@ export function WorkflowsPage() {
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
           A workflow is a deterministic DAG of nodes the engine schedules for each ticket. Node
           types are <strong>agent</strong> (an AI turn), <strong>shell</strong> (a deterministic
-          script), <strong>approval</strong> (a human gate), and <strong>scm</strong> (source-control
-          actions like opening a PR). These are ready-made templates you can apply to a project&apos;s{' '}
-          <code>.orion/config.yaml</code>.
+          script), <strong>approval</strong> (a human gate), <strong>scm</strong> (source-control
+          actions like opening a PR), <strong>message</strong> (a notification or comment),{' '}
+          <strong>condition</strong> (an expression gate), <strong>http</strong> (an HTTP
+          request), and <strong>graphql</strong> (a GraphQL operation). These are ready-made
+          templates you can apply to a project&apos;s <code>.orion/config.yaml</code>.
         </p>
         <div className="mt-3 flex flex-wrap gap-3">
           {NODE_TYPES.map((type) => {

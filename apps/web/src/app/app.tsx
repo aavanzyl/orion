@@ -5,11 +5,11 @@ import { AppLayout } from '@/features/layout/app-layout';
 import { BoardPage } from '@/features/board/board-page';
 import { ChatPage } from '@/features/chat/chat-page';
 import { ProjectsPage } from '@/features/projects/projects-page';
-import { ConfigEditorPage } from '@/features/projects/config-editor-page';
+import { ConfigEditorPage } from '@/features/config-management/config/config-editor-page';
 import { WorkflowsPage } from '@/features/workflows/workflows-page';
-import { WorkflowBuilderPage } from '@/features/workflow-builder/workflow-builder-page';
-import { WorkflowTemplateView } from '@/features/workflow-builder/workflow-template-view';
-import { TriggersPage } from '@/features/triggers/triggers-page';
+import { WorkflowBuilderPage } from '@/features/config-management/builder/workflow-builder-page';
+import { WorkflowTemplateView } from '@/features/config-management/builder/workflow-template-view';
+import { SchedulesPage } from '@/features/schedules/schedules-page';
 import { SettingsPage } from '@/features/settings/settings-page';
 import { DashboardPage } from '@/features/dashboard/dashboard-page';
 import { AnalyticsPage } from '@/features/analytics/analytics-page';
@@ -35,7 +35,7 @@ export function App() {
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/workflows/:name" element={<WorkflowTemplateView />} />
           <Route path="/issues" element={<IssuesPage />} />
-          <Route path="/schedule" element={<TriggersPage />} />
+          <Route path="/schedule" element={<SchedulesPage />} />
           <Route path="/codebase" element={<CodebasePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/mcp" element={<McpPage />} />

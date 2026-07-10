@@ -29,7 +29,48 @@ export interface McpCatalogEntry {
   oauthGuide?: string;
 }
 
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3333/api';
+
+/** Origin of the Orion orchestrator, derived from the configured API URL. */
+function orionOrigin(): string {
+  try {
+    return new URL(API_URL).origin;
+  } catch {
+    return API_URL.replace(/\/api\/?$/, '');
+  }
+}
+
 export const MCP_CATALOG: McpCatalogEntry[] = [
+  {
+    key: 'orion-codebase',
+    title: 'Orion Codebase',
+    description: "Semantic search over this project's indexed codebase (RAG).",
+    category: 'Orion',
+    tools: ['list_projects', 'search_code', 'index_status'],
+    config: { url: `${orionOrigin()}/mcp/codebase` },
+    authType: 'none',
+    setupNote:
+      'Built-in Orion server. The running agent is automatically bound to its own project.',
+  },
+  {
+    key: 'orion-tickets',
+    title: 'Orion Tickets',
+    description: 'Read and manage the Orion board: tickets, swimlanes and labels.',
+    category: 'Orion',
+    tools: [
+      'list_projects',
+      'list_tickets',
+      'get_ticket',
+      'create_ticket',
+      'update_ticket',
+      'move_ticket',
+      'list_labels',
+    ],
+    config: { url: `${orionOrigin()}/mcp/tickets` },
+    authType: 'none',
+    setupNote:
+      'Built-in Orion server. The running agent is automatically bound to its own project.',
+  },
   {
     key: 'context7',
     title: 'Context7',
@@ -258,24 +299,16 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
       '5. Share the target pages/databases with your integration via the "Connections" menu.',
   },
   {
-    key: 'stripe',
-    title: 'Stripe',
-    description: 'Manage Stripe payments, customers, subscriptions, and invoices.',
-    category: 'Data',
-    tools: ['list_customers', 'get_customer', 'create_invoice', 'list_charges'],
+    key: 'aws-docs',
+    title: 'AWS Docs',
+    description: 'Search and read the latest AWS documentation and API references.',
+    category: 'Code & Docs',
+    tools: ['read_documentation', 'search_documentation', 'recommend'],
     config: {
-      command: 'npx',
-      args: ['-y', '@anthropic/mcp-server-stripe'],
-      env: { STRIPE_SECRET_KEY: '${STRIPE_SECRET_KEY}' },
+      command: 'uvx',
+      args: ['awslabs.aws-documentation-mcp-server@latest'],
     },
-    authType: 'api_key',
-    authUrl: 'https://dashboard.stripe.com/apikeys',
-    oauthGuide:
-      'Get a Stripe secret key:\n' +
-      '1. Go to Stripe Dashboard → Developers → API keys.\n' +
-      '2. Copy the "Secret key" (starts with sk_live_ or sk_test_).\n' +
-      '3. Set it as the STRIPE_SECRET_KEY environment variable.\n' +
-      '4. Use a test key for development to avoid real charges.',
+    authType: 'none',
   },
 ];
 

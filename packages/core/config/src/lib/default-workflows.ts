@@ -643,6 +643,154 @@ const SMART_PR_REVIEW: WorkflowTemplate = {
   },
 };
 
+const CONTEXT_AWARE_FIX: WorkflowTemplate = {
+  name: 'context-aware-fix',
+  title: 'Context-aware fix (codebase search + skills → agent-drafted PR)',
+  description:
+    'Investigate with the built-in codebase search MCP so the agent can pull the most relevant files into context, implement guided by the test-driven-change and conventional-commits skills, verify, gate on approval, then open a pull request whose title and body the agent drafts from the actual diff.',
+  tags: ['bugfix', 'feature', 'rag', 'skills'],
+  suggestedSwimlanes: ['backlog', 'investigating', 'in_progress', 'review', 'done'],
+  workflow: {
+    name: 'context-aware-fix',
+    nodes: [
+      {
+        id: 'investigate',
+        type: 'agent',
+        provider: DEFAULT_PROVIDER,
+        model: DEFAULT_MODEL,
+        swimlane: 'investigating',
+      },
+      {
+        id: 'implement',
+        type: 'agent',
+        provider: DEFAULT_PROVIDER,
+        model: DEFAULT_MODEL,
+        dependsOn: ['investigate'],
+        swimlane: 'in_progress',
+        skills: ['test-driven-change', 'conventional-commits'],
+      },
+      {
+        id: 'verify',
+        type: 'shell',
+        script: 'npm test',
+        dependsOn: ['implement'],
+        swimlane: 'in_progress',
+      },
+      { id: 'approval', type: 'approval', dependsOn: ['verify'], swimlane: 'review' },
+      {
+        id: 'open_pr',
+        type: 'scm',
+        action: 'open_pull_request',
+        provider: DEFAULT_PROVIDER,
+        model: DEFAULT_MODEL,
+        agentGenerated: true,
+        dependsOn: ['approval'],
+        swimlane: 'done',
+      },
+    ],
+  },
+};
+
+const FAN_OUT_MIGRATION: WorkflowTemplate = {
+  name: 'fan-out-migration',
+  title: 'Fan-out migration (matrix across packages)',
+  description:
+    'Plan a repetitive change once, then fan an implementer out across several packages in parallel with a bounded matrix, run each package\'s tests in parallel too, gate on approval, and open a PR. Edit the matrix `items` to list your own packages.',
+  tags: ['refactor', 'maintenance', 'parallel', 'matrix'],
+  suggestedSwimlanes: ['backlog', 'planning', 'in_progress', 'review', 'done'],
+  workflow: {
+    name: 'fan-out-migration',
+    nodes: [
+      { id: 'plan', type: 'agent', provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL, swimlane: 'planning' },
+      {
+        id: 'migrate',
+        type: 'agent',
+        provider: DEFAULT_PROVIDER,
+        model: DEFAULT_MODEL,
+        dependsOn: ['plan'],
+        swimlane: 'in_progress',
+        matrix: { items: ['packages/core', 'packages/shared', 'apps/web'], as: 'package', maxParallel: 2 },
+        instructions:
+          'Apply the migration planned above to the package "$PACKAGE" only — do not touch any other package. Follow the plan exactly, keep the change tightly scoped, and update that package\'s tests to match.\n\nTicket details:\n$ARGUMENTS',
+      },
+      {
+        id: 'test',
+        type: 'shell',
+        script: 'npx nx run $PACKAGE:test',
+        dependsOn: ['migrate'],
+        swimlane: 'in_progress',
+        matrix: { items: ['packages/core', 'packages/shared', 'apps/web'], as: 'package', maxParallel: 2 },
+      },
+      { id: 'approval', type: 'approval', dependsOn: ['test'], swimlane: 'review' },
+      {
+        id: 'open_pr',
+        type: 'scm',
+        action: 'open_pull_request',
+        dependsOn: ['approval'],
+        swimlane: 'done',
+      },
+    ],
+  },
+};
+
+const SHIP_AND_ANNOUNCE: WorkflowTemplate = {
+  name: 'ship-and-announce',
+  title: 'Ship and announce (agent-drafted PR → notify + ticket comment)',
+  description:
+    'Implement the change, verify it, gate on approval, and open a pull request the agent drafts from the diff — then announce the outcome to the team via the configured notification providers and post a summary comment back on the ticket.',
+  tags: ['feature', 'notifications'],
+  suggestedSwimlanes: ['backlog', 'in_progress', 'review', 'done'],
+  workflow: {
+    name: 'ship-and-announce',
+    nodes: [
+      { id: 'implement', type: 'agent', provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL, swimlane: 'in_progress' },
+      {
+        id: 'verify',
+        type: 'shell',
+        script: 'npm test',
+        dependsOn: ['implement'],
+        swimlane: 'in_progress',
+      },
+      { id: 'approval', type: 'approval', dependsOn: ['verify'], swimlane: 'review' },
+      {
+        id: 'open_pr',
+        type: 'scm',
+        action: 'open_pull_request',
+        provider: DEFAULT_PROVIDER,
+        model: DEFAULT_MODEL,
+        agentGenerated: true,
+        dependsOn: ['approval'],
+        swimlane: 'done',
+      },
+      {
+        id: 'announce',
+        type: 'message',
+        messageTarget: 'notify',
+        level: 'info',
+        provider: DEFAULT_PROVIDER,
+        model: DEFAULT_MODEL,
+        agentGenerated: true,
+        message:
+          'Summarize the shipped change for the team channel in one or two sentences, and mention that a pull request has been opened for review.',
+        dependsOn: ['open_pr'],
+        swimlane: 'done',
+      },
+      {
+        id: 'comment',
+        type: 'message',
+        messageTarget: 'comment',
+        provider: DEFAULT_PROVIDER,
+        model: DEFAULT_MODEL,
+        agentGenerated: true,
+        message:
+          'Post a short comment on the ticket summarizing what changed and noting that a pull request is open and awaiting review.',
+        dependsOn: ['open_pr'],
+        swimlane: 'done',
+      },
+    ],
+  },
+};
+
 export const DEFAULT_WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   DEFAULT,
   INVESTIGATE_ONLY,
@@ -658,6 +806,9 @@ export const DEFAULT_WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   MULTI_AGENT_REVIEW,
   REVIEW_AND_FIX,
   SMART_PR_REVIEW,
+  CONTEXT_AWARE_FIX,
+  FAN_OUT_MIGRATION,
+  SHIP_AND_ANNOUNCE,
 ];
 
 export const DEFAULT_WORKFLOW_TEMPLATES_BY_NAME: ReadonlyMap<string, WorkflowTemplate> =

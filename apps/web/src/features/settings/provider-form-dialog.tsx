@@ -151,7 +151,7 @@ export function ProviderFormDialog({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-2">
               <Label htmlFor="provider-key">Provider</Label>
-              <Select value={editing ? undefined : (key || undefined)} onValueChange={setKey} disabled={editing}>
+              <Select value={key || undefined} onValueChange={setKey} disabled={editing}>
                 <SelectTrigger id="provider-key" className="w-full">
                   <SelectValue placeholder="Select a provider…" />
                 </SelectTrigger>

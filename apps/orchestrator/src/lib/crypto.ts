@@ -39,3 +39,33 @@ export function maskApiKey(value: string): string {
   if (value.length <= 8) return '*'.repeat(value.length);
   return value.slice(0, 4) + '...' + value.slice(-4);
 }
+
+/**
+ * Thin wrapper around {@link encrypt}/{@link decrypt} bound to a single salt.
+ * When no salt is configured it is a no-op (values are stored in plaintext),
+ * matching the provider-key behavior. `decrypt` tolerates legacy plaintext
+ * values because {@link decrypt} passes through anything lacking the cipher
+ * prefix.
+ */
+export class SecretCipher {
+  constructor(private readonly salt?: string) {}
+
+  /** True when encryption is active (a salt is configured). */
+  get enabled(): boolean {
+    return Boolean(this.salt);
+  }
+
+  encrypt(plaintext: string): string {
+    if (!plaintext) return '';
+    return this.salt ? encrypt(plaintext, this.salt) : plaintext;
+  }
+
+  decrypt(value: string): string {
+    if (!value) return '';
+    return this.salt ? decrypt(value, this.salt) : value;
+  }
+
+  mask(value: string): string {
+    return maskApiKey(value);
+  }
+}

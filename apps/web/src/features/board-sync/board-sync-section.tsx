@@ -109,7 +109,7 @@ export function BoardSyncSection() {
   };
 
   const disconnect = async (project: Project) => {
-    if (!window.confirm(`Disconnect Linear sync for "${project.name}"?`)) return;
+    if (!window.confirm(`Disconnect board sync for "${project.name}"?`)) return;
     try {
       await api.deleteBoardConnection(project.id);
       toast.success('Disconnected');
@@ -131,8 +131,8 @@ export function BoardSyncSection() {
               Board sync
             </CardTitle>
             <CardDescription>
-              Continuously sync Linear teams with Orion boards. Column changes push up
-              immediately; Linear updates pull back on a ~10 minute heartbeat.
+              Continuously sync Linear, Jira, or Trello boards with Orion. Swimlane changes push
+              upstream and remote updates pull back on a configurable cadence.
             </CardDescription>
           </div>
           <Button size="sm" onClick={openAdd} disabled={availableProjects.length === 0}>
@@ -151,7 +151,7 @@ export function BoardSyncSection() {
           <div className="rounded-md border border-dashed p-6 text-center">
             <p className="text-sm text-muted-foreground">
               No board syncs yet. Click <strong>Add sync</strong> to connect a project to a
-              Linear team.
+              Linear, Jira, or Trello board.
             </p>
           </div>
         ) : (
@@ -159,7 +159,8 @@ export function BoardSyncSection() {
             <TableHeader>
               <TableRow>
                 <TableHead>Project</TableHead>
-                <TableHead>Team</TableHead>
+                <TableHead>Provider</TableHead>
+                <TableHead>Board</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Last synced</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -169,6 +170,9 @@ export function BoardSyncSection() {
               {rows.map((row) => (
                 <TableRow key={row.project.id}>
                   <TableCell className="font-medium">{row.project.name}</TableCell>
+                  <TableCell className="capitalize">
+                    {row.connection.provider ?? 'linear'}
+                  </TableCell>
                   <TableCell>
                     {row.connection.teamId ? (
                       <Badge variant="secondary" className="font-mono">

@@ -19,7 +19,6 @@ export type RunEventType =
   | 'agent.message'
   | 'agent.item'
   | 'agent.usage'
-  | 'agent.structured'
   | 'ticket.moved'
   | 'ticket.updated'
   | 'log';
