@@ -251,6 +251,8 @@ export const api = {
     }),
   getConversation: (conversationId: string) =>
     request<ConversationDetail>(`/conversations/${conversationId}`),
+  deleteConversation: (conversationId: string) =>
+    request<{ deleted: boolean }>(`/conversations/${conversationId}`, { method: 'DELETE' }),
   sendChatMessage: (conversationId: string, content: string) =>
     request<ChatMessage>(`/conversations/${conversationId}/messages`, {
       method: 'POST',

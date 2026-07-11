@@ -21,3 +21,19 @@ All tests are network-free and deterministic. Run them with Nx.
   driven with `supertest` — no external Postgres, Codex, GitHub, or Linear access.
 - The E2E suite (`apps/web-e2e`) previews the production web bundle (`npx nx run @orion/web:preview`) and
   stubs every `/api/**` call with `page.route`, so no orchestrator needs to be running.
+
+## Docker
+
+- Deploy (rebuild on changes): `docker compose up -d --build`
+- Deploy from scratch (invalidate cache): `docker compose build --no-cache && docker compose up -d`
+- View running containers: `docker compose ps`
+- View logs: `docker compose logs -f <service>` (e.g. `orchestrator`)
+- Stop: `docker compose down`
+
+### Ports (all exposed to localhost)
+
+| Service      | Container Port | Host Port |
+|-------------|---------------|-----------|
+| Web         | 80            | 8401      |
+| Orchestrator| 3333          | 8400      |
+| Postgres    | 5432          | 8402      |

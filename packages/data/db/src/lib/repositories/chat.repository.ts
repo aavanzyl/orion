@@ -24,13 +24,23 @@ export class ChatRepository {
     return toConversation(row);
   }
 
-  async listConversations(projectId: string): Promise<Conversation[]> {
+  async listConversations(projectId: string, limit = 20): Promise<Conversation[]> {
     const rows = await this.db
       .select()
       .from(conversations)
       .where(eq(conversations.projectId, projectId))
-      .orderBy(desc(conversations.updatedAt));
+      .orderBy(desc(conversations.updatedAt))
+      .limit(limit);
     return rows.map(toConversation);
+  }
+
+  /** Delete a conversation and (via cascade) its messages. */
+  async deleteConversation(id: ConversationId): Promise<boolean> {
+    const rows = await this.db
+      .delete(conversations)
+      .where(eq(conversations.id, id))
+      .returning({ id: conversations.id });
+    return rows.length > 0;
   }
 
   async getConversation(id: ConversationId): Promise<Conversation | null> {

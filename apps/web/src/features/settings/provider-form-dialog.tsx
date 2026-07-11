@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { PlusIcon, XIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Provider } from '@orion/models';
+import { defaultHarnessForProvider } from '@orion/models';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -23,7 +24,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 
-const HARNESS_OPTIONS = ['codex', 'claude', 'opencode'];
+const HARNESS_OPTIONS = ['codex', 'openai', 'claude', 'opencode'];
 
 interface KnownProvider {
   label: string;
@@ -32,8 +33,8 @@ interface KnownProvider {
 
 const KNOWN_PROVIDERS: Record<string, KnownProvider> = {
   openai: { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1' },
-  anthropic: { label: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1' },
-  deepseek: { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1' },
+  anthropic: { label: 'Anthropic', baseUrl: '' },
+  deepseek: { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/anthropic' },
   google: { label: 'Google', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai' },
   mistral: { label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1' },
   groq: { label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1' },
@@ -89,6 +90,7 @@ export function ProviderFormDialog({
     if (!open || editing) return;
     const info = KNOWN_PROVIDERS[key];
     if (info) {
+      setHarness(defaultHarnessForProvider(key));
       setLabel(info.label);
       setBaseUrl(info.baseUrl);
     }

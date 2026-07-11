@@ -13,6 +13,7 @@ DAG of steps you define, tracked live on a Kanban board.
 <p>
   <img src="https://img.shields.io/badge/license-MIT-6366f1.svg" alt="License: MIT" />
   <img src="https://img.shields.io/badge/TypeScript-5.9-3178c6.svg?logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/React-19-61dafb.svg?logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/Nx-monorepo-a855f7.svg" alt="Nx" />
   <img src="https://img.shields.io/badge/PostgreSQL-Drizzle-38bdf8.svg?logo=postgresql&logoColor=white" alt="Postgres" />
   <img src="https://img.shields.io/badge/Docker-compose%20up-2496ed.svg?logo=docker&logoColor=white" alt="Docker" />
@@ -30,13 +31,29 @@ When you ask an AI agent to "fix this bug," what actually happens depends on the
 
 ## Why Orion?
 
-- **Deterministic by design** — The engine is a pure DAG scheduler. It handles ordering, dependencies, and approvals, and it *never* talks to a model directly. Same workflow, same sequence, every run.
-- **Human-in-the-loop, first-class** — `approval` is a real node type. The run pauses, the ticket lands in your review column, and nothing proceeds until you click approve.
+- **Deterministic by design** — The engine is a pure DAG scheduler. It handles ordering, dependencies, parallelism, and approvals, and it *never* talks to a model directly. Same workflow, same sequence, every run.
+- **Human-in-the-loop, first-class** — `approval` is a real node type. The run pauses, the ticket lands in your review swimlane, and nothing proceeds until you click approve.
 - **Isolated by default** — Every run executes in its own disposable git worktree. Run many tickets in parallel with zero conflicts; your working checkout is never touched.
 - **Watch it think** — Every node transition, agent message, tool call, and log line is event-sourced and streamed live to the board over SSE. Open a ticket and watch the work happen.
-- **Yours, in your repo** — Board columns, agents, and the whole workflow live in a single `.orion/config.yaml`, version-controlled next to your code. Your whole team runs the same process.
+- **Yours, in your repo** — Board swimlanes, workflows, commands, and skills live in a single `.orion/config.yaml`, version-controlled next to your code. Your whole team runs the same process.
 - **Provider-agnostic & pluggable** — Every integration — AI harness, source control, board, chat — sits behind a category adapter. Point the Codex harness at OpenAI, DeepSeek, or any OpenAI-compatible endpoint. Swap parts without touching the engine.
+- **Codebase-aware agents** — Orion indexes your repository and exposes semantic search to agents over the Model Context Protocol (MCP), so they ground their reasoning in your actual code.
 - **Multi-repo native** — A project can be one repo *or* a workspace folder of many. Agents run at the workspace level and open one pull request per changed repository.
+
+## Documentation
+
+Detailed guides live in [`docs/`](./docs):
+
+| Guide | What's inside |
+| --- | --- |
+| [Getting Started](./docs/getting-started.md) | Docker, local dev, embedded PGlite, and every environment variable |
+| [Architecture](./docs/architecture.md) | Components, the adapter model, and how a run flows end to end |
+| [Configuration](./docs/configuration.md) | The full `.orion/config.yaml` schema and command templates |
+| [Workflows](./docs/workflows.md) | Every node type, retries, parallel fan-out, matrix, loops, conditions, sub-workflows |
+| [Skills](./docs/skills.md) | The skill catalog, materialization, and installing from GitHub |
+| [Adapters](./docs/adapters.md) | Harness, SCM, board, and communication providers |
+| [Integrations](./docs/integrations.md) | Codebase RAG, MCP servers, chat, schedules, and board sync |
+| [API Reference](./docs/api.md) | REST and SSE endpoints |
 
 ## What It Looks Like
 
@@ -49,7 +66,7 @@ project:
   defaultBranch: main
 
 board:
-  columns: [backlog, investigating, in_progress, review, done]
+  swimlanes: [backlog, investigating, in_progress, review, done]
 
 workflow:
   name: default
@@ -61,38 +78,39 @@ workflow:
       # baseUrl: https://api.deepseek.com   # any OpenAI-compatible endpoint
       instructions: commands/investigate.md
       skills: [conventional-commits, pr-description]   # from the skill catalog
-      command: commands/investigate.md
-      column: investigating
+      swimlane: investigating
 
     - id: implement
       type: agent
       provider: codex
       model: gpt-5-codex
-      command: commands/implement.md
+      instructions: commands/implement.md
       dependsOn: [investigate]
-      column: in_progress
+      swimlane: in_progress
 
     - id: verify
       type: shell                   # deterministic — no AI
       script: "npm test"
       dependsOn: [implement]
-      column: in_progress
+      swimlane: in_progress
 
     - id: approval
       type: approval                # pauses for a human
       dependsOn: [verify]
-      column: review
+      swimlane: review
 
     - id: open_pr
       type: scm                     # commits, pushes, opens the PR
       action: open_pull_request
       dependsOn: [approval]
-      column: done
+      swimlane: done
 ```
 
 <div align="center">
 <img src="assets/workflow.png" alt="The Orion workflow: investigate → implement → verify → approval → open PR" width="880" />
 </div>
+
+Prefer clicking to typing? Orion ships a **visual workflow builder** (React Flow) that round-trips to the same YAML, and a library of built-in workflow templates to start from.
 
 Then just work the board. Drop a ticket, assign an agent, and hit **Start Run**:
 
@@ -103,7 +121,7 @@ Ticket #42  ·  "Fix flaky checkout total on empty cart"
   → investigate  · agent reading codebase, finding root cause …
   → implement    · editing cart.ts, adding a regression test …
   → verify       · npm test → 128 passing
-  → approval     · ⏸ waiting for you in the Review column
+  → approval     · ⏸ waiting for you in the Review swimlane
         (you click Approve)
   → open_pr      · pushed & opened https://github.com/you/shop/pull/91
 ```
@@ -114,17 +132,23 @@ Every arrow above is a live event on the board. Nothing is a black box.
 
 | Concept | What it is |
 | --- | --- |
-| **Project** | A repository *or* a folder of repositories. Its board, agents, and workflow come from `.orion/config.yaml` at the source root. Sources can be `remote` (a git URL Orion clones), `local` (an existing checkout), or `workspace` (a parent folder of many repos sharing one board). |
-| **Ticket** | A unit of work on the board. An agent picks it up and runs the workflow. |
-| **Workflow** | A DAG of nodes — `agent`, `shell`, `approval`, `scm`. The engine schedules each node as its dependencies complete and pauses on approvals. |
+| **Project** | A repository *or* a folder of repositories. Its board, workflows, commands, and skills come from `.orion/config.yaml` at the source root. Sources can be `remote` (a git URL Orion clones), `local` (an existing checkout), or `workspace` (a parent folder of many repos sharing one board). |
+| **Ticket** | A unit of work on the board. An agent picks it up and runs the workflow. Tickets can be created in Orion or synced from Linear, Jira, or Trello. |
+| **Workflow** | A DAG of nodes. The engine schedules each node as its dependencies complete, runs independent branches in parallel, and pauses on approvals. |
 | **Run** | One execution of a workflow for a ticket, isolated in its own git worktree. Every step emits event-sourced events, streamed live to the board. |
 
-**Four node types, one clean contract:**
+**Nine node types, one clean contract:**
 
-- 🧠 `agent` — an AI turn, driven by a rendered command template. Streams messages and tool calls.
+- 🧠 `agent` — an AI turn driven by a rendered instruction template. Streams messages and tool calls. Supports loops and matrix fan-out.
 - ⚙️ `shell` — a deterministic script (`npm test`, a linter, a build). No AI.
-- ✋ `approval` — a human gate. The run parks in your review column until you approve.
-- 🔀 `scm` — source-control actions like `open_pull_request` (one PR per changed repo).
+- ✋ `approval` — a human gate. The run parks in your review swimlane until you approve.
+- 🔀 `scm` — source-control actions: `open_pull_request`, `checkout_branch`, `merge`, `review`, `tag_release` (one PR per changed repo).
+- 🧭 `condition` — a boolean gate / multi-branch router over upstream outputs; skips branches that don't apply.
+- 💬 `message` — post a notification or add a comment to the ticket.
+- 🌐 `http` / `graphql` — call an external API as a first-class step.
+- 📦 `workflow` — reference a reusable sub-workflow, inlined into the graph.
+
+See the [Workflows guide](./docs/workflows.md) for the full contract, plus retries, timeouts, `continueOnError`, matrix fan-out, and loops.
 
 ## Architecture
 
@@ -132,20 +156,20 @@ Everything integratable sits behind a category adapter interface, so new tools a
 
 | Category | Interface (`*-core`) | In scope | On the roadmap |
 | --- | --- | --- | --- |
-| `harness` | `@orion/harness-core` | **codex** | claude, opencode |
+| `harness` | `@orion/harness-core` | **codex** (OpenAI / DeepSeek / any OpenAI-compatible) | claude, opencode |
 | `scm` | `@orion/scm-core` | **github** | bitbucket, gitlab |
-| `board` | `@orion/board-core` | **native, linear, jira, trello** | asana, github projects |
-| `communication` | `@orion/communication-core` | **webhook** (Slack/Discord-compatible) | slack, discord, telegram |
+| `board` | `@orion/board-core` | **native** board + sync from **linear, jira, trello** | asana, github projects |
+| `communication` | `@orion/communication-core` | **webhook, slack** (Slack/Discord-compatible) | discord, telegram |
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│   Web (React + shadcn/ui Kanban)   ·   REST + SSE API          │
+│   Web (React 19 + shadcn/ui Kanban + React Flow builder)      │
 └───────────────────────────────┬──────────────────────────────┘
-                                │
+                                │  REST + SSE
                                 ▼
 ┌──────────────────────────────────────────────────────────────┐
 │                   Orchestrator (Express)                       │
-│     worktree isolation · event bus · node executors           │
+│   worktree isolation · event bus · node executors · RAG · MCP │
 └───────────────────────────────┬──────────────────────────────┘
                                 │
                                 ▼
@@ -158,33 +182,32 @@ Everything integratable sits behind a category adapter interface, so new tools a
         ▼               ▼               ▼                ▼
   ┌──────────┐   ┌──────────┐    ┌──────────┐     ┌──────────┐
   │ harness  │   │   scm    │    │  board   │     │  comms   │
-  │ (codex)  │   │ (github) │    │ (native) │     │ (future) │
+  │ (codex)  │   │ (github) │    │ (native) │     │(webhook) │
   └──────────┘   └──────────┘    └──────────┘     └──────────┘
                                 │
                                 ▼
-              PostgreSQL (Drizzle) — event-sourced runs
+              PostgreSQL / PGlite (Drizzle) — event-sourced runs
 ```
 
 ```
 apps/
-  orchestrator   Express: REST + SSE, hosts the engine and adapters
-  web            React + shadcn/ui Kanban board (Vite)
+  orchestrator   Express: REST + SSE, hosts the engine, adapters, RAG and MCP
+  web            React 19 + shadcn/ui Kanban board & visual workflow builder (Vite)
 packages/
   shared/models          domain types
   shared/adapter-kit     shared provider registry
-  core/config            YAML + zod config loader, command templates, DAG validation
+  core/config            YAML + zod config loader, command templates, skills, DAG validation
   core/workflow-engine   deterministic DAG scheduler (no AI, no DB)
-  data/db                Drizzle schema, client, repositories, migrations
+  core/rag               codebase indexing + embedding pipeline primitives
+  data/db                Drizzle schema, client, repositories, migrations (Postgres + PGlite)
   adapters/<category>/*  category interfaces (core) and implementations
 ```
 
-The Codex harness uses `@openai/codex-sdk` and can target OpenAI, DeepSeek, or any OpenAI-compatible endpoint via `baseUrl`.
+For the full picture — worktree isolation, the event bus, node executors, and how a run flows end to end — see the [Architecture guide](./docs/architecture.md).
 
 ## Getting Started
 
-### Running with Docker (recommended)
-
-`docker compose up` builds everything, applies database migrations, and serves the whole stack. Services bind to `0.0.0.0`, so other devices on your network can reach the board. Apps use the `8400–8410` port range.
+The fastest path is Docker:
 
 ```bash
 cp .env.example .env   # optional: set CODEX_API_KEY / CODEX_BASE_URL / GITHUB_TOKEN
@@ -197,150 +220,13 @@ docker compose up -d --build
 | Orchestrator | `http://<host>:8400` | REST + SSE API |
 | Postgres | `<host>:8402` | user/pass/db: `orion` |
 
-The `migrate` service runs once on startup and exits; the orchestrator waits for it to finish. Because the web container proxies `/api` to the orchestrator, the board works from any device without rebuilds.
-
-To use `local`/`workspace` projects with Docker, the orchestrator bind-mounts a host directory at the **same absolute path** inside the container (defaults to your home directory). Narrow it with `ORION_PROJECTS_DIR`:
-
-```bash
-ORION_PROJECTS_DIR=/Users/you/Documents/Development
-```
-
-Isolated worktrees are created under the managed volume, so your local checkouts are never modified in place.
-
-```bash
-docker compose logs -f orchestrator   # follow logs
-docker compose down                    # stop (add -v to drop the database)
-```
-
-### Local development (without Docker)
-
-1. Install dependencies and start Postgres:
-
-   ```bash
-   npm install
-   docker compose up -d postgres
-   cp .env.example .env
-   npx nx run @orion/db:db:migrate
-   ```
-
-2. Run the orchestrator API and the board:
-
-   ```bash
-   npx nx serve @orion/orchestrator   # http://localhost:3333
-   npx nx dev @orion/web              # http://localhost:4200
-   ```
-
-### Embedded database (no Postgres)
-
-For a quick local try without Docker or a Postgres server, point `DATABASE_URL`
-at [PGlite](https://pglite.dev) — real Postgres compiled to WASM, running
-in-process:
-
-```bash
-DATABASE_URL=pglite://./pgdata npx nx serve @orion/orchestrator
-```
-
-The orchestrator creates the embedded database at that path (use `pglite://memory`
-for an ephemeral in-memory database) and auto-applies the same migrations on boot,
-so there are no manual setup steps. Because PGlite *is* Postgres, it reuses the
-existing schema, migrations and repositories unchanged. Postgres remains the
-default and is recommended for shared or production deployments.
+Prefer running without Docker, or want the zero-setup embedded PGlite database? See the [Getting Started guide](./docs/getting-started.md), which covers local development, the embedded database, and every environment variable.
 
 ## Configuring a Repository
 
-Add `.orion/config.yaml` (and any command templates under `.orion/commands/`) to the repository a project tracks. See [`examples/orion-config`](./examples/orion-config) for a complete example.
+Add `.orion/config.yaml` (and any command templates under `.orion/commands/`) to the repository a project tracks. See [`examples/orion-config`](./examples/orion-config) for a complete example, and the [Configuration guide](./docs/configuration.md) for the full schema.
 
-Command templates are markdown files with `$VARIABLE` substitution — the engine renders them fresh for every node:
-
-| Variable | Resolves to |
-| --- | --- |
-| `$ARGUMENTS` | The ticket title + description |
-| `$TICKET_TITLE` | The ticket title |
-| `$REPOSITORY` / `$REPOSITORIES` | The repo (or comma-separated repos for a workspace) |
-| `$BRANCH` / `$BASE_BRANCH` | The run branch and its base |
-| `$WORKFLOW_ID` | The workflow name |
-
-Config is validated with Zod on load — unique node IDs, valid agent and column references, no dangling dependencies, and **cycle detection** so a bad graph never runs.
-
-### Skills
-
-Skills are reusable, self-contained instruction bundles — a folder with a `SKILL.md` (plus optional references and scripts) following the Claude/opencode convention. An agent opts into skills by name, and Orion **materializes** the selected skills into the run's isolated worktree (under `.orion/skills/`, indexed in `AGENTS.md`) so the harness discovers them natively.
-
-```yaml
-workflow:
-  nodes:
-    - id: implement
-      type: agent
-      provider: codex
-      skills: [conventional-commits, test-driven-change]
-```
-
-The **skill catalog** for a project is the union of Orion's built-in defaults and any skills installed under `.orion/skills/`. Orion ships with `conventional-commits`, `test-driven-change`, and `pr-description` out of the box; a project skill of the same name overrides a built-in.
-
-Install skills from a GitHub repository (recorded in `.orion/skills-lock.json` for reproducible checkouts) and browse the catalog over the API:
-
-```bash
-# List the catalog (built-in + installed).
-GET  /api/projects/:id/skills
-
-# Install a skill from a GitHub repo (owner/repo + path to the skill folder).
-POST /api/projects/:id/skills   { "source": "owner/repo", "skillPath": "skills/my-skill", "ref": "main" }
-
-# Remove an installed skill.
-DELETE /api/projects/:id/skills/:name
-```
-
-A run fails fast with a clear error if an agent references a skill that is not in the catalog.
-
-### Resilient nodes
-
-`agent`, `http` and `graphql` nodes can opt into retries and a timeout. A failed node is retried up to `retries` times (with an optional `retryDelayMs` pause) before the run fails, and a node that exceeds `timeoutMs` is aborted and treated as a failure (subject to the same retry policy):
-
-```yaml
-- id: implement
-  type: agent
-  provider: codex
-  retries: 2          # up to 2 extra attempts after the first failure
-  retryDelayMs: 5000  # wait 5s between attempts
-  timeoutMs: 600000   # abort and fail if it runs longer than 10 minutes
-```
-
-Advisory steps can opt out of failing the run with `continueOnError`. The node is
-marked `skipped` if it fails (after exhausting any retries), the failure is
-recorded on the timeline, and dependents still proceed — perfect for
-non-blocking gates like an advisory linter:
-
-```yaml
-- id: lint
-  type: shell
-  script: "npm run lint"
-  continueOnError: true   # a failing lint won't block the PR
-```
-
-### Parallel fan-out
-
-The engine schedules the DAG, not a list. Every node whose dependencies are
-satisfied in the same pass runs **concurrently**, so independent branches (say
-`lint`, `typecheck` and `test`) execute in parallel and the run only advances
-once they all settle.
-
-### Retrying & crash recovery
-
-A failed or cancelled run can be retried from the board — it resumes from the
-last successful node, preserving completed work and re-running everything else in
-a fresh worktree (`POST /api/runs/:id/retry`). And because runs are
-event-sourced, a run left mid-flight by an orchestrator restart is automatically
-surfaced as failed on startup so you can retry it, instead of hanging forever.
-
-### Bounded concurrency
-
-`ORION_MAX_CONCURRENT_RUNS` (default `3`, `0` = unlimited) caps how many runs
-execute at once. Start as many tickets as you like — anything over the limit is
-`queued` and launched automatically as slots free up.
-
-### Notifications
-
-Set `ORION_NOTIFY_WEBHOOK_URL` to POST run lifecycle notifications — *approval needed*, *completed*, and *failed* — to a Slack- or Discord-compatible incoming webhook. The payload includes a ready-to-render `text`/`content` string plus the structured `title`, `body`, `level`, and `url` fields for custom consumers.
+Config is validated with Zod on load — unique node IDs, valid provider and swimlane references, no dangling dependencies, and **cycle detection** so a bad graph never runs.
 
 ## Common Tasks
 
@@ -349,12 +235,14 @@ npx nx run-many -t typecheck lint test   # verify the workspace
 npx nx run @orion/db:db:generate         # regenerate migrations after schema changes
 ```
 
+See [AGENTS.md](./AGENTS.md) for the full testing matrix (unit, orchestrator integration, and Playwright E2E).
+
 ## Roadmap
 
 - **Harnesses** — Claude, opencode alongside Codex
 - **Source control** — GitLab, Bitbucket
-- **Boards** — sync with Jira, Trello, Linear
-- **Communication** — Slack, Discord, Telegram notifications on approvals and completions
+- **Boards** — Asana, GitHub Projects alongside Linear, Jira, Trello sync
+- **Communication** — Discord, Telegram alongside webhook and Slack
 
 New providers are additive: implement a category interface, register it, done.
 

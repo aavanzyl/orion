@@ -62,6 +62,12 @@
     },
     {
       "path": "./packages/adapters/board/jira"
+    },
+    {
+      "path": "./packages/adapters/harness/openai"
+    },
+    {
+      "path": "./packages/adapters/harness/claude"
     }
   ]
 }

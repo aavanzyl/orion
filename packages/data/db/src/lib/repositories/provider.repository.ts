@@ -5,6 +5,7 @@ import type {
   ProviderId,
   UpdateProviderInput,
 } from '@orion/models';
+import { defaultHarnessForProvider } from '@orion/models';
 import type { Database } from '../client.js';
 import { providers } from '../schema.js';
 import { toProvider } from '../mappers.js';
@@ -28,7 +29,7 @@ export class ProviderRepository {
       .values({
         key: input.key,
         label: input.label ?? '',
-        harness: input.harness ?? null,
+        harness: input.harness ?? defaultHarnessForProvider(input.key),
         baseUrl: input.baseUrl ?? null,
         apiKey: input.apiKey ?? null,
         models: input.models ?? [],

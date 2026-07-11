@@ -1,18 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { listWorkflowTemplates, loadProjectConfig } from '@orion/config';
 import type {
+  AgentDefaults,
   ChatEvent,
   ChatMessage,
   ChatUsage,
   Conversation,
   ConversationDetail,
-  ProjectConfig,
-  Project,
+  McpServerMap,
   RouteIntent,
   WorkflowRouteResult,
 } from '@orion/models';
 import type { AgentProvider, HarnessUsage } from '@orion/harness-core';
 import type { Container } from '../container.js';
+import { decrypt } from '../crypto.js';
 import { WorkspaceService } from './workspace.service.js';
 
 /** The default chat agent properties used when a project configures none. */
@@ -40,6 +41,10 @@ export class ChatService {
 
   listConversations(projectId: string): Promise<Conversation[]> {
     return this.c.chat.listConversations(projectId);
+  }
+
+  deleteConversation(id: string): Promise<boolean> {
+    return this.c.chat.deleteConversation(id);
   }
 
   async getConversation(id: string): Promise<ConversationDetail | null> {
@@ -85,44 +90,25 @@ export class ChatService {
     const conversation = await this.c.chat.getConversation(conversationId);
     if (!conversation) return;
 
-    let provider = DEFAULT_CHAT_PROVIDER;
-    let model = DEFAULT_CHAT_MODEL;
-    let baseUrl: string | undefined;
-    let agentConfig: Record<string, unknown> | undefined;
-    let workingDirectory: string | undefined;
+    let agent: ResolvedChatAgent;
     try {
-      const project = await this.c.projects.get(conversation.projectId);
-      if (!project) throw new Error(`Project ${conversation.projectId} not found`);
-      const configRoot = await this.workspaces.resolveConfigRoot(project);
-      workingDirectory = configRoot;
-      const config = await loadProjectConfig(configRoot, project.configPath).catch(() => null);
-      if (config) {
-        const firstAgent = config.workflow.nodes.find((n) => n.type === 'agent');
-        if (firstAgent) {
-          provider = firstAgent.provider ?? DEFAULT_CHAT_PROVIDER;
-          model = firstAgent.model ?? DEFAULT_CHAT_MODEL;
-          baseUrl = firstAgent.baseUrl;
-          agentConfig = firstAgent.config;
-        }
-      }
+      agent = await this.resolveChatAgent(conversation.projectId);
     } catch (err) {
       await this.failTurn(conversationId, err instanceof Error ? err.message : String(err));
       return;
     }
 
-    const apiKey = this.c.env.codexApiKey;
-    const effectiveBaseUrl = baseUrl ?? this.c.env.codexBaseUrl;
-    if (!apiKey && !effectiveBaseUrl) {
+    if (!agent.apiKey && !agent.baseUrl) {
       await this.failTurn(
         conversationId,
-        'No API key is configured for the chat agent. Set CODEX_API_KEY (or a provider base URL) to enable chat.',
+        'No API key is configured for the chat agent. Choose a provider with an API key in Settings, or set CODEX_API_KEY (or a provider base URL).',
       );
       return;
     }
 
     let harness: AgentProvider;
     try {
-      harness = this.c.harnesses.get(provider);
+      harness = this.c.harnesses.get(agent.harness);
     } catch (err) {
       await this.failTurn(conversationId, err instanceof Error ? err.message : String(err));
       return;
@@ -130,16 +116,18 @@ export class ChatService {
 
     const messages = await this.c.chat.listMessages(conversationId);
     const prompt = buildPrompt(messages);
+    const mcpServers = this.builtinMcpServers(conversation.projectId);
 
     let finalResponse = '';
     let usage: HarnessUsage | undefined;
     try {
       const stream = harness.runStreamed(prompt, {
-        workingDirectory: workingDirectory ?? process.cwd(),
-        model,
-        baseUrl: effectiveBaseUrl,
-        apiKey,
-        config: agentConfig,
+        workingDirectory: agent.workingDirectory ?? process.cwd(),
+        model: agent.model,
+        baseUrl: agent.baseUrl,
+        apiKey: agent.apiKey,
+        mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
+        config: agent.config,
       });
 
       for await (const event of stream) {
@@ -191,40 +179,27 @@ export class ChatService {
     const templates = listWorkflowTemplates();
     const catalog = new Map(templates.map((t) => [t.name, t.title]));
 
-    let project: Project | null = null;
-    let config: ProjectConfig | null = null;
-    let workingDirectory: string | undefined;
+    let agent: ResolvedChatAgent | null = null;
+    let projectWorkflow: string | undefined;
     try {
-      project = await this.c.projects.get(projectId);
-      if (project) {
-        const configRoot = await this.workspaces.resolveConfigRoot(project);
-        workingDirectory = configRoot;
-        config = await loadProjectConfig(configRoot, project.configPath).catch(() => null);
-      }
+      agent = await this.resolveChatAgent(projectId);
+      projectWorkflow = agent.workflowName;
     } catch {
       // Tolerated: routing must still work without a resolvable checkout.
     }
-    const projectWorkflow = config?.workflow.name;
     if (projectWorkflow && !catalog.has(projectWorkflow)) {
       catalog.set(projectWorkflow, projectWorkflow);
     }
 
-    const agent = config?.workflow.nodes.find((n) => n.type === 'agent');
-    const provider = agent?.provider ?? DEFAULT_CHAT_PROVIDER;
-    const model = agent?.model ?? DEFAULT_CHAT_MODEL;
-    const baseUrl = agent?.baseUrl ?? this.c.env.codexBaseUrl;
-    const nodeConfig = agent?.config;
-    const apiKey = this.c.env.codexApiKey;
-
-    if (apiKey || baseUrl) {
+    if (agent && (agent.apiKey || agent.baseUrl)) {
       try {
-        const harness = this.c.harnesses.get(provider);
+        const harness = this.c.harnesses.get(agent.harness);
         const result = await harness.run(buildRoutingPrompt(message, templates, projectWorkflow), {
-          workingDirectory: workingDirectory ?? process.cwd(),
-          model,
-          baseUrl,
-          apiKey,
-          config: nodeConfig,
+          workingDirectory: agent.workingDirectory ?? process.cwd(),
+          model: agent.model,
+          baseUrl: agent.baseUrl,
+          apiKey: agent.apiKey,
+          config: agent.config,
         });
         const parsed = parseRouteJson(result.finalResponse);
         if (parsed) return this.normalizeRoute(parsed, message, catalog);
@@ -234,6 +209,97 @@ export class ChatService {
     }
 
     return fallbackRoute(message, projectWorkflow, catalog);
+  }
+
+  /**
+   * Resolve the effective chat agent (harness, model, base URL, API key) for a
+   * project. The user's saved {@link AgentDefaults} in Settings take precedence
+   * (that is the agent they explicitly chose for chat); the project's first
+   * workflow agent node is the fallback, then environment defaults. When
+   * Settings names a provider, that provider's harness, base URL, and stored
+   * (decrypted) API key are used as a coherent unit so the model always matches
+   * the endpoint it is sent to.
+   */
+  private async resolveChatAgent(projectId: string): Promise<ResolvedChatAgent> {
+    let harness: string | undefined;
+    let model: string | undefined;
+    let baseUrl: string | undefined;
+    let apiKey: string | undefined;
+    let config: Record<string, unknown> | undefined;
+    let workflowName: string | undefined;
+
+    const project = await this.c.projects.get(projectId);
+    if (!project) throw new Error(`Project ${projectId} not found`);
+    const configRoot = await this.workspaces.resolveConfigRoot(project);
+    const workingDirectory = configRoot;
+    const projectConfig = await loadProjectConfig(configRoot, project.configPath).catch(() => null);
+    if (projectConfig) {
+      workflowName = projectConfig.workflow.name;
+      const firstAgent = projectConfig.workflow.nodes.find((n) => n.type === 'agent');
+      if (firstAgent) {
+        harness = firstAgent.provider ?? harness;
+        model = firstAgent.model ?? model;
+        baseUrl = firstAgent.baseUrl ?? baseUrl;
+        config = firstAgent.config ?? config;
+      }
+    }
+
+    // The Settings selection is authoritative for chat and overrides project
+    // config. A chosen provider supplies a coherent harness/baseUrl/apiKey set,
+    // so the model is never mismatched with the endpoint it is sent to.
+    const defaults = await this.loadAgentDefaults();
+    if (defaults.providerId) {
+      const configured = await this.c.providers.get(defaults.providerId).catch(() => null);
+      if (configured) {
+        harness = configured.harness ?? harness;
+        baseUrl = configured.baseUrl ?? baseUrl;
+        // Default to the provider's first model so the request targets a model
+        // the endpoint actually serves (e.g. `deepseek-chat`), never a codex
+        // default. An explicit Settings model below still takes precedence.
+        model = configured.models[0] ?? undefined;
+        const stored = await this.c.providers.getApiKey(configured.id).catch(() => null);
+        if (stored) {
+          apiKey = this.c.env.providerEncryptionSalt
+            ? decrypt(stored, this.c.env.providerEncryptionSalt)
+            : stored;
+        }
+      }
+    }
+    if (defaults.harness) harness = defaults.harness;
+    if (defaults.model) model = defaults.model;
+
+    const effectiveBaseUrl = baseUrl ?? this.c.env.codexBaseUrl;
+    return {
+      harness: this.selectHarness(harness ?? DEFAULT_CHAT_PROVIDER, effectiveBaseUrl),
+      model: model ?? DEFAULT_CHAT_MODEL,
+      baseUrl: effectiveBaseUrl,
+      apiKey: apiKey ?? this.c.env.codexApiKey,
+      config,
+      workingDirectory,
+      workflowName,
+    };
+  }
+
+  /**
+   * Choose the harness that can actually service the request. The Codex harness
+   * now speaks only OpenAI's Responses API, so a non-OpenAI (Chat Completions)
+   * endpoint such as DeepSeek is redirected to the `openai` harness when it is
+   * registered. Any explicitly non-codex harness is left untouched.
+   */
+  private selectHarness(harness: string, baseUrl: string | undefined): string {
+    if (harness === 'codex' && baseUrl && !isOpenAiBaseUrl(baseUrl) && this.c.harnesses.has('openai')) {
+      return 'openai';
+    }
+    return harness;
+  }
+
+  private async loadAgentDefaults(): Promise<AgentDefaults> {
+    try {
+      const settings = await this.c.settings.get();
+      return settings.preferences?.agentDefaults ?? {};
+    } catch {
+      return {};
+    }
   }
 
   /** Validate a model-produced route against the catalog + project workflow. */
@@ -258,6 +324,19 @@ export class ChatService {
       workflowTitle: catalog.get(workflowName),
       ticketTitle: parsed.ticketTitle?.trim() || deriveTitle(message),
       reasoning,
+    };
+  }
+
+  /**
+   * The built-in Orion MCP servers (codebase + tickets) bound to the chat's
+   * project so the agent can search the repo and read/write tickets. Only takes
+   * effect on a harness that supports MCP (e.g. Codex); the OpenAI
+   * chat-completions harness ignores `mcpServers`.
+   */
+  private builtinMcpServers(projectId: string): McpServerMap {
+    return {
+      'orion-codebase': { url: `${this.c.env.publicUrl}/mcp/codebase?projectId=${projectId}` },
+      'orion-tickets': { url: `${this.c.env.publicUrl}/mcp/tickets?projectId=${projectId}` },
     };
   }
 
@@ -286,6 +365,17 @@ interface ParsedRoute {
   workflowName?: string | null;
   ticketTitle?: string | null;
   reasoning?: string;
+}
+
+/** The concrete chat agent settings resolved from project config + Settings. */
+interface ResolvedChatAgent {
+  harness: string;
+  model: string;
+  baseUrl?: string;
+  apiKey?: string;
+  config?: Record<string, unknown>;
+  workingDirectory?: string;
+  workflowName?: string;
 }
 
 /** Concatenate the conversation history into a single prompt string. */
@@ -391,6 +481,16 @@ function fallbackRoute(
     ticketTitle: deriveTitle(message),
     reasoning,
   };
+}
+
+/** True when the base URL is OpenAI's own API (which uses the Responses API). */
+function isOpenAiBaseUrl(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    return host === 'api.openai.com' || host.endsWith('.openai.azure.com');
+  } catch {
+    return false;
+  }
 }
 
 /** Turn a free-form message into a short, single-line ticket/conversation title. */

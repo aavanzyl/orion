@@ -1,6 +1,8 @@
 import { BoardConnectionRepository, ChatRepository, createDb, type DbHandle, EvaluationRepository, EventRepository, LabelRepository, McpServerRepository, ProjectRepository, ProviderRepository, RagRepository, RunRepository, TicketRepository, ScheduleRepository, SettingsRepository } from '@orion/db';
 import { HarnessRegistry } from '@orion/harness-core';
 import { CodexHarness } from '@orion/harness-codex';
+import { OpenAiHarness } from '@orion/harness-openai';
+import { ClaudeHarness } from '@orion/harness-claude';
 import { ScmRegistry } from '@orion/scm-core';
 import { GitHubScmProvider } from '@orion/scm-github';
 import { BoardRegistry } from '@orion/board-core';
@@ -60,9 +62,10 @@ export function createContainer(env: OrionEnv): Container {
   const mcpServers = new McpServerRepository(db);
   const settings = new SettingsRepository(db);
 
-  const harnesses = new HarnessRegistry().register(
-    new CodexHarness({ apiKey: env.codexApiKey, baseUrl: env.codexBaseUrl }),
-  );
+  const harnesses = new HarnessRegistry()
+    .register(new CodexHarness({ apiKey: env.codexApiKey, baseUrl: env.codexBaseUrl }))
+    .register(new OpenAiHarness({ apiKey: env.codexApiKey, baseUrl: env.codexBaseUrl }))
+    .register(new ClaudeHarness({ apiKey: env.claudeApiKey, baseUrl: env.claudeBaseUrl }));
 
   const scm = new ScmRegistry().register(new GitHubScmProvider({ token: env.githubToken }));
 

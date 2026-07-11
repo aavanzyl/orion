@@ -10,6 +10,10 @@ export interface OrionEnv {
   projectsDir: string;
   codexApiKey?: string;
   codexBaseUrl?: string;
+  /** Fallback API key for the Claude harness (Anthropic-compatible). */
+  claudeApiKey?: string;
+  /** Fallback base URL for the Claude harness (e.g. a DeepSeek Anthropic endpoint). */
+  claudeBaseUrl?: string;
   githubToken?: string;
   /** When set, run lifecycle notifications are POSTed to this webhook URL. */
   notifyWebhookUrl?: string;
@@ -53,6 +57,8 @@ export function loadEnv(): OrionEnv {
     projectsDir: resolve(process.env.ORION_PROJECTS_DIR ?? homedir()),
     codexApiKey: process.env.CODEX_API_KEY,
     codexBaseUrl: process.env.CODEX_BASE_URL,
+    claudeApiKey: process.env.ANTHROPIC_API_KEY ?? process.env.CLAUDE_API_KEY,
+    claudeBaseUrl: process.env.ANTHROPIC_BASE_URL ?? process.env.CLAUDE_BASE_URL,
     githubToken: process.env.GITHUB_TOKEN,
     notifyWebhookUrl: process.env.ORION_NOTIFY_WEBHOOK_URL,
     slackWebhookUrl: process.env.ORION_SLACK_WEBHOOK_URL,

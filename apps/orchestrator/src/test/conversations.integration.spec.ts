@@ -43,4 +43,21 @@ describe('conversations (integration)', () => {
     expect(res.status).toBe(404);
     expect(res.body.success).toBe(false);
   });
+
+  it('deletes a conversation and removes it from the list', async () => {
+    const created = await request(ctx.app)
+      .post(`/api/projects/${projectId}/conversations`)
+      .send({ title: 'Throwaway chat' });
+    const id = created.body.data.id;
+
+    const deleted = await request(ctx.app).delete(`/api/conversations/${id}`);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.data.deleted).toBe(true);
+
+    const list = await request(ctx.app).get(`/api/projects/${projectId}/conversations`);
+    expect(list.body.data.map((c: { id: string }) => c.id)).not.toContain(id);
+
+    const missing = await request(ctx.app).delete(`/api/conversations/${id}`);
+    expect(missing.status).toBe(404);
+  });
 });

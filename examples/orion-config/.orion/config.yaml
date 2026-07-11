@@ -16,7 +16,6 @@ mcpServers:
 
 board:
   swimlanes: [backlog, investigating, in_progress, review, done]
-
 workflow:
   name: default
   nodes:
@@ -27,7 +26,6 @@ workflow:
       # Point at any OpenAI-compatible endpoint (e.g. DeepSeek) via baseUrl:
       # baseUrl: https://api.deepseek.com
       instructions: commands/investigate.md
-      command: commands/investigate.md
       # MCP servers unique to this node (merged with the global set above; an
       # entry of the same name overrides the global one).
       mcpServers:
@@ -36,15 +34,15 @@ workflow:
           args: [-y, '@modelcontextprotocol/server-github']
           env:
             GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
-      column: investigating
+      swimlane: investigating
 
     - id: implement
       type: agent
       provider: codex
       model: gpt-5-codex
-      command: commands/implement.md
+      instructions: commands/implement.md
       dependsOn: [investigate]
-      column: in_progress
+      swimlane: in_progress
       # Loop this node: re-run until the agent's output contains the sentinel or
       # maxIterations is reached. `freshContext: true` starts a new harness
       # thread each pass instead of accumulating context.
@@ -57,15 +55,15 @@ workflow:
       type: shell
       script: 'echo "run your test suite here"'
       dependsOn: [implement]
-      column: in_progress
+      swimlane: in_progress
 
     - id: approval
       type: approval
       dependsOn: [verify]
-      column: review
+      swimlane: review
 
     - id: open_pr
       type: scm
       action: open_pull_request
       dependsOn: [approval]
-      column: done
+      swimlane: done

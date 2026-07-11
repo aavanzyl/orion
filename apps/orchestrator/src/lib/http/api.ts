@@ -1028,6 +1028,15 @@ export function createApiRouter(
     }),
   );
 
+  router.delete(
+    '/conversations/:id',
+    asyncHandler(async (req, res) => {
+      const deleted = await chat.deleteConversation(req.params.id);
+      if (!deleted) return fail(res, 'Conversation not found', 404);
+      ok(res, { deleted: true });
+    }),
+  );
+
   router.get('/conversations/:id/stream', (req: Request, res: Response) => {
     void streamChat(c, chat, req, res);
   });

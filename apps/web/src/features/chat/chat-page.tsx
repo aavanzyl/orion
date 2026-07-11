@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MessagesSquareIcon, PlusIcon, SendIcon, SparklesIcon, PlayIcon } from 'lucide-react';
+import {
+  MessagesSquareIcon,
+  PlusIcon,
+  SendIcon,
+  SparklesIcon,
+  PlayIcon,
+  Trash2Icon,
+  BrainIcon,
+  WrenchIcon,
+  TerminalIcon,
+  ChevronRightIcon,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import type { WorkflowRouteResult } from '@orion/models';
 import { Button } from '@/components/ui/button';
@@ -19,22 +30,64 @@ import { Markdown } from '@/components/markdown';
 import { api } from '@/lib/api';
 import { useProjects } from '@/features/projects/hooks';
 import { useProjectConfig } from '@/features/board/hooks';
+import { usePreferences } from '@/lib/use-preferences';
+import { useProviders } from '@/features/settings/hooks';
 import { useConversations } from './hooks';
-import { useChatStream } from './use-chat-stream';
+import { useChatStream, type ChatStreamItem } from './use-chat-stream';
 
-function itemLine(item: unknown): string {
-  const it = (item ?? {}) as Record<string, unknown>;
-  const type = typeof it.type === 'string' ? it.type : 'item';
-  if (typeof it.command === 'string') return `$ ${it.command}`;
-  if (typeof it.text === 'string') return `${type}: ${String(it.text).slice(0, 160)}`;
-  return type;
+function itemIcon(type: string) {
+  if (type === 'reasoning') return BrainIcon;
+  if (type === 'command_execution') return TerminalIcon;
+  return WrenchIcon;
 }
+
+function ActivityItem({ item }: { item: ChatStreamItem }) {
+  const [open, setOpen] = useState(false);
+  const Icon = itemIcon(item.type);
+  const hasDetail = Boolean(item.detail);
+  return (
+    <div className="flex flex-col">
+      <button
+        type="button"
+        disabled={!hasDetail}
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          'flex items-center gap-2 rounded-md px-1.5 py-1 text-left',
+          hasDetail && 'hover:bg-muted',
+        )}
+      >
+        {hasDetail ? (
+          <ChevronRightIcon
+            className={cn('size-3 shrink-0 transition-transform', open && 'rotate-90')}
+          />
+        ) : (
+          <span className="w-3 shrink-0" />
+        )}
+        <Icon className="size-3.5 shrink-0" />
+        <span className="truncate font-medium">{item.title}</span>
+        {item.status && item.status !== 'completed' && (
+          <span className="shrink-0 text-[10px] uppercase tracking-wide opacity-70">
+            {item.status}
+          </span>
+        )}
+      </button>
+      {open && hasDetail && (
+        <pre className="ml-6 mt-0.5 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 text-[11px] leading-snug">
+          {item.detail}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 
 export function ChatPage() {
   const { projects, loading: projectsLoading } = useProjects();
   const [projectId, setProjectId] = useState<string | null>(null);
   const { conversations, refetch, setConversations } = useConversations(projectId);
   const { config } = useProjectConfig(projectId);
+  const { preferences } = usePreferences();
+  const { providers } = useProviders();
   const [conversationId, setConversationId] = useState<string | null>(null);
   const { messages, streamingText, items, streaming, error } = useChatStream(conversationId);
 
@@ -61,7 +114,22 @@ export function ChatPage() {
     bottomRef.current?.scrollIntoView({ block: 'end' });
   }, [messages, streamingText, items]);
 
-  const activeAgent = useMemo(() => config?.workflow.nodes.find((n) => n.type === 'agent')?.provider, [config]);
+  const activeAgent = useMemo(() => {
+    const { harness, providerId } = preferences.agentDefaults;
+    if (providerId) {
+      const provider = providers.find((p) => p.id === providerId);
+      if (provider) return provider.label || provider.key;
+    }
+    if (harness) return harness;
+    const fromConfig = config?.workflow.nodes.find((n) => n.type === 'agent')?.provider;
+    return fromConfig ?? undefined;
+  }, [config, preferences.agentDefaults, providers]);
+
+  const activeModel = useMemo(() => {
+    const { providerId, model } = preferences.agentDefaults;
+    if (providerId || model) return model || undefined;
+    return config?.workflow.nodes.find((n) => n.type === 'agent')?.model || undefined;
+  }, [config, preferences.agentDefaults]);
 
   const newConversation = async () => {
     if (!projectId) return;
@@ -70,6 +138,19 @@ export function ChatPage() {
       setConversations((prev) => [conversation, ...prev]);
       setConversationId(conversation.id);
       setRoute(null);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
+  const deleteConversation = async (id: string) => {
+    try {
+      await api.deleteConversation(id);
+      setConversations((prev) => prev.filter((conversation) => conversation.id !== id));
+      if (conversationId === id) {
+        setConversationId(null);
+        setRoute(null);
+      }
     } catch (e) {
       toast.error((e as Error).message);
     }
@@ -152,6 +233,7 @@ export function ChatPage() {
           {activeAgent && (
             <Badge variant="secondary" className="font-mono">
               {activeAgent}
+              {activeModel ? ` · ${activeModel}` : ''}
             </Badge>
           )}
         </div>
@@ -176,22 +258,34 @@ export function ChatPage() {
                   <p className="px-2 py-2 text-xs text-muted-foreground">No conversations yet.</p>
                 ) : (
                   conversations.map((conversation) => (
-                    <button
-                      key={conversation.id}
-                      type="button"
-                      onClick={() => {
-                        setConversationId(conversation.id);
-                        setRoute(null);
-                      }}
-                      className={cn(
-                        'truncate rounded-md px-3 py-2 text-left text-sm font-medium transition-all',
-                        conversation.id === conversationId
-                          ? 'bg-accent text-accent-foreground shadow-sm'
-                          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                      )}
-                    >
-                      {conversation.title}
-                    </button>
+                    <div key={conversation.id} className="group/conv relative">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConversationId(conversation.id);
+                          setRoute(null);
+                        }}
+                        className={cn(
+                          'w-full truncate rounded-md py-2 pl-3 pr-9 text-left text-sm font-medium transition-all',
+                          conversation.id === conversationId
+                            ? 'bg-accent text-accent-foreground shadow-sm'
+                            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                        )}
+                      >
+                        {conversation.title}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Delete conversation"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void deleteConversation(conversation.id);
+                        }}
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground opacity-60 transition-opacity hover:bg-primary/10 hover:text-primary hover:opacity-100 focus-visible:opacity-100"
+                      >
+                        <Trash2Icon className="size-3.5" />
+                      </button>
+                    </div>
                   ))
                 )}
               </div>
@@ -199,7 +293,7 @@ export function ChatPage() {
           </aside>
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <ScrollArea className="flex-1">
+            <ScrollArea className="min-h-0 flex-1">
               <div className="mx-auto flex max-w-3xl flex-col gap-4 p-6">
                 {messages.length === 0 && !streaming ? (
                   <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
@@ -235,11 +329,9 @@ export function ChatPage() {
                 {streaming && (
                   <div className="flex flex-col gap-2">
                     {items.length > 0 && (
-                      <div className="rounded-xl border border-info/30 bg-info/5 p-3 font-mono text-xs text-muted-foreground">
-                        {items.map((item, i) => (
-                          <div key={i} className="truncate">
-                            {itemLine(item)}
-                          </div>
+                      <div className="flex flex-col gap-0.5 rounded-xl border border-info/30 bg-info/5 p-2 text-xs text-muted-foreground">
+                        {items.map((item) => (
+                          <ActivityItem key={item.id} item={item} />
                         ))}
                       </div>
                     )}

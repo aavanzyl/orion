@@ -64,7 +64,7 @@ import { ProviderFormDialog } from './provider-form-dialog';
 import { McpClientConnectCard } from './mcp-shared';
 import { BoardSyncSection } from '@/features/board-sync/board-sync-section';
 
-const HARNESS_OPTIONS = ['codex', 'claude', 'opencode'];
+const HARNESS_OPTIONS = ['codex', 'openai', 'claude', 'opencode'];
 const REPO_URL = 'https://github.com/aavanzyl/orion';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? '0.0.0';
 const APP_GIT_SHA = import.meta.env.VITE_APP_GIT_SHA ?? 'unknown';

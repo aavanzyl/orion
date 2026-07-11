@@ -38,3 +38,17 @@ export interface UpdateProviderInput {
   models?: string[];
   apiKey?: string;
 }
+
+/**
+ * The agent harness that best fits a given model provider. OpenAI-family
+ * providers default to Codex (OpenAI's own agent SDK); every other provider
+ * defaults to the Claude Agent SDK, which drives non-OpenAI models (DeepSeek,
+ * Anthropic, etc.) more reliably than Codex.
+ */
+export function defaultHarnessForProvider(key: string): string {
+  const normalized = key.trim().toLowerCase();
+  if (normalized === 'openai' || normalized === 'codex' || normalized === 'azure') {
+    return 'codex';
+  }
+  return 'claude';
+}

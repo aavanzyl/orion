@@ -17,7 +17,7 @@
           "main": "apps/orchestrator/src/main.ts",
           "tsConfig": "apps/orchestrator/tsconfig.app.json",
           "assets": ["apps/orchestrator/src/assets"],
-          "external": ["@openai/codex-sdk"],
+          "external": ["@openai/codex-sdk", "@anthropic-ai/claude-agent-sdk"],
           "esbuildOptions": {
             "sourcemap": true,
             "outExtension": { ".js": ".mjs" }
@@ -74,6 +74,8 @@
     "@orion/db": "*",
     "@orion/harness-core": "*",
     "@orion/harness-codex": "*",
+    "@orion/harness-openai": "*",
+    "@orion/harness-claude": "*",
     "@orion/models": "*",
     "@orion/scm-core": "*",
     "@orion/scm-github": "*",

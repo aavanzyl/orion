@@ -110,7 +110,7 @@ export function AppLayout() {
 
   return (
     <TooltipProvider delayDuration={0}>
-      <div className="flex h-screen bg-background">
+      <div className="flex h-dvh overflow-hidden bg-background">
         <aside
           className={cn(
             'flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-200',
@@ -134,13 +134,6 @@ export function AppLayout() {
                   {branding.title}
                 </span>
               </>
-            )}
-            {collapsed && (
-              <img
-                src={branding.logo || '/orion-mark.svg'}
-                alt={branding.title}
-                className="size-10 shrink-0 object-contain"
-              />
             )}
             <Tooltip>
               <TooltipTrigger asChild>
@@ -210,7 +203,7 @@ export function AppLayout() {
             </nav>
           </ScrollArea>
         </aside>
-        <div className="min-w-0 flex-1">
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
           <Outlet />
         </div>
       </div>

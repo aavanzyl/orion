@@ -33,6 +33,12 @@
       "path": "../../packages/shared/models/tsconfig.lib.json"
     },
     {
+      "path": "../../packages/adapters/harness/claude/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/adapters/harness/openai/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/adapters/harness/codex/tsconfig.lib.json"
     },
     {
@@ -51,6 +57,9 @@
       "path": "../../packages/adapters/communication/core/tsconfig.lib.json"
     },
     {
+      "path": "../../packages/adapters/board/trello/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/adapters/board/native/tsconfig.lib.json"
     },
     {
@@ -58,9 +67,6 @@
     },
     {
       "path": "../../packages/adapters/board/jira/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/adapters/board/trello/tsconfig.lib.json"
     },
     {
       "path": "../../packages/adapters/board/core/tsconfig.lib.json"

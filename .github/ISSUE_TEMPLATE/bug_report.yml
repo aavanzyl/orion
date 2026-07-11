@@ -1,0 +1,76 @@
+name: Bug report
+description: Report a problem with Orion
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please search existing issues before opening a new one.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+      placeholder: When I run the default workflow, the run stalls at the approval node...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal, deterministic steps to reproduce the behavior.
+      placeholder: |
+        1. Configure `.orion/config.yaml` with ...
+        2. Trigger a run on ticket ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which part of the system is involved?
+      options:
+        - orchestrator (engine / API)
+        - web (board UI)
+        - db (migrations / persistence)
+        - adapters (harness / scm / board / communication)
+        - config / workflow definition
+        - other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Fill in the versions you are running.
+      value: |
+        - Orion version / commit:
+        - OS:
+        - Node.js version:
+        - Deployment (docker-compose / local / other):
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Paste any relevant log output. This will be rendered as code, no backticks needed.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: I have removed any secrets or sensitive data from logs.
+          required: true
