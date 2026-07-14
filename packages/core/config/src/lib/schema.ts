@@ -18,6 +18,7 @@ export const boardConfigSchema = z
   .object({
     swimlanes: z.array(z.string().min(1)).min(1).optional(),
     columns: z.array(z.string().min(1)).min(1).optional(),
+    triggerSwimlane: z.string().min(1).optional(),
   })
   .refine((data) => (data.swimlanes ?? data.columns) !== undefined, {
     message: 'Either swimlanes or columns is required',
@@ -81,6 +82,7 @@ export const workflowNodeConfigSchema = z.object({
   retryDelayMs: z.number().int().min(0).optional(),
   timeoutMs: z.number().int().min(1).optional(),
   continueOnError: z.boolean().optional(),
+  onFailureTransitionTo: z.string().optional(),
   loop: loopConfigSchema.optional(),
   matrix: matrixConfigSchema.optional(),
 });
@@ -91,6 +93,14 @@ export const budgetConfigSchema = z
     maxCostUsd: z.number().positive().optional(),
   })
   .optional();
+
+export const issueTypeConfigSchema = z.object({
+  name: z.string().min(1).regex(/^[a-z][a-z0-9_-]*$/, 'issue type name must be a lowercase identifier starting with a letter'),
+  label: z.string().min(1),
+  workflow: z.string().min(1),
+  icon: z.string().optional(),
+  color: z.string().optional(),
+});
 
 export const workflowConfigSchema = z.object({
   name: z.string().min(1).default('default'),
@@ -106,6 +116,7 @@ export const projectConfigSchema = z.object({
   }),
   mcpServers: mcpServerMapSchema.optional(),
   workflows: z.record(z.string().min(1), workflowConfigSchema).optional(),
+  issueTypes: z.array(issueTypeConfigSchema).min(1).optional(),
   board: boardConfigSchema,
   workflow: workflowConfigSchema,
 });
