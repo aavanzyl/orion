@@ -1,6 +1,7 @@
 import { parse, stringify } from 'yaml';
 import type {
   BudgetConfig,
+  IssueTypeConfig,
   McpServerMap,
   ProjectConfig,
   WorkflowConfig,
@@ -14,9 +15,6 @@ import {
   type NodeData,
 } from '../shared/node-model';
 
-// Re-exported so the config editor's own imports keep a single source of truth
-// with the visual builder.
-export { NODE_TYPES as WORKFLOW_NODE_TYPES } from '../shared/node-model';
 
 /**
  * A single workflow node as edited by the config form. This is the shared
@@ -37,11 +35,14 @@ export interface ConfigFormModel {
   /** Preserved project-wide MCP servers so round-tripping is not lossy. */
   mcpServers?: McpServerMap;
   swimlanes: string[];
+  triggerSwimlane?: string;
   workflowName: string;
   /** Workflow token/cost budget. */
   budget?: BudgetConfig;
   /** Preserved reusable sub-workflows so round-tripping is not lossy. */
   workflows?: Record<string, WorkflowConfig>;
+  /** Configured issue types mapping to workflows. */
+  issueTypes?: IssueTypeConfig[];
   nodes: NodeFormModel[];
   /**
    * The full parsed YAML root the model was derived from. On save the modeled
@@ -170,6 +171,16 @@ function budgetConfig(value: unknown): BudgetConfig | undefined {
   return Object.keys(budget).length > 0 ? budget : undefined;
 }
 
+/** Built-in issue type defaults pre-populated in the editor when none are configured. */
+function DEFAULT_MODEL_ISSUE_TYPES(workflowName: string): IssueTypeConfig[] {
+  return [
+    { name: 'feature', label: 'Feature', workflow: workflowName },
+    { name: 'bug', label: 'Bug', workflow: workflowName },
+    { name: 'issue', label: 'Issue', workflow: workflowName },
+    { name: 'hotfix', label: 'Hotfix', workflow: workflowName },
+  ];
+}
+
 /**
  * Parse raw YAML text into the editable form model. Throws when the YAML is
  * syntactically invalid so the caller can keep the user in the raw editor.
@@ -194,7 +205,11 @@ export function parseConfigToModel(yaml: string): ConfigFormModel {
     branchFormat: str(project.branchFormat) || undefined,
     mcpServers: mcpMap(raw.mcpServers),
     workflows: subWorkflowMap(raw.workflows),
+    issueTypes: Array.isArray(raw.issueTypes)
+      ? (raw.issueTypes as IssueTypeConfig[])
+      : DEFAULT_MODEL_ISSUE_TYPES(str(workflow.name) || 'default'),
     swimlanes: swimlanes.map((c) => str(c)).filter(Boolean),
+    triggerSwimlane: typeof board.triggerSwimlane === 'string' ? board.triggerSwimlane : undefined,
     workflowName: str(workflow.name) || 'default',
     budget: budgetConfig(workflow.budget),
     nodes: nodes.map((n) => {
@@ -225,7 +240,7 @@ function cleanBudget(budget: BudgetConfig): BudgetConfig {
 }
 
 /** Build a clean ProjectConfig object from the form model, dropping empties. */
-export function modelToConfig(model: ConfigFormModel): ProjectConfig {
+function modelToConfig(model: ConfigFormModel): ProjectConfig {
   const budget = model.budget ? cleanBudget(model.budget) : {};
   const config: ProjectConfig = {
     project: {
@@ -235,6 +250,7 @@ export function modelToConfig(model: ConfigFormModel): ProjectConfig {
     },
     board: {
       swimlanes: model.swimlanes.map((c) => c.trim()).filter(Boolean),
+      ...(model.triggerSwimlane ? { triggerSwimlane: model.triggerSwimlane } : {}),
     },
     workflow: {
       name: model.workflowName.trim() || 'default',
@@ -247,6 +263,9 @@ export function modelToConfig(model: ConfigFormModel): ProjectConfig {
   }
   if (model.workflows && Object.keys(model.workflows).length) {
     config.workflows = model.workflows;
+  }
+  if (model.issueTypes && model.issueTypes.length) {
+    config.issueTypes = model.issueTypes;
   }
   return config;
 }
@@ -267,11 +286,13 @@ export function modelToYaml(model: ConfigFormModel): string {
   else delete root.mcpServers;
   if (config.workflows) root.workflows = config.workflows;
   else delete root.workflows;
+  if (config.issueTypes) root.issueTypes = config.issueTypes;
+  else delete root.issueTypes;
   return stringify(root, { indent: 2, lineWidth: 0 });
 }
 
 /** The parts of a bundled workflow template needed to apply it client-side. */
-export interface WorkflowTemplateApply {
+interface WorkflowTemplateApply {
   /** The template's `workflow:` block as YAML text. */
   yaml: string;
   suggestedSwimlanes: string[];

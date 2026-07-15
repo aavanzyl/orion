@@ -79,7 +79,7 @@ export class ScheduleService {
       ]);
       return {
         skills: globalSkills.map((s) => s.name),
-        mcpServers: ['orion-codebase', 'orion-tickets'],
+        mcpServers: ['orion-codebase', 'orion-tickets', 'orion-skills'],
         globalMcpServers: globalMcpServers.map((s) => s.name),
       };
     }
@@ -96,7 +96,12 @@ export class ScheduleService {
     ];
     return {
       skills: mergedSkills,
-      mcpServers: config?.mcpServers ? Object.keys(config.mcpServers) : [],
+      mcpServers: [
+        'orion-codebase',
+        'orion-tickets',
+        'orion-skills',
+        ...(config?.mcpServers ? Object.keys(config.mcpServers) : []),
+      ],
       globalMcpServers: globalMcpServers.map((s) => s.name),
     };
   }
@@ -156,11 +161,41 @@ export class ScheduleService {
     const project = await this.c.projects.get(schedule.projectId);
     if (!project) throw new Error(`Project ${schedule.projectId} not found`);
 
-    const response = await this.runAgentTurn(schedule, project, payload);
+    this.c.bus.emit('schedule', {
+      type: 'schedule.fired',
+      scheduleId: schedule.id,
+      projectId: schedule.projectId,
+      name: schedule.name,
+      instruction: schedule.instruction,
+      createdAt: new Date().toISOString(),
+    });
 
-    const now = new Date();
-    await this.c.schedules.markFired(schedule.id, now, this.computeNextFire(schedule.cron, now));
-    return response;
+    try {
+      const response = await this.runAgentTurn(schedule, project, payload);
+
+      const now = new Date();
+      await this.c.schedules.markFired(schedule.id, now, this.computeNextFire(schedule.cron, now));
+
+      this.c.bus.emit('schedule', {
+        type: 'schedule.completed',
+        scheduleId: schedule.id,
+        projectId: schedule.projectId,
+        name: schedule.name,
+        createdAt: new Date().toISOString(),
+      });
+
+      return response;
+    } catch (err) {
+      this.c.bus.emit('schedule', {
+        type: 'schedule.failed',
+        scheduleId: schedule.id,
+        projectId: schedule.projectId,
+        name: schedule.name,
+        error: err instanceof Error ? err.message : String(err),
+        createdAt: new Date().toISOString(),
+      });
+      throw err;
+    }
   }
 
   /** Run the schedule's agent turn in a throwaway worktree. */
@@ -241,6 +276,7 @@ export class ScheduleService {
     const servers: McpServerMap = {
       'orion-codebase': { url: `${this.c.env.publicUrl}/mcp/codebase?projectId=${project.id}` },
       'orion-tickets': { url: `${this.c.env.publicUrl}/mcp/tickets?projectId=${project.id}` },
+      'orion-skills': { url: `${this.c.env.publicUrl}/mcp/skills?projectId=${project.id}` },
     };
     for (const name of schedule.mcpServers) {
       const cfg =

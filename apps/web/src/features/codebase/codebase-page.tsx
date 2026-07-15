@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DatabaseIcon, RefreshCwIcon, SearchIcon } from 'lucide-react';
+import { DatabaseIcon, GitBranchIcon, PackageIcon, RefreshCwIcon, SearchIcon } from 'lucide-react';
 import type { CodeIndex, SearchResult } from '@orion/models';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -62,7 +62,6 @@ export function CodebasePage() {
     fetchStatus().finally(() => setLoadingStatus(false));
   }, [projectId, fetchStatus]);
 
-  // Poll the status while an index is building.
   useEffect(() => {
     if (index?.status === 'indexing') {
       pollRef.current = setInterval(fetchStatus, POLL_INTERVAL_MS);
@@ -147,10 +146,28 @@ export function CodebasePage() {
         ) : (
           <span className="text-sm text-muted-foreground">Select a project to begin.</span>
         )}
-        <Button size="sm" variant="outline" onClick={handleReindex} disabled={!projectId || isIndexing}>
-          <RefreshCwIcon className={`size-4 ${isIndexing ? 'animate-spin' : ''}`} />
-          {isIndexing ? 'Indexing…' : 'Reindex'}
-        </Button>
+        <div className="flex items-center gap-2">
+          {index?.status === 'ready' && (
+            <>
+              <Button variant="ghost" size="sm" asChild>
+                <a href={`/codebase-graph`}>
+                  <GitBranchIcon className="size-3.5" />
+                  Call Graph
+                </a>
+              </Button>
+              <Button variant="ghost" size="sm" asChild>
+                <a href={`/codegen-graph`}>
+                  <PackageIcon className="size-3.5" />
+                  Projects
+                </a>
+              </Button>
+            </>
+          )}
+          <Button size="sm" variant="outline" onClick={handleReindex} disabled={!projectId || isIndexing}>
+            <RefreshCwIcon className={`size-4 ${isIndexing ? 'animate-spin' : ''}`} />
+            {isIndexing ? 'Indexing…' : 'Reindex'}
+          </Button>
+        </div>
       </div>
 
       <div className="flex items-center gap-2 border-b px-6 py-3">

@@ -13,6 +13,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import {
   Table,
   TableBody,
@@ -108,10 +109,16 @@ export function BoardSyncSection() {
     }
   };
 
+  const [disconnectingProject, setDisconnectingProject] = useState<Project | null>(null);
+
   const disconnect = async (project: Project) => {
-    if (!window.confirm(`Disconnect board sync for "${project.name}"?`)) return;
+    setDisconnectingProject(project);
+  };
+
+  const confirmDisconnect = async () => {
+    if (!disconnectingProject) return;
     try {
-      await api.deleteBoardConnection(project.id);
+      await api.deleteBoardConnection(disconnectingProject.id);
       toast.success('Disconnected');
       await load();
     } catch (e) {
@@ -244,6 +251,15 @@ export function BoardSyncSection() {
         availableProjects={availableProjects}
         editProject={editProject}
         onSaved={load}
+      />
+
+      <ConfirmDialog
+        open={disconnectingProject !== null}
+        onOpenChange={(open) => { if (!open) setDisconnectingProject(null); }}
+        title="Disconnect board sync"
+        description={`Disconnect board sync for "${disconnectingProject?.name}"?`}
+        confirmLabel="Disconnect"
+        onConfirm={confirmDisconnect}
       />
     </Card>
   );

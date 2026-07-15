@@ -2,20 +2,34 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createTestApp, seedProjectRepo, type TestApp } from './app.js';
 
-const CONFIG_WITH_SWIMLANE_TRIGGERS = `project:
-  name: swimlane-project
+const CONFIG_WITH_ISSUE_TYPES = `project:
+  name: issue-type-project
   defaultBranch: main
 
 board:
-  swimlanes: [backlog, triage, in_progress, done]
+  swimlanes: [backlog, in_progress, done]
+
+issueTypes:
+  - name: feature
+    label: Feature
+    workflow: feature-flow
+  - name: bug
+    label: Bug
+    workflow: bug-fix
 
 workflows:
-  triage-flow:
-    name: triage-flow
+  feature-flow:
+    name: feature-flow
     nodes:
-      - id: assess
-        type: approval
-        swimlane: triage
+      - id: build
+        type: shell
+        script: 'echo "building feature"'
+  bug-fix:
+    name: bug-fix
+    nodes:
+      - id: fix
+        type: shell
+        script: 'echo "fixing bug"'
 
 workflow:
   name: default
@@ -27,16 +41,16 @@ workflow:
       swimlane: in_progress
 `;
 
-describe('swimlane triggers (integration)', () => {
+describe('type-based workflows (integration)', () => {
   let ctx: TestApp;
   let projectId: string;
 
   beforeAll(async () => {
     ctx = await createTestApp();
-    const rootPath = await seedProjectRepo({}, CONFIG_WITH_SWIMLANE_TRIGGERS);
+    const rootPath = await seedProjectRepo({}, CONFIG_WITH_ISSUE_TYPES);
     const project = await request(ctx.app)
       .post('/api/projects')
-      .send({ name: 'Swimlane Project', sourceKind: 'local', rootPath });
+      .send({ name: 'Issue Type Project', sourceKind: 'local', rootPath, config: CONFIG_WITH_ISSUE_TYPES });
     projectId = project.body.data.id;
   });
 
@@ -44,29 +58,43 @@ describe('swimlane triggers (integration)', () => {
     await ctx.dispose();
   });
 
-  async function createTicket(): Promise<string> {
-    const res = await request(ctx.app)
-      .post(`/api/projects/${projectId}/tickets`)
-      .send({ title: 'Do the thing', swimlane: 'backlog' });
-    return res.body.data.id;
-  }
-
-  it('starts the swimlane workflow when a ticket enters a trigger column', async () => {
-    const ticketId = await createTicket();
-
-    await ctx.runs.handleSwimlaneEntry(ticketId, 'triage');
-
-    const runs = await ctx.runs.listRunsForTicket(ticketId);
-    expect(runs).toHaveLength(1);
-    expect(runs[0].workflowName).toBe('triage-flow');
+  it('config endpoint includes issueTypes', async () => {
+    const res = await request(ctx.app).get(`/api/projects/${projectId}/config`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.issueTypes).toEqual([
+      { name: 'feature', label: 'Feature', workflow: 'feature-flow' },
+      { name: 'bug', label: 'Bug', workflow: 'bug-fix' },
+    ]);
   });
 
-  it('does not start a workflow when a ticket enters a column with no trigger', async () => {
-    const ticketId = await createTicket();
+  it('board endpoint includes issueTypes with epic always present', async () => {
+    const res = await request(ctx.app).get(`/api/projects/${projectId}/board`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.issueTypes).toEqual([
+      { value: 'epic', label: 'Epic' },
+      { value: 'feature', label: 'Feature', workflow: 'feature-flow' },
+      { value: 'bug', label: 'Bug', workflow: 'bug-fix' },
+    ]);
+  });
 
-    await ctx.runs.handleSwimlaneEntry(ticketId, 'backlog');
+  it('creates a ticket with a configured type and shows it on the board', async () => {
+    const created = await request(ctx.app)
+      .post(`/api/projects/${projectId}/tickets`)
+      .send({ title: 'A bug fix', type: 'bug', swimlane: 'backlog' });
+    expect(created.status).toBe(201);
+    expect(created.body.data.type).toBe('bug');
 
-    const runs = await ctx.runs.listRunsForTicket(ticketId);
-    expect(runs).toHaveLength(0);
+    const board = await request(ctx.app).get(`/api/projects/${projectId}/board`);
+    expect(board.status).toBe(200);
+    const tickets = board.body.data.swimlanes[0].tickets;
+    expect(tickets.some((t: { type: string }) => t.type === 'bug')).toBe(true);
+  });
+
+  it('allows epic type always', async () => {
+    const created = await request(ctx.app)
+      .post(`/api/projects/${projectId}/tickets`)
+      .send({ title: 'An epic', type: 'epic', swimlane: 'backlog' });
+    expect(created.status).toBe(201);
+    expect(created.body.data.type).toBe('epic');
   });
 });

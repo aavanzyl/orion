@@ -35,7 +35,7 @@ export function decrypt(ciphertext: string, salt: string): string {
   return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
 }
 
-export function maskApiKey(value: string): string {
+function maskApiKey(value: string): string {
   if (value.length <= 8) return '*'.repeat(value.length);
   return value.slice(0, 4) + '...' + value.slice(-4);
 }

@@ -14,6 +14,13 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Table,
   TableBody,
   TableCell,
@@ -129,6 +136,26 @@ export function ConfigForm({
   const removeNode = (key: string) =>
     patch({ nodes: model.nodes.filter((n) => n.key !== key) });
 
+  const issueTypes = model.issueTypes ?? [];
+
+  const updateIssueType = (index: number, field: string, value: string) => {
+    const next = [...issueTypes];
+    const existing = next[index] ?? { name: '', label: '', workflow: '' };
+    next[index] = { ...existing, [field]: value };
+    patch({ issueTypes: next.filter((it) => it.name || it.label) });
+  };
+
+  const addIssueType = () =>
+    patch({ issueTypes: [...issueTypes, { name: '', label: '', workflow: model.workflowName || 'default' }] });
+
+  const removeIssueType = (index: number) =>
+    patch({ issueTypes: issueTypes.filter((_, i) => i !== index) });
+
+  const workflowNames = [
+    model.workflowName || 'default',
+    ...Object.keys(model.workflows ?? {}),
+  ].filter(Boolean);
+
   const openNew = () => {
     setEditingNode(null);
     setNodeOpen(true);
@@ -243,6 +270,192 @@ export function ConfigForm({
         </div>
       </section>
 
+      <div className="flex flex-col gap-1.5 -mt-1.5">
+        <Label htmlFor="trigger-swimlane" className="text-sm">Auto-trigger swimlane</Label>
+        <p className="text-xs text-muted-foreground">
+          Moving a ticket to this swimlane auto-starts a workflow when the ticket has no prior runs.
+        </p>
+        <Select
+          value={model.triggerSwimlane ?? ''}
+          onValueChange={(v) => patch({ triggerSwimlane: v === '__none__' ? undefined : v || undefined })}
+          disabled={disabled}
+        >
+          <SelectTrigger id="trigger-swimlane">
+            <SelectValue placeholder="None (disabled)" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">None (disabled)</SelectItem>
+            {model.swimlanes.filter((c) => c.trim()).map((sw) => (
+              <SelectItem key={sw} value={sw}>{sw}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <Separator />
+
+      {/* Issue Types */}
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-2">
+          <SectionHeader
+            title="Issue types"
+            description="Map ticket types to workflows. &quot;epic&quot; is always available."
+          />
+          <Button variant="outline" size="sm" onClick={addIssueType} disabled={disabled}>
+            <PlusIcon data-icon="inline-start" />
+            Add type
+          </Button>
+        </div>
+        {issueTypes.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            No custom types configured. The defaults (feature, bug, issue, hotfix) apply.
+          </p>
+        )}
+        {issueTypes.length > 0 && (
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Label</TableHead>
+                  <TableHead>Workflow</TableHead>
+                  <TableHead className="w-0" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {issueTypes.map((it, index) => (
+                  <TableRow key={index}>
+                    <TableCell>
+                      <Input
+                        value={it.name}
+                        disabled={disabled}
+                        onChange={(e) => {
+                          const newName = e.target.value;
+                          updateIssueType(index, 'name', newName);
+                          const autoLabel = newName ? newName.charAt(0).toUpperCase() + newName.slice(1) : '';
+                          if (!it.label) {
+                            updateIssueType(index, 'label', autoLabel);
+                          }
+                        }}
+                        placeholder="feature"
+                        className="font-mono"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        value={it.label}
+                        disabled={disabled}
+                        onChange={(e) => updateIssueType(index, 'label', e.target.value)}
+                        placeholder="Feature"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Select
+                        value={it.workflow}
+                        disabled={disabled}
+                        onValueChange={(v) => updateIssueType(index, 'workflow', v)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a workflow" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {workflowNames.map((name) => (
+                            <SelectItem key={name} value={name}>
+                              {name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => removeIssueType(index)}
+                        disabled={disabled}
+                        aria-label="Remove issue type"
+                      >
+                        <Trash2Icon />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </section>
+
+      <Separator />
+
+      {/* Workflows */}
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-2">
+          <SectionHeader
+            title="Workflows"
+            description="Additional workflows that issue types or workflow nodes can reference."
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const name = `workflow-${Date.now().toString(36)}`;
+              patch({
+                workflows: {
+                  ...model.workflows,
+                  [name]: { name, nodes: [{ id: 'start', type: 'shell' as const, script: 'echo ready' }] },
+                },
+              });
+            }}
+            disabled={disabled}
+          >
+            <PlusIcon data-icon="inline-start" />
+            Add workflow
+          </Button>
+        </div>
+        {!model.workflows || Object.keys(model.workflows).length === 0 ? (
+          <p className="text-xs text-muted-foreground">No additional workflows defined.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {Object.entries(model.workflows ?? {}).map(([key, wf]) => (
+              <div key={key} className="flex items-center gap-2">
+                <Input
+                  value={key}
+                  disabled={disabled}
+                  onChange={(e) => {
+                    const next = { ...model.workflows };
+                    const value = next[key];
+                    delete next[key];
+                    next[e.target.value || key] = { ...value, name: e.target.value || key };
+                    patch({ workflows: next });
+                  }}
+                  placeholder="workflow-name"
+                  className="font-mono flex-1"
+                />
+                <Badge variant="secondary" className="text-xs whitespace-nowrap">
+                  {wf.nodes.length} node{wf.nodes.length !== 1 ? 's' : ''}
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => {
+                    const next = { ...model.workflows };
+                    delete next[key];
+                    patch({ workflows: Object.keys(next).length > 0 ? next : undefined });
+                  }}
+                  disabled={disabled}
+                  aria-label="Remove workflow"
+                >
+                  <Trash2Icon />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
       <Separator />
 
       {/* Workflow */}
@@ -267,21 +480,6 @@ export function ConfigForm({
             placeholder="default"
           />
         </Field>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <NumberField
-            label="Max tokens (budget)"
-            value={model.budget?.maxTokens}
-            onChange={(v) => setBudget('maxTokens', v)}
-            placeholder="unlimited"
-          />
-          <NumberField
-            label="Max cost USD (budget)"
-            value={model.budget?.maxCostUsd}
-            onChange={(v) => setBudget('maxCostUsd', v)}
-            placeholder="unlimited"
-          />
-        </div>
 
         {model.nodes.length > 0 ? (
           <div className="rounded-md border bg-card">
@@ -400,6 +598,21 @@ export function ConfigForm({
             No nodes yet. Add one to define the workflow.
           </p>
         )}
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <NumberField
+            label="Max tokens (budget)"
+            value={model.budget?.maxTokens}
+            onChange={(v) => setBudget('maxTokens', v)}
+            placeholder="unlimited"
+          />
+          <NumberField
+            label="Max cost USD (budget)"
+            value={model.budget?.maxCostUsd}
+            onChange={(v) => setBudget('maxCostUsd', v)}
+            placeholder="unlimited"
+          />
+        </div>
       </section>
 
       <WorkflowNodeDialog

@@ -2,8 +2,8 @@ import { useId, useState } from 'react';
 import { FilePenLineIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { FieldLabel } from './node-properties/fields';
+import { MarkdownEditor } from '@/components/markdown-editor';
 
 export interface InstructionsFieldProps {
   value: string;
@@ -51,12 +51,11 @@ export function InstructionsField({
         </div>
       )}
       {isInline ? (
-        <Textarea
+        <MarkdownEditor
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={onChange}
           placeholder="Inline instructions… supports $VARIABLE and {{ nodes.<id>.<path> }} substitution."
-          spellCheck={false}
-          className="min-h-24 text-sm"
+          rows={6}
         />
       ) : (
         <div className="flex items-center gap-2">

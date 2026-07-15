@@ -7,6 +7,7 @@ import {
   WorkflowIcon,
   ActivityIcon,
   BarChart3Icon,
+  BugIcon,
   ClipboardCheckIcon,
   DatabaseIcon,
   FolderKanbanIcon,
@@ -15,6 +16,9 @@ import {
   WrenchIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
+  GitBranchIcon,
+  CalendarIcon,
+  NetworkIcon,
 } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -53,7 +57,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/', label: 'Board', icon: LayoutDashboardIcon, end: true, description: 'Kanban board with drag-and-drop' },
       { to: '/issues', label: 'Issues', icon: TicketIcon, description: 'Search and filter all tickets' },
-      { to: '/codebase', label: 'Codebase', icon: DatabaseIcon, description: 'Index and search project repositories' },
+      { to: '/timeline', label: 'Timeline', icon: CalendarIcon, description: 'Project timeline with due dates' },
       { to: '/chat', label: 'Chat', icon: MessagesSquareIcon, description: 'Chat with your AI agents' },
     ],
   },
@@ -63,6 +67,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/dashboard', label: 'Dashboard', icon: ActivityIcon, description: 'Monitor active workflow runs' },
       { to: '/analytics', label: 'Analytics', icon: BarChart3Icon, description: 'Success rates, costs, and trends' },
       { to: '/evaluations', label: 'Evaluations', icon: ClipboardCheckIcon, description: 'Rate agent performance' },
+      { to: '/debug', label: 'Debug', icon: BugIcon, description: 'Inspect workflow logs and transitions' },
     ],
   },
   {
@@ -71,6 +76,9 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/workflows', label: 'Workflows', icon: WorkflowIcon, description: 'Browse and apply workflow templates' },
       { to: '/mcp', label: 'MCP', icon: PlugIcon, description: 'Model Context Protocol servers' },
       { to: '/skills', label: 'Skills', icon: WrenchIcon, description: 'Manage agent skills and tools' },
+      { to: '/codebase', label: 'Codebase Search', icon: DatabaseIcon, description: 'Index and search project repositories' },
+      { to: '/codebase-graph', label: 'Codebase Graph', icon: GitBranchIcon, description: 'File dependency graph visualization' },
+      { to: '/knowledge-graph', label: 'Knowledge Graph', icon: NetworkIcon, description: 'Multi-layered code knowledge graph' },
     ],
   },
   {

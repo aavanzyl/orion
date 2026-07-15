@@ -4,7 +4,7 @@ import type {
   WorkflowNodeConfig,
   WorkflowRun,
 } from '@orion/models';
-import { evaluateCondition, resolveNodeReference } from '@orion/config';
+import { evaluateCondition } from '@orion/config';
 import type { EmitEvent, MoveTicket, RunStore } from './ports.js';
 import type {
   NodeExecutionContext,
@@ -113,9 +113,19 @@ export class WorkflowEngine {
       const byKey = new Map(nodes.map((n) => [n.nodeKey, n]));
 
       if (nodes.some((n) => n.status === 'failed')) {
+        await this.deps.emit({
+          runId: current.id,
+          type: 'log',
+          payload: { message: 'Run failed: one or more nodes failed', transition: 'run.failed' },
+        });
         return this.setRunStatus(current, 'failed');
       }
       if (nodes.every((n) => TERMINAL_NODE.has(n.status))) {
+        await this.deps.emit({
+          runId: current.id,
+          type: 'log',
+          payload: { message: 'All nodes have reached a terminal state', transition: 'run.completed' },
+        });
         return this.setRunStatus(current, 'completed');
       }
 
@@ -124,9 +134,19 @@ export class WorkflowEngine {
         const latest = await this.deps.store.get(current.id);
         if (latest) {
           if (budget.maxTokens && (latest.totalTokens ?? 0) >= budget.maxTokens) {
+            await this.deps.emit({
+              runId: current.id,
+              type: 'log',
+              payload: { message: `Budget exceeded: maxTokens (${budget.maxTokens}) limit reached`, transition: 'budget.exceeded' },
+            });
             return this.setRunStatus(current, 'failed', `Budget exceeded: maxTokens limit (${budget.maxTokens}) reached`);
           }
           if (budget.maxCostUsd && (latest.costUsd ?? 0) >= budget.maxCostUsd) {
+            await this.deps.emit({
+              runId: current.id,
+              type: 'log',
+              payload: { message: `Budget exceeded: maxCostUsd (${budget.maxCostUsd}) limit reached`, transition: 'budget.exceeded' },
+            });
             return this.setRunStatus(current, 'failed', `Budget exceeded: maxCostUsd limit (${budget.maxCostUsd}) reached`);
           }
         }
@@ -151,9 +171,20 @@ export class WorkflowEngine {
       );
 
       if (ready.length === 0) {
-        // Nothing runnable: either an approval/other node is waiting, or the
-        // remaining nodes are blocked by an unmet dependency. Either way the run
-        // pauses until an external event (approval) resumes it.
+        const waitingNode = nodes.find((n) => n.status === 'waiting');
+        if (waitingNode) {
+          await this.deps.emit({
+            runId: current.id,
+            type: 'log',
+            payload: { message: `Run paused: node "${waitingNode.nodeKey}" is waiting for approval`, transition: 'run.waiting', waitingNode: waitingNode.nodeKey },
+          });
+        } else {
+          await this.deps.emit({
+            runId: current.id,
+            type: 'log',
+            payload: { message: 'Run paused: no runnable nodes (dependencies not met)', transition: 'run.waiting' },
+          });
+        }
         return this.setRunStatus(current, 'waiting');
       }
 
@@ -230,6 +261,18 @@ export class WorkflowEngine {
         type: 'node.skipped',
         payload: { nodeKey: node.nodeKey, reason: 'condition' },
       });
+      await this.deps.emit({
+        runId: run.id,
+        nodeId: node.id,
+        type: 'transition',
+        payload: { nodeKey: node.nodeKey, from: node.status, to: 'skipped', reason: 'condition' },
+      });
+      await this.deps.emit({
+        runId: run.id,
+        nodeId: node.id,
+        type: 'log',
+        payload: { message: `Node "${node.nodeKey}" condition-skipped (upstream branch not taken)`, transition: 'node.skipped', nodeKey: node.nodeKey, reason: 'condition' },
+      });
       return { result: 'skipped' };
     }
 
@@ -242,7 +285,6 @@ export class WorkflowEngine {
 
     if (outcome.status === 'failed') {
       if (nodeConfig.continueOnError) {
-        // Advisory node: record the failure but let the workflow continue.
         await this.deps.store.updateNode(node.id, {
           status: 'skipped',
           error: outcome.error,
@@ -255,14 +297,137 @@ export class WorkflowEngine {
           type: 'node.failed',
           payload: { nodeKey: node.nodeKey, error: outcome.error, continued: true },
         });
+        await this.deps.emit({
+          runId: run.id,
+          nodeId: node.id,
+          type: 'transition',
+          payload: { nodeKey: node.nodeKey, from: node.status, to: 'skipped', reason: 'continueOnError', error: outcome.error },
+        });
+        await this.deps.emit({
+          runId: run.id,
+          nodeId: node.id,
+          type: 'log',
+          payload: { message: `Node "${node.nodeKey}" failed but continued (continueOnError): ${outcome.error}`, transition: 'node.failed.continued', nodeKey: node.nodeKey, error: outcome.error },
+        });
         return { result: 'skipped' };
       }
+
+      if (nodeConfig.onFailureTransitionTo) {
+        const targetKey = nodeConfig.onFailureTransitionTo;
+        const targetNode = byKey.get(targetKey);
+        if (targetNode) {
+          const failureContext = { onFailureFrom: node.nodeKey, error: outcome.error };
+          await this.deps.store.updateNode(targetNode.id, {
+            status: 'pending',
+            input: failureContext,
+          });
+
+          const allNodes = [...byKey.values()];
+          const toReset = new Set<string>([node.id]);
+          let changed = true;
+          while (changed) {
+            changed = false;
+            for (const n of allNodes) {
+              if (toReset.has(n.id)) continue;
+              if (n.dependsOn.some((depKey) => {
+                const depNode = byKey.get(depKey);
+                return depNode !== undefined && toReset.has(depNode.id);
+              })) {
+                toReset.add(n.id);
+                changed = true;
+              }
+            }
+          }
+
+          for (const nodeId of toReset) {
+            await this.deps.store.updateNode(nodeId, {
+              status: 'pending',
+            });
+          }
+
+          await this.deps.emit({
+            runId: run.id,
+            nodeId: node.id,
+            type: 'node.failed',
+            payload: { nodeKey: node.nodeKey, error: outcome.error, transitionedTo: targetKey },
+          });
+          await this.deps.emit({
+            runId: run.id,
+            nodeId: node.id,
+            type: 'transition',
+            payload: { nodeKey: node.nodeKey, from: node.status, to: 'pending', reason: 'onFailureTransitionTo', targetNode: targetKey, error: outcome.error },
+          });
+          await this.deps.emit({
+            runId: run.id,
+            nodeId: node.id,
+            type: 'log',
+            payload: { message: `Node "${node.nodeKey}" failed, transitioning to "${targetKey}": ${outcome.error}`, transition: 'node.failed.transition', nodeKey: node.nodeKey, targetNode: targetKey, error: outcome.error },
+          });
+          return { result: 'skipped' };
+        }
+
+        const swimlanes = config.board.swimlanes ?? [];
+        if (swimlanes.includes(targetKey)) {
+          await this.deps.moveTicket(run.ticketId, targetKey);
+          await this.deps.store.updateNode(node.id, {
+            status: 'skipped',
+            error: outcome.error,
+            completedAt: new Date().toISOString(),
+            ...telemetry,
+          });
+          await this.deps.emit({
+            runId: run.id,
+            nodeId: node.id,
+            type: 'node.failed',
+            payload: { nodeKey: node.nodeKey, error: outcome.error, transitionedToSwimlane: targetKey },
+          });
+          await this.deps.emit({
+            runId: run.id,
+            nodeId: node.id,
+            type: 'log',
+            payload: { message: `Node "${node.nodeKey}" failed, moving ticket to swimlane "${targetKey}": ${outcome.error}`, transition: 'node.failed.transition.swimlane', nodeKey: node.nodeKey, targetSwimlane: targetKey, error: outcome.error },
+          });
+          return { result: 'skipped' };
+        }
+
+        await this.failNode(
+          node,
+          `onFailureTransitionTo target "${targetKey}" not found`,
+          telemetry,
+        );
+        await this.deps.emit({
+          runId: run.id,
+          nodeId: node.id,
+          type: 'node.failed',
+          payload: { nodeKey: node.nodeKey, error: outcome.error },
+        });
+        await this.deps.emit({
+          runId: run.id,
+          nodeId: node.id,
+          type: 'log',
+          payload: { message: `Node "${node.nodeKey}" failed: onFailureTransitionTo target "${targetKey}" not found`, transition: 'node.failed.transition.error', nodeKey: node.nodeKey, targetNode: targetKey },
+        });
+        return { result: 'failed' };
+      }
+
       await this.failNode(node, outcome.error, telemetry);
       await this.deps.emit({
         runId: run.id,
         nodeId: node.id,
         type: 'node.failed',
         payload: { nodeKey: node.nodeKey, error: outcome.error },
+      });
+      await this.deps.emit({
+        runId: run.id,
+        nodeId: node.id,
+        type: 'transition',
+        payload: { nodeKey: node.nodeKey, from: node.status, to: 'failed', error: outcome.error },
+      });
+      await this.deps.emit({
+        runId: run.id,
+        nodeId: node.id,
+        type: 'log',
+        payload: { message: `Node "${node.nodeKey}" failed: ${outcome.error}`, transition: 'node.failed', nodeKey: node.nodeKey, error: outcome.error },
       });
       return { result: 'failed' };
     }
@@ -274,6 +439,12 @@ export class WorkflowEngine {
         nodeId: node.id,
         type: 'node.status',
         payload: { nodeKey: node.nodeKey, status: 'waiting' },
+      });
+      await this.deps.emit({
+        runId: run.id,
+        nodeId: node.id,
+        type: 'transition',
+        payload: { nodeKey: node.nodeKey, from: node.status, to: 'waiting' },
       });
       return { result: 'waiting' };
     }
@@ -293,6 +464,18 @@ export class WorkflowEngine {
       nodeId: node.id,
       type: 'node.completed',
       payload: { nodeKey: node.nodeKey, output: outcome.output, usage: outcome.usage },
+    });
+    await this.deps.emit({
+      runId: run.id,
+      nodeId: node.id,
+      type: 'transition',
+      payload: { nodeKey: node.nodeKey, from: node.status, to: 'completed' },
+    });
+    await this.deps.emit({
+      runId: run.id,
+      nodeId: node.id,
+      type: 'log',
+      payload: { message: `Node "${node.nodeKey}" completed`, transition: 'node.completed', nodeKey: node.nodeKey },
     });
     return { result: 'completed', threadId: outcome.threadId };
   }
@@ -377,6 +560,12 @@ export class WorkflowEngine {
       type: 'node.completed',
       payload: { nodeKey: node.nodeKey, branchIndex: selectedIndex },
     });
+    await this.deps.emit({
+      runId: run.id,
+      nodeId: node.id,
+      type: 'log',
+      payload: { message: `Node "${node.nodeKey}" condition evaluated: branch ${selectedIndex} selected`, transition: 'node.condition.selected', nodeKey: node.nodeKey, branchIndex: selectedIndex },
+    });
 
     for (let i = 0; i < branches.length; i++) {
       if (i === selectedIndex) continue;
@@ -394,6 +583,12 @@ export class WorkflowEngine {
           nodeId: targetNode.id,
           type: 'node.skipped',
           payload: { nodeKey: targetNode.nodeKey, reason: 'condition' },
+        });
+        await this.deps.emit({
+          runId: run.id,
+          nodeId: targetNode.id,
+          type: 'log',
+          payload: { message: `Node "${targetNode.nodeKey}" condition-skipped (branch ${i} not selected)`, transition: 'node.skipped', nodeKey: targetNode.nodeKey, reason: 'condition', branchIndex: i },
         });
       }
     }
@@ -421,6 +616,11 @@ export class WorkflowEngine {
         type: 'node.completed',
         payload: { nodeKey, approved: true },
       });
+      await this.deps.emit({
+        runId: run.id,
+        type: 'log',
+        payload: { message: `Node "${nodeKey}" approved, resuming run`, transition: 'node.approved', nodeKey },
+      });
     }
     return this.advance(run, config, workspace);
   }
@@ -439,6 +639,7 @@ export class WorkflowEngine {
       return { status: 'failed', error: `No executor for node type "${node.type}"` };
     }
 
+    const previousStatus = node.status;
     await this.deps.store.updateNode(node.id, {
       status: 'running',
       startedAt: new Date().toISOString(),
@@ -449,6 +650,18 @@ export class WorkflowEngine {
       type: 'node.started',
       payload: { nodeKey: node.nodeKey, type: node.type },
     });
+    await this.deps.emit({
+      runId: run.id,
+      nodeId: node.id,
+      type: 'transition',
+      payload: { nodeKey: node.nodeKey, from: previousStatus, to: 'running' },
+    });
+    await this.deps.emit({
+      runId: run.id,
+      nodeId: node.id,
+      type: 'log',
+      payload: { message: `Node "${node.nodeKey}" (${node.type}) started`, transition: 'node.started', nodeKey: node.nodeKey, nodeType: node.type },
+    });
 
     if (nodeConfig.swimlane) {
       await this.deps.moveTicket(run.ticketId, nodeConfig.swimlane);
@@ -458,10 +671,12 @@ export class WorkflowEngine {
         type: 'ticket.moved',
         payload: { ticketId: run.ticketId, swimlane: nodeConfig.swimlane },
       });
-    }
-
-    if (nodeConfig.matrix) {
-      return this.runMatrix(run, node, nodeConfig, config, workspace, executor, signal, nodeOutputs);
+      await this.deps.emit({
+        runId: run.id,
+        nodeId: node.id,
+        type: 'log',
+        payload: { message: `Ticket moved to swimlane "${nodeConfig.swimlane}"`, transition: 'ticket.moved', ticketId: run.ticketId, swimlane: nodeConfig.swimlane },
+      });
     }
 
     if (nodeConfig.loop) {
@@ -499,6 +714,12 @@ export class WorkflowEngine {
         type: 'node.iteration',
         payload: { nodeKey: node.nodeKey, iteration, maxIterations: loop.maxIterations },
       });
+      await this.deps.emit({
+        runId: run.id,
+        nodeId: node.id,
+        type: 'log',
+        payload: { message: `Node "${node.nodeKey}" loop iteration ${iteration}/${loop.maxIterations}`, transition: 'node.loop.iteration', nodeKey: node.nodeKey, iteration, maxIterations: loop.maxIterations },
+      });
 
       outcome = await this.runAttempts(
         run,
@@ -533,105 +754,12 @@ export class WorkflowEngine {
     };
   }
 
-  /**
-   * Fan the node out into one concurrent execution per matrix item. Items come
-   * from a literal array or a `nodes.<id>[.path]` reference resolved against the
-   * upstream outputs. Each item runs through the same attempt/retry/timeout
-   * machinery; the node completes with `{ items: [...] }` (usage summed) or fails
-   * naming the first failed index.
-   */
-  private async runMatrix(
-    run: WorkflowRun,
-    node: RunNode,
-    nodeConfig: WorkflowNodeConfig,
-    config: ProjectConfig,
-    workspace: RunWorkspace,
-    executor: NodeExecutor,
-    signal: AbortSignal | undefined,
-    nodeOutputs: Record<string, unknown>,
-  ): Promise<NodeOutcome> {
-    const matrix = nodeConfig.matrix!;
 
-    let items: unknown[];
-    if (Array.isArray(matrix.items)) {
-      items = matrix.items;
-    } else {
-      const ref = matrix.items.trim();
-      const parsed = /^nodes\.([A-Za-z0-9_-]+)((?:\.[A-Za-z0-9_]+)*)$/.exec(ref);
-      if (!parsed) {
-        return { status: 'failed', error: `matrix.items reference "${matrix.items}" is not a valid node output reference` };
-      }
-      const segments = parsed[2] ? parsed[2].replace(/^\./, '').split('.') : [];
-      const resolved = resolveNodeReference(nodeOutputs, parsed[1], segments);
-      if (!Array.isArray(resolved)) {
-        return { status: 'failed', error: `matrix.items reference "${matrix.items}" did not resolve to an array` };
-      }
-      items = resolved;
-    }
-
-    await this.deps.emit({
-      runId: run.id,
-      nodeId: node.id,
-      type: 'node.matrix',
-      payload: { nodeKey: node.nodeKey, total: items.length },
-    });
-
-    if (items.length === 0) {
-      return { status: 'completed', output: { items: [] } };
-    }
-
-    const total = items.length;
-    const as = matrix.as;
-    const maxParallel =
-      matrix.maxParallel && matrix.maxParallel > 0
-        ? Math.min(matrix.maxParallel, total)
-        : total;
-
-    // Run items in bounded waves, preserving per-item output order. A worker
-    // pool pulls the next index until the queue drains.
-    const outcomes: NodeOutcome[] = new Array(total);
-    let cursor = 0;
-    const worker = async (): Promise<void> => {
-      for (;;) {
-        if (signal?.aborted) return;
-        const index = cursor++;
-        if (index >= total) return;
-        outcomes[index] = await this.runAttempts(
-          run,
-          node,
-          nodeConfig,
-          config,
-          workspace,
-          executor,
-          run,
-          signal,
-          nodeOutputs,
-          { item: items[index], index, total, as },
-        );
-      }
-    };
-    await Promise.all(Array.from({ length: maxParallel }, () => worker()));
-
-    let totalUsage: NodeUsage | undefined;
-    const outputs: unknown[] = [];
-    for (let index = 0; index < outcomes.length; index++) {
-      const outcome = outcomes[index];
-      if (outcome.status !== 'completed') {
-        const reason = outcome.status === 'failed' ? outcome.error : 'item did not complete';
-        return { status: 'failed', error: `matrix item ${index} failed: ${reason}` };
-      }
-      outputs.push(outcome.output);
-      totalUsage = addUsage(totalUsage, outcome.usage);
-    }
-
-    return { status: 'completed', output: { items: outputs }, usage: totalUsage };
-  }
 
   /**
    * Run the node's executor once, honoring its retry/timeout policy. The
    * `contextRun` supplies the threadId the execution context should observe
-   * (updated between loop iterations). An optional `matrix` context marks the
-   * execution as one item of a matrix fan-out.
+   * (updated between loop iterations).
    */
   private async runAttempts(
     run: WorkflowRun,
@@ -643,7 +771,6 @@ export class WorkflowEngine {
     contextRun: WorkflowRun,
     signal: AbortSignal | undefined,
     nodeOutputs: Record<string, unknown>,
-    matrix?: { item: unknown; index: number; total: number; as?: string },
   ): Promise<NodeOutcome> {
     const makeCtx = (attemptSignal?: AbortSignal): NodeExecutionContext => ({
       run: contextRun,
@@ -655,7 +782,6 @@ export class WorkflowEngine {
       signal: attemptSignal,
       emit: (type, payload) => this.deps.emit({ runId: run.id, nodeId: node.id, type, payload }),
       nodeOutputs,
-      matrix,
     });
 
     const maxAttempts = Math.max(1, (nodeConfig.retries ?? 0) + 1);
@@ -681,6 +807,12 @@ export class WorkflowEngine {
           maxAttempts,
           error: outcome.error,
         },
+      });
+      await this.deps.emit({
+        runId: run.id,
+        nodeId: node.id,
+        type: 'log',
+        payload: { message: `Node "${node.nodeKey}" retry ${attempt}/${maxAttempts} after error: ${outcome.error}`, transition: 'node.retry', nodeKey: node.nodeKey, attempt, maxAttempts, error: outcome.error },
       });
 
       if (retryDelayMs > 0) await this.delay(retryDelayMs, signal);
@@ -763,8 +895,14 @@ export class WorkflowEngine {
     error?: string,
   ): Promise<WorkflowRun> {
     if (run.status === status && !error) return run;
+    const previous = run.status;
     const updated = await this.deps.store.update(run.id, { status, error: error ?? null });
     await this.deps.emit({ runId: run.id, type: 'run.status', payload: { status, error } });
+    await this.deps.emit({
+      runId: run.id,
+      type: 'run.transition',
+      payload: { from: previous, to: status, error },
+    });
     return updated;
   }
 }

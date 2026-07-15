@@ -39,7 +39,7 @@ export interface BoardSyncDialogProps {
   onSaved: () => void;
 }
 
-type ProviderKey = 'linear' | 'jira' | 'trello';
+type ProviderKey = 'linear' | 'jira' | 'trello' | 'github';
 
 interface ProviderMeta {
   label: string;
@@ -76,6 +76,15 @@ const PROVIDERS: Record<ProviderKey, ProviderMeta> = {
     secretPlaceholder: 'ATTA...',
     containerLabel: 'Board',
     configFields: [{ key: 'key', label: 'API key', placeholder: 'Trello API key' }],
+  },
+  github: {
+    label: 'GitHub',
+    secretLabel: 'GitHub token',
+    secretPlaceholder: 'ghp_...',
+    containerLabel: 'Repository',
+    configFields: [
+      { key: 'baseUrl', label: 'API URL', placeholder: 'https://api.github.com' },
+    ],
   },
 };
 

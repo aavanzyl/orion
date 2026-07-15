@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router-dom';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { AppLayout } from '@/features/layout/app-layout';
+import { RunNotificationsProvider } from '@/features/notifications/run-notifications-provider';
 import { BoardPage } from '@/features/board/board-page';
 import { ChatPage } from '@/features/chat/chat-page';
 import { ProjectsPage } from '@/features/projects/projects-page';
@@ -15,9 +16,14 @@ import { DashboardPage } from '@/features/dashboard/dashboard-page';
 import { AnalyticsPage } from '@/features/analytics/analytics-page';
 import { EvaluationsPage } from '@/features/evaluations/evaluations-page';
 import { CodebasePage } from '@/features/codebase/codebase-page';
+import { CodebaseGraphPage } from '@/features/codebase/codebase-graph-page';
+import { CodegenGraphPage } from '@/features/codebase/codegen-graph-page';
+import { KnowledgeGraphPage } from '@/features/codebase/knowledge-graph-page';
 import { IssuesPage } from '@/features/issues/issues-page';
 import { McpPage } from '@/features/mcp/mcp-page';
 import { SkillsPage } from '@/features/skills/skills-page';
+import { TimelinePage } from '@/features/timeline/timeline-page';
+import { DebugPage } from '@/features/debug/debug-page';
 
 export function App() {
   return (
@@ -30,20 +36,27 @@ export function App() {
           <Route path="/evaluations" element={<EvaluationsPage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/projects/:projectId" element={<BoardPage />} />
           <Route path="/projects/:projectId/builder" element={<WorkflowBuilderPage />} />
           <Route path="/projects/:projectId/config" element={<ConfigEditorPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/workflows/:name" element={<WorkflowTemplateView />} />
           <Route path="/issues" element={<IssuesPage />} />
+          <Route path="/timeline" element={<TimelinePage />} />
           <Route path="/schedule" element={<SchedulesPage />} />
           <Route path="/codebase" element={<CodebasePage />} />
+          <Route path="/codebase-graph" element={<CodebaseGraphPage />} />
+          <Route path="/codegen-graph" element={<CodegenGraphPage />} />
+          <Route path="/knowledge-graph" element={<KnowledgeGraphPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/mcp" element={<McpPage />} />
           <Route path="/skills" element={<SkillsPage />} />
+          <Route path="/debug" element={<DebugPage />} />
           <Route path="*" element={<BoardPage />} />
         </Route>
       </Routes>
       <Toaster />
+      <RunNotificationsProvider />
     </TooltipProvider>
   );
 }

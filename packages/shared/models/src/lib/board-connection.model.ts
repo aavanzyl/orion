@@ -4,7 +4,7 @@ import type { ProjectId } from './project.model.js';
 export type BoardSyncDirection = 'pull' | 'push' | 'both';
 
 /** Providers that can back a board connection. */
-export type BoardConnectionProvider = 'linear' | 'jira' | 'trello';
+export type BoardConnectionProvider = 'linear' | 'jira' | 'trello' | 'github';
 
 export interface BoardConnection {
   id: string;

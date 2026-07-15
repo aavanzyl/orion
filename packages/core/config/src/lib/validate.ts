@@ -148,14 +148,6 @@ function validateNode(
   if ((node as { loop?: unknown }).loop && node.type !== 'agent') {
     issues.push(`node "${node.id}" has a loop but only agent nodes may loop`);
   }
-  if ((node as { matrix?: unknown }).matrix) {
-    if (node.type !== 'agent' && node.type !== 'shell') {
-      issues.push(`node "${node.id}" has a matrix but only agent and shell nodes may fan out`);
-    }
-    if ((node as { loop?: unknown }).loop) {
-      issues.push(`node "${node.id}" cannot combine matrix with loop`);
-    }
-  }
 }
 
 function hasCycle(config: ProjectConfig): boolean {

@@ -24,7 +24,7 @@ export interface DbHandle {
  * Infer the target dialect from a connection string. Postgres remains the
  * default: only explicit pglite/file/memory forms opt into the embedded engine.
  */
-export function detectDialect(connectionString: string): DbDialect {
+function detectDialect(connectionString: string): DbDialect {
   if (/^postgres(ql)?:\/\//i.test(connectionString)) return 'postgres';
   if (
     /^pglite:/i.test(connectionString) ||
@@ -62,16 +62,4 @@ export function createDb(connectionString: string): DbHandle {
   return { db, dialect, close: () => pool.end() };
 }
 
-let singleton: DbHandle | undefined;
 
-/** Lazily create a shared client from the DATABASE_URL environment variable. */
-export function getDb(): DbHandle {
-  if (!singleton) {
-    const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) {
-      throw new Error('DATABASE_URL is not set');
-    }
-    singleton = createDb(connectionString);
-  }
-  return singleton;
-}

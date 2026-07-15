@@ -24,7 +24,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 
-const HARNESS_OPTIONS = ['codex', 'openai', 'claude', 'opencode'];
+const HARNESS_OPTIONS = ['codex', 'claude', 'opencode'];
 
 interface KnownProvider {
   label: string;

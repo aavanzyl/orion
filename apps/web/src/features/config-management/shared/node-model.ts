@@ -2,7 +2,6 @@ import type {
   ConditionBranch,
   HttpMethod,
   LoopConfig,
-  MatrixConfig,
   McpServerMap,
   MessageTarget,
   NotificationLevel,
@@ -55,8 +54,8 @@ export interface NodeData {
   retryDelayMs?: number;
   timeoutMs?: number;
   continueOnError?: boolean;
+  onFailureTransitionTo?: string;
   loop?: LoopConfig;
-  matrix?: MatrixConfig;
   skills?: string[];
   mcpServers?: McpServerMap;
 }
@@ -73,7 +72,7 @@ export const NODE_TYPES = [
   'graphql',
 ] as const satisfies readonly WorkflowNodeType[];
 
-export type EditableNodeType = (typeof NODE_TYPES)[number];
+type EditableNodeType = (typeof NODE_TYPES)[number];
 
 /** Human-readable labels for each node type, shared across both surfaces. */
 export const NODE_TYPE_LABELS: Record<EditableNodeType, string> = {
@@ -182,8 +181,8 @@ export function nodeConfigToData(node: WorkflowNodeConfig): NodeData {
     retryDelayMs: node.retryDelayMs,
     timeoutMs: node.timeoutMs,
     continueOnError: node.continueOnError,
+    onFailureTransitionTo: node.onFailureTransitionTo,
     loop: node.loop,
-    matrix: node.matrix,
     skills: node.skills,
     mcpServers: node.mcpServers,
   };
@@ -251,8 +250,8 @@ export function dataToNodeConfig(
   }
   if (supportsRetryPolicy && typeof data.timeoutMs === 'number') node.timeoutMs = data.timeoutMs;
   if (data.continueOnError) node.continueOnError = true;
+  if (data.onFailureTransitionTo?.trim()) node.onFailureTransitionTo = data.onFailureTransitionTo.trim();
   if (data.loop && isAgent) node.loop = data.loop;
-  if (data.matrix && (isAgent || isShell)) node.matrix = data.matrix;
   if (isAgent && data.skills?.length) node.skills = data.skills;
   if (isAgent && data.mcpServers && Object.keys(data.mcpServers).length > 0) {
     node.mcpServers = data.mcpServers;
@@ -294,9 +293,6 @@ export function validateNodeData(data: NodeData, id: string): string[] {
   if (data.type === 'graphql') {
     if (!data.url?.trim()) issues.push(`Node "${label}" is a graphql node but has no url.`);
     if (!data.query?.trim()) issues.push(`Node "${label}" is a graphql node but has no query.`);
-  }
-  if (data.loop && data.matrix) {
-    issues.push(`Node "${label}" cannot combine a loop with a matrix.`);
   }
   return issues;
 }

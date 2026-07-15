@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
-import type { ApiResponse, CreateMcpServerInput, McpOAuthStored, McpServerConfig, McpServerMap, RunStatus, UpdateMcpServerInput } from '@orion/models';
+import type { ApiResponse, CreateMcpServerInput, McpOAuthStored, McpServerConfig, McpServerMap, RunEventType, RunStatus, UpdateMcpServerInput } from '@orion/models';
 import {
   ConfigError,
   getWorkflowTemplate,
@@ -14,6 +14,8 @@ import {
   updateSkillLockEntry,
   uninstallSkill,
   syncSkill,
+  createSkill,
+  updateSkillContent,
 } from '@orion/config';
 import type { Container } from '../container.js';
 import { ProjectService } from '../services/project.service.js';
@@ -21,6 +23,7 @@ import { RunService } from '../services/run.service.js';
 import { ChatService } from '../services/chat.service.js';
 import { ScheduleService } from '../services/schedule.service.js';
 import { FilesystemService } from '../services/filesystem.service.js';
+import { GraphService } from '../services/graph.service.js';
 import { encrypt, decrypt } from '../crypto.js';
 
 function parseSkillTags(raw: unknown): string[] | undefined {
@@ -171,6 +174,7 @@ export function createApiRouter(
   const router = Router();
   const projects = new ProjectService(c);
   const filesystem = new FilesystemService(c);
+  const graphService = new GraphService(c);
 
   // Global skills service (project-independent, stored under ~/.orion/skills/)
   const skills = {
@@ -184,6 +188,10 @@ export function createApiRouter(
       syncSkill('', name, '.orion/config.yaml', 'global', c.env.githubToken),
     uninstallGlobal: (name: string) =>
       uninstallSkill('', name, '.orion/config.yaml', 'global'),
+    createGlobal: (name: string, description: string, content: string) =>
+      createSkill('', name, description, content, '.orion/config.yaml', 'global'),
+    updateGlobalContent: (name: string, content: string, newName?: string, newDescription?: string) =>
+      updateSkillContent('', name, content, '.orion/config.yaml', 'global', newName, newDescription),
   };
 
   router.get(
@@ -422,6 +430,40 @@ export function createApiRouter(
     }),
   );
 
+  router.post(
+    '/skills/create',
+    asyncHandler(async (req, res) => {
+      const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+      const description = typeof req.body?.description === 'string' ? req.body.description.trim() : '';
+      const content = typeof req.body?.content === 'string' ? req.body.content : '';
+      if (!name) return fail(res, 'name is required');
+      if (!description) return fail(res, 'description is required');
+      try {
+        await skills.createGlobal(name, description, content);
+        ok(res, { name, description }, 201);
+      } catch (err) {
+        if (err instanceof ConfigError) return fail(res, err.message, 422);
+        throw err;
+      }
+    }),
+  );
+
+  router.put(
+    '/skills/:name/content',
+    asyncHandler(async (req, res) => {
+      const content = typeof req.body?.content === 'string' ? req.body.content : '';
+      const newName = typeof req.body?.name === 'string' ? req.body.name.trim() : undefined;
+      const newDescription = typeof req.body?.description === 'string' ? req.body.description.trim() : undefined;
+      try {
+        await skills.updateGlobalContent(req.params.name, content, newName, newDescription);
+        ok(res, { name: newName ?? req.params.name });
+      } catch (err) {
+        if (err instanceof ConfigError) return fail(res, err.message, 422);
+        throw err;
+      }
+    }),
+  );
+
   // Project-scoped skills
 
   router.get(
@@ -524,6 +566,44 @@ export function createApiRouter(
     }),
   );
 
+  router.post(
+    '/projects/:id/skills/create',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+      const description = typeof req.body?.description === 'string' ? req.body.description.trim() : '';
+      const content = typeof req.body?.content === 'string' ? req.body.content : '';
+      if (!name) return fail(res, 'name is required');
+      if (!description) return fail(res, 'description is required');
+      try {
+        await projects.createSkill(project, name, description, content);
+        ok(res, { name, description }, 201);
+      } catch (err) {
+        if (err instanceof ConfigError) return fail(res, err.message, 422);
+        throw err;
+      }
+    }),
+  );
+
+  router.put(
+    '/projects/:id/skills/:name/content',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const content = typeof req.body?.content === 'string' ? req.body.content : '';
+      const newName = typeof req.body?.name === 'string' ? req.body.name.trim() : undefined;
+      const newDescription = typeof req.body?.description === 'string' ? req.body.description.trim() : undefined;
+      try {
+        await projects.updateSkillContent(project, req.params.name, content, newName, newDescription);
+        ok(res, { name: newName ?? req.params.name });
+      } catch (err) {
+        if (err instanceof ConfigError) return fail(res, err.message, 422);
+        throw err;
+      }
+    }),
+  );
+
   router.get(
     '/projects',
     asyncHandler(async (_req, res) => ok(res, await projects.list())),
@@ -532,7 +612,7 @@ export function createApiRouter(
   router.post(
     '/projects',
     asyncHandler(async (req, res) => {
-      const { name, sourceKind = 'remote', repoUrl, rootPath } = req.body ?? {};
+      const { name, sourceKind = 'remote', repoUrl, rootPath, config } = req.body ?? {};
       if (!name) return fail(res, 'name is required');
       if (sourceKind === 'remote' && !repoUrl) {
         return fail(res, 'repoUrl is required for remote projects');
@@ -542,7 +622,7 @@ export function createApiRouter(
       }
       // Local and workspace sources are handled by the git-based SCM adapter.
       const scmProvider = req.body.scmProvider ?? 'github';
-      ok(res, await projects.create({ ...req.body, sourceKind, scmProvider }), 201);
+      ok(res, await projects.create({ ...req.body, sourceKind, scmProvider, configYaml: config }), 201);
     }),
   );
 
@@ -586,6 +666,7 @@ export function createApiRouter(
         board: config.board,
         workflow: config.workflow,
         workflows: Object.keys(config.workflows ?? {}),
+        issueTypes: config.issueTypes,
       });
     }),
   );
@@ -628,6 +709,22 @@ export function createApiRouter(
       const project = await projects.get(req.params.id);
       if (!project) return fail(res, 'Project not found', 404);
       ok(res, await projects.getBoard(project));
+    }),
+  );
+
+  /** Timeline: epic tickets with date ranges, plus epics for the project. */
+  router.get(
+    '/projects/:id/timeline',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const [all, epics] = await Promise.all([
+        c.tickets.listByProject(req.params.id),
+        c.epics.listByProject(req.params.id),
+      ]);
+      const epicTickets = all.filter((t) => t.type === 'epic' && t.startDate && t.dueDate);
+      epicTickets.sort((a, b) => new Date(a.startDate!).getTime() - new Date(b.startDate!).getTime());
+      ok(res, { tickets: epicTickets, epics });
     }),
   );
 
@@ -679,6 +776,152 @@ export function createApiRouter(
     }),
   );
 
+  router.get(
+    '/projects/:id/files/dirs',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      ok(res, await c.ragService.listDirs(req.params.id));
+    }),
+  );
+
+  router.get(
+    '/projects/:id/call-graph',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const dir = typeof req.query.dir === 'string' ? req.query.dir : undefined;
+      const extensions = typeof req.query.extensions === 'string' ? req.query.extensions : undefined;
+      ok(res, await c.ragService.getCallGraph(req.params.id, dir, extensions));
+    }),
+  );
+
+  router.get(
+    '/projects/:id/files/graph',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const maxFiles = typeof req.query.maxFiles === 'string' ? parseInt(req.query.maxFiles, 10) || 0 : 0;
+      const connectedOnly = req.query.connectedOnly !== 'false';
+      const dir = typeof req.query.dir === 'string' ? req.query.dir : undefined;
+      const extensions = typeof req.query.extensions === 'string' ? req.query.extensions : undefined;
+      ok(res, await c.ragService.getGraph(req.params.id, maxFiles, connectedOnly, dir, extensions));
+    }),
+  );
+
+  router.get(
+    '/projects/:id/codegen-graph',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const maxFiles = typeof req.query.maxFiles === 'string' ? parseInt(req.query.maxFiles, 10) || 250 : 250;
+      const dir = typeof req.query.dir === 'string' ? req.query.dir : undefined;
+      const extensions = typeof req.query.extensions === 'string' ? req.query.extensions : undefined;
+      ok(res, await c.ragService.getCodegenGraph(req.params.id, maxFiles, dir, extensions));
+    }),
+  );
+
+  // Knowledge Graph routes (new, enhanced graph functionality)
+  router.get(
+    '/projects/:id/knowledge-graph',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const graph = await graphService.getGraph(project.id);
+      res.json(graph);
+    }),
+  );
+
+  router.post(
+    '/projects/:id/knowledge-graph/build',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const graph = await graphService.buildGraph(project.id);
+      res.json(graph);
+    }),
+  );
+
+  router.get(
+    '/projects/:id/knowledge-graph/query',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const { q } = req.query;
+      if (!q || typeof q !== 'string') {
+        return fail(res, 'Query parameter "q" is required');
+      }
+      const result = await graphService.queryGraph(project.id, q);
+      ok(res, result);
+    }),
+  );
+
+  router.get(
+    '/projects/:id/knowledge-graph/path',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const { source, target } = req.query;
+      if (!source || !target || typeof source !== 'string' || typeof target !== 'string') {
+        return fail(res, 'Query parameters "source" and "target" are required');
+      }
+      const path = await graphService.findPath(project.id, source, target);
+      if (!path) {
+        return fail(res, 'No path found between the specified concepts', 404);
+      }
+      ok(res, path);
+    }),
+  );
+
+  router.get(
+    '/projects/:id/knowledge-graph/explain',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const { label } = req.query;
+      if (!label || typeof label !== 'string') {
+        return fail(res, 'Query parameter "label" is required');
+      }
+      const node = await graphService.explainNode(project.id, label);
+      if (!node) {
+        return fail(res, `Node "${label}" not found`, 404);
+      }
+      ok(res, node);
+    }),
+  );
+
+  router.get(
+    '/projects/:id/knowledge-graph/god-nodes',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const topN = req.query.n ? parseInt(req.query.n as string, 10) : 10;
+      const nodes = await graphService.getGodNodes(project.id, topN);
+      ok(res, nodes);
+    }),
+  );
+
+  router.get(
+    '/projects/:id/knowledge-graph/stats',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const stats = await graphService.getStats(project.id);
+      ok(res, stats);
+    }),
+  );
+
+  router.get(
+    '/projects/:id/knowledge-graph/html',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const html = await graphService.exportHtml(project.id);
+      res.setHeader('Content-Type', 'text/html');
+      res.send(html);
+    }),
+  );
+
   router.post(
     '/projects/:id/tickets',
     asyncHandler(async (req, res) => {
@@ -693,7 +936,12 @@ export function createApiRouter(
         parentId: req.body?.parentId,
         labelIds: req.body?.labelIds,
         relations: req.body?.relations,
+        type: typeof req.body?.type === 'string' ? req.body.type : undefined,
+        startDate: typeof req.body?.startDate === 'string' ? req.body.startDate : undefined,
+        dueDate: typeof req.body?.dueDate === 'string' ? req.body.dueDate : undefined,
+        epicId: req.body?.epicId ?? undefined,
       });
+      c.bus.emit(`board:${req.params.id}`, { type: 'ticket.created', ticketId: ticket.id, ticket });
       ok(res, ticket, 201);
     }),
   );
@@ -733,6 +981,58 @@ export function createApiRouter(
   );
 
   router.get(
+    '/projects/:id/epics',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      ok(res, await c.epics.listByProject(req.params.id));
+    }),
+  );
+
+  router.post(
+    '/projects/:id/epics',
+    asyncHandler(async (req, res) => {
+      if (!req.body?.title) return fail(res, 'title is required');
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      ok(
+        res,
+        await c.epics.create({
+          projectId: req.params.id,
+          title: req.body.title,
+          description: typeof req.body?.description === 'string' ? req.body.description : undefined,
+          color: typeof req.body?.color === 'string' ? req.body.color : undefined,
+        }),
+        201,
+      );
+    }),
+  );
+
+  router.patch(
+    '/epics/:id',
+    asyncHandler(async (req, res) => {
+      const existing = await c.epics.get(req.params.id);
+      if (!existing) return fail(res, 'Epic not found', 404);
+      const updated = await c.epics.update(req.params.id, {
+        title: typeof req.body?.title === 'string' ? req.body.title : undefined,
+        description: typeof req.body?.description === 'string' ? req.body.description : undefined,
+        color: typeof req.body?.color === 'string' ? req.body.color : undefined,
+      });
+      ok(res, updated);
+    }),
+  );
+
+  router.delete(
+    '/epics/:id',
+    asyncHandler(async (req, res) => {
+      const existing = await c.epics.get(req.params.id);
+      if (!existing) return fail(res, 'Epic not found', 404);
+      await c.epics.delete(req.params.id);
+      ok(res, { deleted: true });
+    }),
+  );
+
+  router.get(
     '/tickets',
     asyncHandler(async (_req, res) => {
       ok(res, await c.tickets.listAll());
@@ -760,7 +1060,26 @@ export function createApiRouter(
     '/tickets/:id',
     asyncHandler(async (req, res) => {
       const board = c.boards.get('native');
-      ok(res, await board.updateTicket(req.params.id, req.body ?? {}));
+      const prior = await board.getTicket(req.params.id);
+      const updated = await board.updateTicket(req.params.id, req.body ?? {});
+      if (prior) {
+        c.bus.emit(`board:${prior.projectId}`, { type: 'ticket.updated', ticketId: updated.id, swimlane: updated.swimlane });
+      }
+      ok(res, updated);
+    }),
+  );
+
+  router.delete(
+    '/tickets/:id',
+    asyncHandler(async (req, res) => {
+      const board = c.boards.get('native');
+      const ticket = await board.getTicket(req.params.id);
+      const deleted = await board.deleteTicket(req.params.id);
+      if (!deleted) return fail(res, 'Ticket not found', 404);
+      if (ticket) {
+        c.bus.emit(`board:${ticket.projectId}`, { type: 'ticket.deleted', ticketId: req.params.id });
+      }
+      ok(res, { deleted: true });
     }),
   );
 
@@ -801,9 +1120,29 @@ export function createApiRouter(
         order: req.body?.order,
       });
       c.boardSync.pushTicketState(req.params.id).catch(() => undefined);
-      if (req.body?.swimlane) {
-        void runs.handleSwimlaneEntry(req.params.id, req.body.swimlane, req.body?.workflowName);
+
+      const destSwimlane = req.body?.swimlane;
+      if (typeof destSwimlane === 'string' && destSwimlane) {
+        try {
+          const ticket = await c.tickets.get(req.params.id);
+          if (ticket) {
+            const project = await c.projects.get(ticket.projectId);
+            if (project) {
+              const config = await projects.loadConfig(project);
+              const triggerSwimlane = config.board.triggerSwimlane || config.board.swimlanes[0];
+              if (triggerSwimlane && triggerSwimlane === destSwimlane) {
+                const existing = await c.runs.getByTicket(req.params.id);
+                if (existing.length === 0) {
+                  void runs.start(req.params.id).catch(() => undefined);
+                }
+              }
+            }
+          }
+        } catch {
+          // Auto-trigger is best-effort; never fail the move request.
+        }
       }
+
       ok(res, result);
     }),
   );
@@ -837,7 +1176,21 @@ export function createApiRouter(
 
   router.get(
     '/runs/:id/events',
-    asyncHandler(async (req, res) => ok(res, await runs.listEvents(req.params.id))),
+    asyncHandler(async (req, res) => {
+      const type = typeof req.query.type === 'string' ? req.query.type as RunEventType : undefined;
+      const nodeId = typeof req.query.nodeId === 'string' ? req.query.nodeId : undefined;
+      ok(res, await runs.listEvents(req.params.id, type || nodeId ? { type, nodeId } : undefined));
+    }),
+  );
+
+  router.get(
+    '/tickets/:id/logs',
+    asyncHandler(async (req, res) => {
+      const type = typeof req.query.type === 'string' ? req.query.type as RunEventType : undefined;
+      const nodeKey = typeof req.query.nodeKey === 'string' ? req.query.nodeKey : undefined;
+      const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined;
+      ok(res, await runs.listTicketLogs(req.params.id, { type, nodeKey, limit }));
+    }),
   );
 
   router.post(
@@ -871,7 +1224,8 @@ export function createApiRouter(
     '/runs',
     asyncHandler(async (req, res) => {
       const projectId = typeof req.query.projectId === 'string' ? req.query.projectId : undefined;
-      const status = typeof req.query.status === 'string' ? (req.query.status as RunStatus) : undefined;
+      const statusRaw = typeof req.query.status === 'string' ? req.query.status : undefined;
+      const status = statusRaw ? (statusRaw.split(',') as RunStatus[]) : undefined;
       const from = typeof req.query.from === 'string' ? req.query.from : undefined;
       const to = typeof req.query.to === 'string' ? req.query.to : undefined;
       const search = typeof req.query.search === 'string' ? req.query.search : undefined;
@@ -1145,6 +1499,11 @@ export function createApiRouter(
       ok(res, fireResponse(await schedules.fire(schedule, req.body ?? {})), 201);
     }),
   );
+
+  // --- Schedule SSE stream --------------------------------------------------
+  router.get('/schedules/stream', (req: Request, res: Response) => {
+    void streamSchedules(c, req, res);
+  });
 
   // --- Global MCP servers: persisted in the database ------------------------
 
@@ -1587,6 +1946,40 @@ async function streamBoard(
 
   const channel = `board:${projectId}`;
   const unsubscribe = c.bus.on(channel, (payload) => send('ticket.updated', payload));
+  const heartbeat = setInterval(() => res.write(': keep-alive\n\n'), 15000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
+}
+
+/**
+ * Server-Sent Events stream for schedule notifications. Subscribes to the
+ * `schedule` bus channel and sends `schedule.*` events.
+ */
+async function streamSchedules(
+  c: Container,
+  req: Request,
+  res: Response,
+): Promise<void> {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+  });
+  res.write('retry: 3000\n\n');
+
+  const send = (event: string, payload: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+
+  const unsubscribe = c.bus.on('schedule', (payload) => {
+    const event = payload as { type?: string };
+    send(event?.type ?? 'schedule.event', payload);
+  });
   const heartbeat = setInterval(() => res.write(': keep-alive\n\n'), 15000);
 
   req.on('close', () => {

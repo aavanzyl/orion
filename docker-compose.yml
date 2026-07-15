@@ -40,6 +40,11 @@ services:
       ORION_PROJECTS_DIR: ${ORION_PROJECTS_DIR:-${HOME}}
       CODEX_API_KEY: ${CODEX_API_KEY:-}
       CODEX_BASE_URL: ${CODEX_BASE_URL:-}
+      # Fallback credentials for the Claude harness (per-provider keys set in the
+      # UI take precedence). ANTHROPIC_BASE_URL may point at an Anthropic-compatible
+      # endpoint (e.g. https://api.deepseek.com/anthropic).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       PROVIDER_ENCRYPTION_SALT: ${PROVIDER_ENCRYPTION_SALT:-}
       # Outbound notifications for `notify` nodes / run lifecycle events.

@@ -48,22 +48,9 @@ export class AgentNodeExecutor implements NodeExecutor {
     };
 
     let scope: Record<string, unknown> | undefined;
-    if (ctx.matrix) {
-      const itemStr =
-        typeof ctx.matrix.item === 'string' ? ctx.matrix.item : JSON.stringify(ctx.matrix.item);
-      const name = ctx.matrix.as ?? 'item';
-      scope = {
-        matrix: {
-          item: ctx.matrix.item,
-          index: ctx.matrix.index,
-          total: ctx.matrix.total,
-          [name]: ctx.matrix.item,
-        },
-      };
-      variables.MATRIX_ITEM = itemStr;
-      variables.MATRIX_INDEX = String(ctx.matrix.index);
-      variables.MATRIX_TOTAL = String(ctx.matrix.total);
-      variables[name.toUpperCase()] = itemStr;
+
+    if (ctx.node.input !== undefined && ctx.node.input !== null) {
+      scope = { ...scope, input: ctx.node.input };
     }
 
     const instructions = nodeConfig.instructions;
@@ -113,7 +100,14 @@ export class AgentNodeExecutor implements NodeExecutor {
       throw err;
     }
 
-    const harness = this.harnesses.get(provider);
+    let harness;
+    if (this.harnesses.has(provider)) {
+      harness = this.harnesses.get(provider);
+    } else {
+      const keys = this.harnesses.keys();
+      if (keys.length === 0) throw new Error('No harness providers registered');
+      harness = this.harnesses.get(keys[0]);
+    }
 
     // Auto-inject the codebase MCP (SSE) so running agents can search the repo.
     // On by default; node/project config of the same name overrides or disables it.
@@ -193,6 +187,7 @@ export class AgentNodeExecutor implements NodeExecutor {
     const kinds: Record<string, string> = {
       'orion-codebase': 'codebase',
       'orion-tickets': 'tickets',
+      'orion-skills': 'skills',
     };
     const kind = kinds[name];
     return kind ? `${this.env.publicUrl}/mcp/${kind}?projectId=${projectId}` : undefined;

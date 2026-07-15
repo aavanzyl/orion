@@ -14,6 +14,9 @@ const DEFAULT_PREFERENCES = {
     runFailed: true,
     syncComplete: false,
     approvalRequired: true,
+    workflowTriggered: false,
+    agentRunning: false,
+    agentFailed: true,
   },
 };
 

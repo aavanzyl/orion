@@ -3,9 +3,9 @@ import type {
   ChatMessage,
   ChatRole,
   ChatUsage,
-  CodeChunk,
   CodeIndex,
   Conversation,
+  Epic,
   IndexStatus,
   Label,
   McpAuthType,
@@ -23,6 +23,7 @@ import type {
   TicketPriority,
   TicketRelation,
   TicketRelationType,
+  TicketType,
   WorkflowRun,
 } from '@orion/models';
 import type { AppSettings, Provider } from '@orion/models';
@@ -34,9 +35,9 @@ import type {
   appSettings,
   boardConnections,
   chatMessages,
-  codeChunks,
   codeIndexes,
   conversations,
+  epics,
   labels,
   mcpServers,
   projects,
@@ -52,6 +53,7 @@ import type {
 
 type ProjectRow = typeof projects.$inferSelect;
 type ProviderRow = typeof providers.$inferSelect;
+type EpicRow = typeof epics.$inferSelect;
 type TicketRow = typeof tickets.$inferSelect;
 type LabelRow = typeof labels.$inferSelect;
 type TicketRelationRow = typeof ticketRelations.$inferSelect;
@@ -63,7 +65,6 @@ type ConversationRow = typeof conversations.$inferSelect;
 type ChatMessageRow = typeof chatMessages.$inferSelect;
 type BoardConnectionRow = typeof boardConnections.$inferSelect;
 type ScheduleRow = typeof schedules.$inferSelect;
-type CodeChunkRow = typeof codeChunks.$inferSelect;
 type CodeIndexRow = typeof codeIndexes.$inferSelect;
 type McpServerRow = typeof mcpServers.$inferSelect;
 type AppSettingsRow = typeof appSettings.$inferSelect;
@@ -118,6 +119,22 @@ export function toTicket(row: TicketRow, labelIds: string[] = []): Ticket {
     externalId: opt(row.externalId),
     order: row.position,
     displayKey: opt(row.displayKey),
+    type: row.type as TicketType,
+    startDate: row.startDate ? iso(row.startDate) : undefined,
+    dueDate: row.dueDate ? iso(row.dueDate) : undefined,
+    epicId: opt(row.epicId),
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
+  };
+}
+
+export function toEpic(row: EpicRow): Epic {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    title: row.title,
+    description: row.description,
+    color: row.color,
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
   };
@@ -313,20 +330,6 @@ export function toSchedule(row: ScheduleRow): Schedule {
     nextFireAt: row.nextFireAt ? iso(row.nextFireAt) : undefined,
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
-  };
-}
-
-export function toCodeChunk(row: CodeChunkRow): CodeChunk {
-  return {
-    id: row.id,
-    projectId: row.projectId,
-    filePath: row.filePath,
-    chunkIndex: row.chunkIndex,
-    startLine: row.startLine,
-    endLine: row.endLine,
-    content: row.content,
-    embedding: row.embedding,
-    createdAt: iso(row.createdAt),
   };
 }
 

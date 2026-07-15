@@ -22,6 +22,27 @@ All tests are network-free and deterministic. Run them with Nx.
 - The E2E suite (`apps/web-e2e`) previews the production web bundle (`npx nx run @orion/web:preview`) and
   stubs every `/api/**` call with `page.route`, so no orchestrator needs to be running.
 
+## Event Recording
+
+Every feature that mutates state should emit events so the debug page, SSE streams, and notification
+provider can surface them to users. Follow these rules when adding or changing behaviour:
+
+- **Workflow engine changes**: When a run or node transitions between states, emit both the
+  lifecycle event (e.g. `node.started`, `run.status`) and a `transition` / `run.transition` event
+  so the debug log viewer can filter transitions independently.
+- **Schedule changes**: When a scheduled agent fires, completes, or fails, emit schedule events
+  (e.g. `schedule.fired`) on the `schedule` bus channel so the notification provider can relay
+  them to the user.
+- **New event types**: Extend `RunEventType` in `packages/shared/models/src/lib/event.model.ts`.
+  If the event should trigger a user notification, also add a corresponding key to
+  `NotificationEventKey` in `packages/shared/models/src/lib/settings.model.ts`.
+- **Notification defaults**: Add sensible defaults in `apps/web/src/lib/use-preferences.ts`
+  (`DEFAULT_EVENT_PREFS`) and render the toggle in the Notifications tab of the settings page
+  (`apps/web/src/features/settings/settings-page.tsx`).
+- **Notification provider**: Wire the new event type into
+  `apps/web/src/features/notifications/run-notifications-provider.tsx` so notifications are
+  dispatched when the event arrives over SSE.
+
 ## Docker
 
 - Deploy (rebuild on changes): `docker compose up -d --build`

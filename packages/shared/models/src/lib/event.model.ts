@@ -7,6 +7,7 @@ import type { RunId, RunNodeId } from './run.model.js';
 export type RunEventType =
   | 'run.created'
   | 'run.status'
+  | 'run.transition'
   | 'run.diff'
   | 'node.status'
   | 'node.started'
@@ -21,6 +22,9 @@ export type RunEventType =
   | 'agent.usage'
   | 'ticket.moved'
   | 'ticket.updated'
+  | 'ticket.created'
+  | 'ticket.deleted'
+  | 'transition'
   | 'log';
 
 export interface RunEvent<T = unknown> {

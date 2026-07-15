@@ -317,13 +317,4 @@ export function getCatalogEntry(key: string): McpCatalogEntry | undefined {
   return MCP_CATALOG.find((e) => e.key === key);
 }
 
-/** Group catalog entries by category. */
-export function getCatalogByCategory(): Map<string, McpCatalogEntry[]> {
-  const map = new Map<string, McpCatalogEntry[]>();
-  for (const entry of MCP_CATALOG) {
-    const list = map.get(entry.category) ?? [];
-    list.push(entry);
-    map.set(entry.category, list);
-  }
-  return map;
-}
+

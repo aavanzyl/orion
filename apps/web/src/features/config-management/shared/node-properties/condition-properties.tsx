@@ -85,7 +85,7 @@ export function ConditionProperties({
                     updateBranch(index, { target: v === noneLabel ? undefined : v })
                   }
                 >
-                  <SelectTrigger className="h-8 flex-1 text-xs">
+                  <SelectTrigger size="sm" className="flex-1 text-xs">
                     <SelectValue placeholder="no target" />
                   </SelectTrigger>
                   <SelectContent>

@@ -6,6 +6,12 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs';
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -24,6 +30,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { RunLogViewer } from '@/components/run-log-viewer';
 import { api, type RunListItem } from '@/lib/api';
 import { useProjects } from '@/features/projects/hooks';
 
@@ -387,42 +394,51 @@ export function DashboardPage() {
                     )}
                   </div>
 
-                  {runDetail && runDetail.nodes.length > 0 && (
-                    <div className="flex flex-col gap-2">
-                      <h3 className="text-sm font-semibold">Nodes ({runDetail.nodes.length})</h3>
-                      <div className="overflow-hidden rounded-lg border border-border/50">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="border-b bg-muted/50 text-left">
-                              <th className="px-3 py-2 font-medium">Node</th>
-                              <th className="px-3 py-2 font-medium">Type</th>
-                              <th className="px-3 py-2 font-medium">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {runDetail.nodes.map((n) => (
-                              <tr key={n.nodeKey} className="border-b last:border-0">
-                                <td className="px-3 py-2">{n.nodeKey}</td>
-                                <td className="px-3 py-2 text-muted-foreground">{n.type}</td>
-                                <td className="px-3 py-2">
-                                  <Badge variant={n.status === 'failed' ? 'destructive' : n.status === 'completed' ? 'success' : 'outline'}>{n.status}</Badge>
-                                </td>
+                  <Tabs defaultValue="nodes" className="w-full">
+                    <TabsList className="w-full">
+                      <TabsTrigger value="nodes" className="flex-1">Nodes</TabsTrigger>
+                      <TabsTrigger value="logs" className="flex-1">Logs</TabsTrigger>
+                      {selectedRun.diff && (
+                        <TabsTrigger value="diff" className="flex-1">Diff</TabsTrigger>
+                      )}
+                    </TabsList>
+                    <TabsContent value="nodes" className="mt-2">
+                      {runDetail && runDetail.nodes.length > 0 && (
+                        <div className="overflow-hidden rounded-lg border border-border/50">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b bg-muted/50 text-left">
+                                <th className="px-3 py-2 font-medium">Node</th>
+                                <th className="px-3 py-2 font-medium">Type</th>
+                                <th className="px-3 py-2 font-medium">Status</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {selectedRun.diff && (
-                    <div className="flex flex-col gap-2">
-                      <h3 className="text-sm font-medium">Diff</h3>
-                      <pre className="max-h-96 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-xs">
-                        {selectedRun.diff}
-                      </pre>
-                    </div>
-                  )}
+                            </thead>
+                            <tbody>
+                              {runDetail.nodes.map((n) => (
+                                <tr key={n.nodeKey} className="border-b last:border-0">
+                                  <td className="px-3 py-2">{n.nodeKey}</td>
+                                  <td className="px-3 py-2 text-muted-foreground">{n.type}</td>
+                                  <td className="px-3 py-2">
+                                    <Badge variant={n.status === 'failed' ? 'destructive' : n.status === 'completed' ? 'success' : 'outline'}>{n.status}</Badge>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </TabsContent>
+                    <TabsContent value="logs" className="mt-2">
+                      <RunLogViewer runId={selectedRun.id} maxHeight="60vh" />
+                    </TabsContent>
+                    {selectedRun.diff && (
+                      <TabsContent value="diff" className="mt-2">
+                        <pre className="max-h-96 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-xs">
+                          {selectedRun.diff}
+                        </pre>
+                      </TabsContent>
+                    )}
+                  </Tabs>
                 </>
               )}
             </div>

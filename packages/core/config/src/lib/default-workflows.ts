@@ -709,17 +709,15 @@ const FAN_OUT_MIGRATION: WorkflowTemplate = {
         model: DEFAULT_MODEL,
         dependsOn: ['plan'],
         swimlane: 'in_progress',
-        matrix: { items: ['packages/core', 'packages/shared', 'apps/web'], as: 'package', maxParallel: 2 },
         instructions:
-          'Apply the migration planned above to the package "$PACKAGE" only — do not touch any other package. Follow the plan exactly, keep the change tightly scoped, and update that package\'s tests to match.\n\nTicket details:\n$ARGUMENTS',
+          'Apply the migration planned above. Follow the plan exactly, keep the change tightly scoped, and update tests to match.\n\nTicket details:\n$ARGUMENTS',
       },
       {
         id: 'test',
         type: 'shell',
-        script: 'npx nx run $PACKAGE:test',
+        script: 'npx nx run-many -t test',
         dependsOn: ['migrate'],
         swimlane: 'in_progress',
-        matrix: { items: ['packages/core', 'packages/shared', 'apps/web'], as: 'package', maxParallel: 2 },
       },
       { id: 'approval', type: 'approval', dependsOn: ['test'], swimlane: 'review' },
       {

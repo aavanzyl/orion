@@ -7,6 +7,7 @@ export * from './lib/ticket.model.js';
 export * from './lib/board.model.js';
 export * from './lib/run.model.js';
 export * from './lib/event.model.js';
+export * from './lib/graph.model.js';
 export * from './lib/evaluation.model.js';
 export * from './lib/chat.model.js';
 export * from './lib/schedule.model.js';

@@ -8,7 +8,9 @@ import type {
   Ticket,
   TicketPriority,
   TicketRelationKind,
+  TicketType,
 } from '@orion/models';
+import { ALL_DEFAULT_TICKET_TYPES } from '@orion/models';
 import { Button } from '@/components/ui/button';
 import {
   Sheet,
@@ -29,6 +31,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 import { MarkdownEditor } from '@/components/markdown-editor';
 import { PrioritySelect } from './priority';
 import { LabelPicker } from './label-picker';
@@ -40,6 +43,9 @@ interface NewTicketSheetProps {
   swimlanes: BoardSwimlane[];
   labels: LabelModel[];
   tickets: Ticket[];
+  epicTickets: Ticket[];
+  projectId: string | null;
+  ticketTypes?: { value: string; label: string }[];
   onCreateLabel: (name: string, color: string) => Promise<void>;
   onCreate: (input: CreateInput) => Promise<void>;
 }
@@ -48,6 +54,9 @@ export function NewTicketSheet({
   swimlanes,
   labels,
   tickets,
+  epicTickets,
+  projectId: _projectId,
+  ticketTypes,
   onCreateLabel,
   onCreate,
 }: NewTicketSheetProps) {
@@ -58,9 +67,13 @@ export function NewTicketSheet({
   const [priority, setPriority] = useState<TicketPriority>(0);
   const [labelIds, setLabelIds] = useState<string[]>([]);
   const [parentId, setParentId] = useState<string | undefined>();
+  const [ticketType, setTicketType] = useState<TicketType>('feature');
+  const [startDate, setStartDate] = useState('');
+  const [dueDate, setDueDate] = useState('');
   const [relations, setRelations] = useState<NewTicketRelation[]>([]);
   const [relationKind, setRelationKind] = useState<TicketRelationKind>('blocks');
   const [relationTicketId, setRelationTicketId] = useState<string | undefined>();
+  const [epicId, setEpicId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -74,9 +87,13 @@ export function NewTicketSheet({
     setPriority(0);
     setLabelIds([]);
     setParentId(undefined);
+    setTicketType('feature');
+    setStartDate('');
+    setDueDate('');
     setRelations([]);
     setRelationKind('blocks');
     setRelationTicketId(undefined);
+    setEpicId(null);
   };
 
   const toggleLabel = (id: string) =>
@@ -100,6 +117,10 @@ export function NewTicketSheet({
         labelIds,
         parentId,
         relations,
+        type: ticketType,
+        startDate: startDate || undefined,
+        dueDate: dueDate || undefined,
+        epicId: ticketType !== 'epic' ? epicId : null,
       });
       reset();
       setOpen(false);
@@ -125,9 +146,9 @@ export function NewTicketSheet({
         </SheetHeader>
 
         <ScrollArea className="min-h-0 flex-1">
-          <div className="flex flex-col gap-4 px-4 py-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="ticket-title">Title</Label>
+          <div className="flex flex-col gap-5 px-4 py-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="ticket-title" className="text-xs text-muted-foreground">Title</Label>
               <Input
                 id="ticket-title"
                 value={title}
@@ -136,9 +157,24 @@ export function NewTicketSheet({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col gap-2">
-                <Label>Swimlane</Label>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs text-muted-foreground">Type</Label>
+                <Select value={ticketType} onValueChange={(v) => setTicketType(v as TicketType)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(ticketTypes ?? ALL_DEFAULT_TICKET_TYPES).map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs text-muted-foreground">Swimlane</Label>
                 <Select value={swimlane} onValueChange={setSwimlane}>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select a swimlane" />
@@ -152,14 +188,35 @@ export function NewTicketSheet({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex flex-col gap-2">
-                <Label>Priority</Label>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs text-muted-foreground">Priority</Label>
                 <PrioritySelect value={priority} onChange={setPriority} className="w-full" />
               </div>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="ticket-description">Description</Label>
+            <div className="flex gap-3">
+              <div className="flex flex-1 flex-col gap-1.5">
+                <Label htmlFor="ticket-start-date" className="text-xs text-muted-foreground">Start date</Label>
+                <Input
+                  id="ticket-start-date"
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-1 flex-col gap-1.5">
+                <Label htmlFor="ticket-due-date" className="text-xs text-muted-foreground">Due date</Label>
+                <Input
+                  id="ticket-due-date"
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="ticket-description" className="text-xs text-muted-foreground">Description</Label>
               <MarkdownEditor
                 id="ticket-description"
                 value={description}
@@ -169,18 +226,8 @@ export function NewTicketSheet({
               />
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label>Labels</Label>
-              <LabelPicker
-                labels={labels}
-                selectedIds={labelIds}
-                onToggle={toggleLabel}
-                onCreate={onCreateLabel}
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label>Parent ticket</Label>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs text-muted-foreground">Parent ticket</Label>
               <TicketSelect
                 tickets={tickets}
                 value={parentId}
@@ -192,8 +239,41 @@ export function NewTicketSheet({
               />
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label>Relationships</Label>
+            {parentId ? (
+              <p className="text-xs text-muted-foreground">Epic, labels and priority are inherited from the parent ticket.</p>
+            ) : (
+              <>
+                {ticketType !== 'epic' && (
+                  <div className="flex flex-col gap-1.5">
+                    <Label className="text-xs text-muted-foreground">Epic</Label>
+                    <TicketSelect
+                      tickets={epicTickets.filter((t) => t.id !== parentId)}
+                      value={epicId ?? undefined}
+                      onChange={(id) => setEpicId(id ?? null)}
+                      allowNone
+                      noneLabel="No epic"
+                      placeholder="No epic"
+                      className="w-full"
+                    />
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs text-muted-foreground">Labels</Label>
+                  <LabelPicker
+                    labels={labels}
+                    selectedIds={labelIds}
+                    onToggle={toggleLabel}
+                    onCreate={onCreateLabel}
+                  />
+                </div>
+              </>
+            )}
+
+            <Separator />
+
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs text-muted-foreground">Relationships</Label>
               {relations.length > 0 && (
                 <div className="flex flex-col gap-1">
                   {relations.map((rel, i) => (
@@ -242,7 +322,8 @@ export function NewTicketSheet({
           </div>
         </ScrollArea>
 
-        <SheetFooter className="border-t">
+        <SheetFooter className="flex items-center justify-between border-t">
+          <Button variant="ghost" onClick={() => { reset(); setOpen(false); }}>Cancel</Button>
           <Button onClick={submit} disabled={submitting}>
             Create
           </Button>

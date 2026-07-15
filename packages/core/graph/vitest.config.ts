@@ -2,13 +2,12 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   root: __dirname,
-  cacheDir: '../../../../node_modules/.vite/packages/adapters/harness/openai',
+  cacheDir: '../../../node_modules/.vite/packages/core/graph',
   test: {
-    name: '@orion/harness-openai',
+    name: '@orion/graph',
     watch: false,
     globals: true,
     environment: 'node',
-    passWithNoTests: true,
     include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts}'],
     reporters: ['default'],
     coverage: {

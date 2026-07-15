@@ -4,6 +4,15 @@ export interface AppBranding {
   logo?: string | null;
 }
 
+/** A default issue type configuration stored in app settings. */
+export interface DefaultIssueTypeConfig {
+  name: string;
+  label: string;
+  workflow: string;
+  color?: string;
+  icon?: string;
+}
+
 export interface AgentDefaults {
   providerId?: string;
   model?: string;
@@ -13,16 +22,33 @@ export interface AgentDefaults {
   maxRetries?: number;
 }
 
+export interface NotificationChannelPrefs {
+  toasts: boolean;
+  desktop: boolean;
+}
+
+export type NotificationEventKey =
+  | 'runComplete'
+  | 'runFailed'
+  | 'syncComplete'
+  | 'approvalRequired'
+  | 'workflowTriggered'
+  | 'agentRunning'
+  | 'agentFailed'
+  | 'scheduleFired'
+  | 'scheduleCompleted'
+  | 'scheduleFailed'
+  | 'transitionIssue'
+  | 'nodeTransition';
+
+export type NotificationEvents = Record<NotificationEventKey, NotificationChannelPrefs>;
+
 export interface AppPreferences {
   agentDefaults: AgentDefaults;
   notifications: {
-    toasts: boolean;
-    desktop: boolean;
-    runComplete: boolean;
-    runFailed: boolean;
-    syncComplete: boolean;
-    approvalRequired: boolean;
+    events: NotificationEvents;
   };
+  issueTypeDefaults?: DefaultIssueTypeConfig[];
 }
 
 export interface AppSettings {

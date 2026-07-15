@@ -40,7 +40,6 @@ export class NativeBoardProvider implements BoardProvider {
   async getBoard(
     projectId: ProjectId,
     swimlanes: string[],
-    triggers?: Record<string, string[]>,
   ): Promise<Board> {
     const all = await this.tickets.listByProject(projectId);
     const bySwimlane = new Map<string, Ticket[]>();
@@ -52,16 +51,11 @@ export class NativeBoardProvider implements BoardProvider {
       bucket.push(ticket);
     }
 
-    const boardSwimlanes: BoardSwimlane[] = swimlanes.map((key) => {
-      const workflows = triggers?.[key];
-
-      return {
-        key,
-        title: titleize(key),
-        tickets: (bySwimlane.get(key) ?? []).sort((a, b) => a.order - b.order),
-        workflows: workflows && workflows.length > 0 ? workflows : undefined,
-      };
-    });
+    const boardSwimlanes: BoardSwimlane[] = swimlanes.map((key) => ({
+      key,
+      title: titleize(key),
+      tickets: (bySwimlane.get(key) ?? []).sort((a, b) => a.order - b.order),
+    }));
 
     return { projectId, swimlanes: boardSwimlanes };
   }
@@ -111,5 +105,9 @@ export class NativeBoardProvider implements BoardProvider {
 
   removeRelation(relationId: string): Promise<void> {
     return this.tickets.removeRelation(relationId);
+  }
+
+  deleteTicket(ticketId: TicketId): Promise<boolean> {
+    return this.tickets.delete(ticketId);
   }
 }

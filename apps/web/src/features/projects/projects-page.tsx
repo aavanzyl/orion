@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/table';
 import { useProjects } from './hooks';
 import { ProjectFormDialog } from './project-form-dialog';
+import { ProjectWizard } from './project-wizard';
 import { DeleteProjectDialog } from './delete-project-dialog';
 
 const SOURCE_LABELS: Record<Project['sourceKind'], string> = {
@@ -88,7 +89,7 @@ export function ProjectsPage() {
             </TableHeader>
             <TableBody>
               {projects.map((project) => (
-                <TableRow key={project.id}>
+                <TableRow key={project.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/projects/${project.id}`)}>
                   <TableCell className="font-medium">{project.name}</TableCell>
                   <TableCell>
                     <Badge variant="secondary">{SOURCE_LABELS[project.sourceKind]}</Badge>
@@ -104,7 +105,7 @@ export function ProjectsPage() {
                     <div className="flex items-center gap-1">
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <Button variant="ghost" size="icon-sm" onClick={() => openEdit(project)}>
+                          <Button variant="ghost" size="icon-sm" onClick={(e) => { e.stopPropagation(); openEdit(project); }}>
                             <PencilIcon />
                           </Button>
                         </TooltipTrigger>
@@ -115,7 +116,7 @@ export function ProjectsPage() {
                           <Button
                             variant="ghost"
                             size="icon-sm"
-                            onClick={() => navigate(`/projects/${project.id}/config`)}
+                            onClick={(e) => { e.stopPropagation(); navigate(`/projects/${project.id}/config`); }}
                           >
                             <FileCodeIcon />
                           </Button>
@@ -127,7 +128,7 @@ export function ProjectsPage() {
                           <Button
                             variant="ghost"
                             size="icon-sm"
-                            onClick={() => navigate(`/projects/${project.id}/builder`)}
+                            onClick={(e) => { e.stopPropagation(); navigate(`/projects/${project.id}/builder`); }}
                           >
                             <WorkflowIcon />
                           </Button>
@@ -140,7 +141,7 @@ export function ProjectsPage() {
                             variant="ghost"
                             size="icon-sm"
                             className="text-destructive hover:text-destructive"
-                            onClick={() => setDeleting(project)}
+                            onClick={(e) => { e.stopPropagation(); setDeleting(project); }}
                           >
                             <Trash2Icon />
                           </Button>
@@ -157,9 +158,21 @@ export function ProjectsPage() {
         )}
       </main>
 
+      <ProjectWizard
+        open={formOpen && !editing}
+        onOpenChange={(open) => {
+          if (!open) setFormOpen(false);
+        }}
+        onSaved={refetch}
+      />
       <ProjectFormDialog
-        open={formOpen}
-        onOpenChange={setFormOpen}
+        open={formOpen && !!editing}
+        onOpenChange={(open) => {
+          if (!open) {
+            setFormOpen(false);
+            setEditing(null);
+          }
+        }}
         project={editing}
         onSaved={refetch}
       />

@@ -1,5 +1,5 @@
 {
-  "name": "@orion/harness-openai",
+  "name": "@orion/graph",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -14,9 +14,7 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "tags": ["scope:adapters", "category:harness", "type:impl"]
+    "tags": ["scope:core", "type:util"]
   },
-  "dependencies": {
-    "@orion/harness-core": "*"
-  }
+  "dependencies": {}
 }

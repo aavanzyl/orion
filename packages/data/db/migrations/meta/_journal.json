@@ -162,6 +162,34 @@
       "when": 1783360800000,
       "tag": "0024_app_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1783360900000,
+      "tag": "0025_add_ticket_due_date",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1783361000000,
+      "tag": "0026_add_epics",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1783361100000,
+      "tag": "0027_tickets_epic_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1783361200000,
+      "tag": "0028_add_ticket_type_and_start_date",
+      "breakpoints": true
     }
   ]
 }

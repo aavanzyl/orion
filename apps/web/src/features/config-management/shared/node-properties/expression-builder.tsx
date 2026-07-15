@@ -218,7 +218,7 @@ export function ExpressionBuilder({ value, onChange, referenceOptions = [] }: Ex
         </div>
         {rows.length > 1 && mode === 'guided' && (
           <Select value={connector} onValueChange={(v) => emit(v as 'and' | 'or', rows)}>
-            <SelectTrigger className="h-7 w-28 text-xs">
+            <SelectTrigger size="sm" className="w-28 text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -265,7 +265,7 @@ export function ExpressionBuilder({ value, onChange, referenceOptions = [] }: Ex
               </div>
               <div className="flex items-center gap-1 pl-8">
                 <Select value={row.op} onValueChange={(v) => updateRow(index, { op: v })}>
-                  <SelectTrigger className="h-8 w-36 shrink-0 text-xs">
+                  <SelectTrigger size="sm" className="w-36 shrink-0 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -334,7 +334,7 @@ function OperandFields({
   return (
     <div className="flex flex-1 items-center gap-1">
       <Select value={operand.type} onValueChange={(v) => onChange({ type: v as OperandType })}>
-        <SelectTrigger className="h-8 w-[92px] shrink-0 text-xs">
+        <SelectTrigger size="sm" className="w-[92px] shrink-0 text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -349,7 +349,7 @@ function OperandFields({
       {operand.type === 'ref' && (
         <>
           <Select value={operand.id || ''} onValueChange={(v) => onChange({ id: v })}>
-            <SelectTrigger className="h-8 w-28 shrink-0 text-xs">
+            <SelectTrigger size="sm" className="w-28 shrink-0 text-xs">
               <SelectValue placeholder="node" />
             </SelectTrigger>
             <SelectContent>
@@ -386,7 +386,7 @@ function OperandFields({
           value={operand.bool ? 'true' : 'false'}
           onValueChange={(v) => onChange({ bool: v === 'true' })}
         >
-          <SelectTrigger className="h-8 flex-1 text-xs">
+          <SelectTrigger size="sm" className="flex-1 text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

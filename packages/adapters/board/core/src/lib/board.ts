@@ -24,7 +24,6 @@ export interface BoardProvider extends Keyed {
   getBoard(
     projectId: ProjectId,
     swimlanes: string[],
-    triggers?: Record<string, string[]>,
   ): Promise<Board>;
   createTicket(input: CreateTicketInput): Promise<Ticket>;
   updateTicket(ticketId: TicketId, input: UpdateTicketInput): Promise<Ticket>;
@@ -39,6 +38,8 @@ export interface BoardProvider extends Keyed {
   /** Ticket relationships (blocking / blocked-by / related). */
   addRelation(ticketId: TicketId, relation: NewTicketRelation): Promise<TicketRelation>;
   removeRelation(relationId: string): Promise<void>;
+  /** Delete a ticket permanently. */
+  deleteTicket(ticketId: TicketId): Promise<boolean>;
   /** Pull latest state from an external board, if applicable. */
   sync?(projectId: ProjectId): Promise<void>;
 }

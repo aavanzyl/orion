@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { loadProjectConfig, flattenProjectConfig, deriveSwimlaneTriggers } from '@orion/config';
-import type { CreateRunEventInput, ProjectConfig, RunStatus, WorkflowRun } from '@orion/models';
+import { loadProjectConfig, flattenProjectConfig, resolveWorkflowForTicketType } from '@orion/config';
+import type { CreateRunEventInput, ProjectConfig, RunEventType, RunStatus, WorkflowRun } from '@orion/models';
 import {
   WorkflowEngine,
   type NodeExecutor,
@@ -30,9 +30,6 @@ interface ActiveRun {
 }
 
 const RETRYABLE_STATUSES = new Set<RunStatus>(['failed', 'cancelled']);
-
-/** Run statuses that mean the run is finished and no longer occupies a slot. */
-const TERMINAL_RUN_STATUSES = new Set<RunStatus>(['completed', 'failed', 'cancelled']);
 
 /**
  * Pick the workflow a run should execute. A named workflow (from the project's
@@ -93,8 +90,12 @@ export class RunService {
     return this.c.runs.listNodes(runId);
   }
 
-  listEvents(runId: string) {
-    return this.c.events.listByRun(runId);
+  listEvents(runId: string, filter?: { type?: RunEventType; nodeId?: string }) {
+    return this.c.events.listByRun(runId, filter);
+  }
+
+  listTicketLogs(ticketId: string, filter?: { type?: RunEventType; nodeKey?: string; limit?: number }) {
+    return this.c.events.listByTicket(ticketId, filter);
   }
 
   listRunsForTicket(ticketId: string) {
@@ -103,9 +104,9 @@ export class RunService {
 
   /** Create a run for a ticket and begin (or queue) executing its workflow.
    *
-   * When `workflowName` is provided and resolves to a named entry in the
-   * project's `workflows` map, that workflow is run instead of the top-level
-   * `workflow`. This is how a swimlane can dictate its own sequence of events.
+   * The workflow is resolved from the ticket's type via the project's
+   * `issueTypes` config. When `workflowName` is provided it serves as an
+   * explicit override.
    */
   async start(ticketId: string, workflowName?: string): Promise<WorkflowRun> {
     const ticket = await this.c.tickets.get(ticketId);
@@ -117,7 +118,8 @@ export class RunService {
       .resolveConfigRoot(project)
       .then((root) => loadProjectConfig(root, project.configPath));
 
-    const selected = selectWorkflow(config, workflowName);
+    const resolvedName = resolveWorkflowForTicketType(config, ticket.type, workflowName);
+    const selected = selectWorkflow(config, resolvedName);
 
     const run = await this.c.runs.create({
       ticketId,
@@ -128,49 +130,9 @@ export class RunService {
       } as unknown as Record<string, unknown>,
     });
     await this.emitStatus(run.id, 'run.created', { ticketId });
+    await this.emitStatus(run.id, 'log', { message: `Run created for workflow "${selected.name}"`, transition: 'run.created' });
 
     return this.admit(run);
-  }
-
-  /**
-   * React to a ticket entering a board column. Trigger workflows are derived
-   * from the project config: a workflow is auto-started when a ticket enters the
-   * swimlane of its entry node (`deriveSwimlaneTriggers`). If no workflow maps to
-   * the swimlane, nothing happens. When several workflows map to the same
-   * swimlane, the caller-supplied `workflowName` selects which one fires; absent
-   * that, the first is used. Skips triggering when the ticket already has a run
-   * in flight. Best-effort: never throws.
-   */
-  async handleSwimlaneEntry(
-    ticketId: string,
-    swimlane: string,
-    workflowName?: string,
-  ): Promise<void> {
-    try {
-      const ticket = await this.c.tickets.get(ticketId);
-      if (!ticket) return;
-      const project = await this.c.projects.get(ticket.projectId);
-      if (!project) return;
-
-      const config = await this.workspaces
-        .resolveConfigRoot(project)
-        .then((root) => loadProjectConfig(root, project.configPath));
-
-      const triggerNames = deriveSwimlaneTriggers(config)[swimlane];
-      if (!triggerNames || triggerNames.length === 0) return;
-
-      const selected =
-        triggerNames.length === 1
-          ? triggerNames[0]
-          : triggerNames.find((n) => n === workflowName) ?? triggerNames[0];
-
-      const existing = await this.c.runs.getByTicket(ticketId);
-      if (existing.some((r) => !TERMINAL_RUN_STATUSES.has(r.status))) return;
-
-      await this.start(ticketId, selected);
-    } catch (err) {
-      console.error(`[ orion orchestrator ] failed to trigger workflow for swimlane "${swimlane}":`, err);
-    }
   }
 
   /**
@@ -187,7 +149,7 @@ export class RunService {
     await this.cleanup(runId);
     await this.c.runs.resetForRetry(runId);
     const reset = await this.c.runs.update(runId, { status: 'created', error: null });
-    await this.emitStatus(runId, 'log', { message: 'Run retried' });
+    await this.emitStatus(runId, 'log', { message: 'Run retried', transition: 'run.retried' });
     return this.admit(reset);
   }
 
@@ -242,6 +204,7 @@ export class RunService {
     const queued = await this.c.runs.update(run.id, { status: 'queued' });
     this.queue.push(run.id);
     await this.emitStatus(run.id, 'run.status', { status: 'queued' });
+    await this.emitStatus(run.id, 'log', { message: 'Run queued (concurrency limit reached)', transition: 'run.queued' });
     return queued;
   }
 
@@ -288,6 +251,7 @@ export class RunService {
         branch,
       );
       run = await this.c.runs.update(run.id, { branch, worktreePath: workspace.rootPath });
+      await this.emitStatus(run.id, 'log', { message: `Worktree prepared at "${workspace.rootPath}" on branch "${branch}"`, transition: 'run.launched' });
 
       const controller = new AbortController();
       const agentText = new HarnessTextGenerator(this.c.harnesses, this.c.env);
@@ -355,11 +319,14 @@ export class RunService {
 
       if (result.status === 'completed') {
         await this.aggregateArtifacts(run.id);
+        await this.emitStatus(run.id, 'log', { message: 'Run completed successfully', transition: 'run.completed' });
         await this.notifyRun(result, 'info', 'Run completed');
       } else if (result.status === 'failed') {
         await this.aggregateArtifacts(run.id);
+        await this.emitStatus(run.id, 'log', { message: `Run failed: ${result.error ?? 'unknown error'}`, transition: 'run.failed' });
         await this.notifyRun(result, 'error', 'Run failed', result.error);
       } else if (result.status === 'waiting') {
+        await this.emitStatus(run.id, 'log', { message: 'Run paused: awaiting approval', transition: 'run.waiting' });
         await this.notifyRun(result, 'warn', 'Run awaiting approval');
       }
 

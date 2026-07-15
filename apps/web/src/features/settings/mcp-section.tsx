@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
@@ -194,6 +195,8 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
 
   const entries = Object.entries(mcpServers);
 
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+
   const remove = async (key: string) => {
     if (global) {
       const meta = serverMeta(key);
@@ -213,6 +216,11 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
       setMcpServers(next);
       saveProjectMcp(next);
     }
+  };
+
+  const confirmRemove = async () => {
+    if (!deletingKey) return;
+    await remove(deletingKey);
   };
 
   const resetAddDialog = () => {
@@ -714,7 +722,7 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        onClick={(e) => { e.stopPropagation(); remove(key); }}
+                        onClick={(e) => { e.stopPropagation(); setDeletingKey(key); }}
                         aria-label={`Remove ${key}`}
                         className="text-destructive hover:text-destructive"
                       >
@@ -897,23 +905,23 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
                             <div className="grid grid-cols-2 gap-2">
                               <div className="flex flex-col gap-1">
                                 <Label className="text-[11px] text-muted-foreground">Authorization URL</Label>
-                                <Input value={customOauthAuthUrl} onChange={(e) => setCustomOauthAuthUrl(e.target.value)} placeholder="https://..." className="h-7 text-xs" />
+                                <Input value={customOauthAuthUrl} onChange={(e) => setCustomOauthAuthUrl(e.target.value)} placeholder="https://..." className="h-8 text-xs" />
                               </div>
                               <div className="flex flex-col gap-1">
                                 <Label className="text-[11px] text-muted-foreground">Token URL</Label>
-                                <Input value={customOauthTokenUrl} onChange={(e) => setCustomOauthTokenUrl(e.target.value)} placeholder="https://..." className="h-7 text-xs" />
+                                <Input value={customOauthTokenUrl} onChange={(e) => setCustomOauthTokenUrl(e.target.value)} placeholder="https://..." className="h-8 text-xs" />
                               </div>
                               <div className="flex flex-col gap-1">
                                 <Label className="text-[11px] text-muted-foreground">Client ID</Label>
-                                <Input value={customOauthClientId} onChange={(e) => setCustomOauthClientId(e.target.value)} placeholder="..." className="h-7 text-xs" />
+                                <Input value={customOauthClientId} onChange={(e) => setCustomOauthClientId(e.target.value)} placeholder="..." className="h-8 text-xs" />
                               </div>
                               <div className="flex flex-col gap-1">
                                 <Label className="text-[11px] text-muted-foreground">Client Secret</Label>
-                                <Input value={customOauthClientSecret} onChange={(e) => setCustomOauthClientSecret(e.target.value)} placeholder="..." className="h-7 text-xs" type="password" />
+                                <Input value={customOauthClientSecret} onChange={(e) => setCustomOauthClientSecret(e.target.value)} placeholder="..." className="h-8 text-xs" type="password" />
                               </div>
                               <div className="flex flex-col gap-1 col-span-2">
                                 <Label className="text-[11px] text-muted-foreground">Scopes (space-separated)</Label>
-                                <Input value={customOauthScopes} onChange={(e) => setCustomOauthScopes(e.target.value)} placeholder="read write" className="h-7 text-xs" />
+                                <Input value={customOauthScopes} onChange={(e) => setCustomOauthScopes(e.target.value)} placeholder="read write" className="h-8 text-xs" />
                               </div>
                             </div>
                           </div>
@@ -984,7 +992,7 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
                         value={catalogOauthAuthUrl}
                         onChange={(e) => setCatalogOauthAuthUrl(e.target.value)}
                         placeholder="https://..."
-                        className="h-7 text-xs"
+                        className="h-8 text-xs"
                       />
                     </div>
                     <div className="flex flex-col gap-1">
@@ -993,7 +1001,7 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
                         value={catalogOauthTokenUrl}
                         onChange={(e) => setCatalogOauthTokenUrl(e.target.value)}
                         placeholder="https://..."
-                        className="h-7 text-xs"
+                        className="h-8 text-xs"
                       />
                     </div>
                     <div className="flex flex-col gap-1">
@@ -1002,7 +1010,7 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
                         value={catalogOauthClientId}
                         onChange={(e) => setCatalogOauthClientId(e.target.value)}
                         placeholder="..."
-                        className="h-7 text-xs"
+                        className="h-8 text-xs"
                       />
                     </div>
                     <div className="flex flex-col gap-1">
@@ -1011,7 +1019,7 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
                         value={catalogOauthClientSecret}
                         onChange={(e) => setCatalogOauthClientSecret(e.target.value)}
                         placeholder="..."
-                        className="h-7 text-xs"
+                        className="h-8 text-xs"
                         type="password"
                       />
                     </div>
@@ -1021,7 +1029,7 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
                         value={catalogOauthScopes}
                         onChange={(e) => setCatalogOauthScopes(e.target.value)}
                         placeholder="read write"
-                        className="h-7 text-xs"
+                        className="h-8 text-xs"
                       />
                     </div>
                   </div>
@@ -1220,23 +1228,23 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
                       <div className="grid grid-cols-2 gap-2">
                         <div className="flex flex-col gap-1">
                           <Label className="text-[11px] text-muted-foreground">Authorization URL</Label>
-                          <Input value={editOauthAuthUrl} onChange={(e) => setEditOauthAuthUrl(e.target.value)} placeholder="https://..." className="h-7 text-xs" />
+                          <Input value={editOauthAuthUrl} onChange={(e) => setEditOauthAuthUrl(e.target.value)} placeholder="https://..." className="h-8 text-xs" />
                         </div>
                         <div className="flex flex-col gap-1">
                           <Label className="text-[11px] text-muted-foreground">Token URL</Label>
-                          <Input value={editOauthTokenUrl} onChange={(e) => setEditOauthTokenUrl(e.target.value)} placeholder="https://..." className="h-7 text-xs" />
+                          <Input value={editOauthTokenUrl} onChange={(e) => setEditOauthTokenUrl(e.target.value)} placeholder="https://..." className="h-8 text-xs" />
                         </div>
                         <div className="flex flex-col gap-1">
                           <Label className="text-[11px] text-muted-foreground">Client ID</Label>
-                          <Input value={editOauthClientId} onChange={(e) => setEditOauthClientId(e.target.value)} placeholder="..." className="h-7 text-xs" />
+                          <Input value={editOauthClientId} onChange={(e) => setEditOauthClientId(e.target.value)} placeholder="..." className="h-8 text-xs" />
                         </div>
                         <div className="flex flex-col gap-1">
                           <Label className="text-[11px] text-muted-foreground">Client Secret</Label>
-                          <Input value={editOauthClientSecret} onChange={(e) => setEditOauthClientSecret(e.target.value)} placeholder="..." className="h-7 text-xs" type="password" />
+                          <Input value={editOauthClientSecret} onChange={(e) => setEditOauthClientSecret(e.target.value)} placeholder="..." className="h-8 text-xs" type="password" />
                         </div>
                         <div className="flex flex-col gap-1 col-span-2">
                           <Label className="text-[11px] text-muted-foreground">Scopes (space-separated)</Label>
-                          <Input value={editOauthScopes} onChange={(e) => setEditOauthScopes(e.target.value)} placeholder="read write" className="h-7 text-xs" />
+                          <Input value={editOauthScopes} onChange={(e) => setEditOauthScopes(e.target.value)} placeholder="read write" className="h-8 text-xs" />
                         </div>
                       </div>
                     </div>
@@ -1266,6 +1274,15 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={deletingKey !== null}
+        onOpenChange={(open) => { if (!open) setDeletingKey(null); }}
+        title="Remove MCP server"
+        description={`Are you sure you want to remove "${deletingKey}"?`}
+        confirmLabel="Remove"
+        onConfirm={confirmRemove}
+      />
     </div>
   );
 }

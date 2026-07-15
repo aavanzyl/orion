@@ -27,12 +27,14 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { Markdown } from '@/components/markdown';
+import { ConfirmDialog } from '@/components/confirm-dialog';
+import { useNotifications } from '@/lib/use-notifications';
 import { api } from '@/lib/api';
 import { useProjects } from '@/features/projects/hooks';
 import { useProjectConfig } from '@/features/board/hooks';
 import { usePreferences } from '@/lib/use-preferences';
 import { useProviders } from '@/features/settings/hooks';
-import { useConversations } from './hooks';
+import { useAllConversations } from './hooks';
 import { useChatStream, type ChatStreamItem } from './use-chat-stream';
 
 function itemIcon(type: string) {
@@ -84,9 +86,11 @@ function ActivityItem({ item }: { item: ChatStreamItem }) {
 export function ChatPage() {
   const { projects, loading: projectsLoading } = useProjects();
   const [projectId, setProjectId] = useState<string | null>(null);
-  const { conversations, refetch, setConversations } = useConversations(projectId);
+  const projectIds = useMemo(() => projects.map((p) => p.id), [projects]);
+  const { conversations, refetch, setConversations } = useAllConversations(projectIds);
   const { config } = useProjectConfig(projectId);
   const { preferences } = usePreferences();
+  const { notify } = useNotifications();
   const { providers } = useProviders();
   const [conversationId, setConversationId] = useState<string | null>(null);
   const { messages, streamingText, items, streaming, error } = useChatStream(conversationId);
@@ -101,18 +105,49 @@ export function ChatPage() {
     if (!projectId && projects.length > 0) setProjectId(projects[0].id);
   }, [projects, projectId]);
 
-  useEffect(() => {
-    setConversationId(null);
-    setRoute(null);
-  }, [projectId]);
+  /** Conversations grouped under their project, ordered by the project list. */
+  const groups = useMemo(() => {
+    const grouped = new Map<string, typeof conversations>();
+    for (const conversation of conversations) {
+      const list = grouped.get(conversation.projectId) ?? [];
+      list.push(conversation);
+      grouped.set(conversation.projectId, list);
+    }
+    for (const list of grouped.values()) {
+      list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    }
+    return projects
+      .filter((p) => grouped.has(p.id) || p.id === projectId)
+      .map((project) => ({
+        project,
+        conversations: grouped.get(project.id) ?? [],
+      }));
+  }, [projects, conversations, projectId]);
 
+  // Auto-select the most recent conversation of the active project.
   useEffect(() => {
-    if (!conversationId && conversations.length > 0) setConversationId(conversations[0].id);
-  }, [conversations, conversationId]);
+    if (conversationId) return;
+    const group = groups.find((g) => g.project.id === projectId);
+    if (group && group.conversations.length > 0) {
+      setConversationId(group.conversations[0].id);
+    }
+  }, [groups, projectId, conversationId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });
   }, [messages, streamingText, items]);
+
+  const selectProject = (id: string) => {
+    setProjectId(id);
+    setConversationId(null);
+    setRoute(null);
+  };
+
+  const selectConversation = (conversation: (typeof conversations)[number]) => {
+    setProjectId(conversation.projectId);
+    setConversationId(conversation.id);
+    setRoute(null);
+  };
 
   const activeAgent = useMemo(() => {
     const { harness, providerId } = preferences.agentDefaults;
@@ -154,6 +189,13 @@ export function ChatPage() {
     } catch (e) {
       toast.error((e as Error).message);
     }
+  };
+
+  const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
+
+  const confirmDeleteConversation = async () => {
+    if (!deletingConversationId) return;
+    await deleteConversation(deletingConversationId);
   };
 
   const send = async () => {
@@ -203,8 +245,16 @@ export function ChatPage() {
         title: route.ticketTitle ?? 'New task',
         swimlane,
       });
-      await api.startRun(ticket.id);
-      toast.success(`Run started for "${ticket.title}"`);
+      const run = await api.startRun(ticket.id);
+      if (preferences.notifications.events.workflowTriggered.toasts || preferences.notifications.events.workflowTriggered.desktop) {
+        notify('workflowTriggered', {
+          title: `Workflow triggered: ${run.workflowName}`,
+          description: `Ticket: ${ticket.title}`,
+          url: `${window.location.origin}/dashboard?run=${run.id}`,
+        });
+      } else {
+        toast.success(`Run started for "${ticket.title}"`);
+      }
       setRoute(null);
     } catch (e) {
       toast.error((e as Error).message);
@@ -214,22 +264,11 @@ export function ChatPage() {
   };
 
   return (
+    <>
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between gap-4 border-b px-6 py-4">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-semibold">Chat</h1>
-          <Select value={projectId ?? undefined} onValueChange={setProjectId}>
-            <SelectTrigger className="w-64">
-              <SelectValue placeholder={projectsLoading ? 'Loading…' : 'Select a project'} />
-            </SelectTrigger>
-            <SelectContent>
-              {projects.map((project) => (
-                <SelectItem key={project.id} value={project.id}>
-                  {project.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           {activeAgent && (
             <Badge variant="secondary" className="font-mono">
               {activeAgent}
@@ -241,50 +280,72 @@ export function ChatPage() {
 
       {!projectId ? (
         <div className="flex flex-1 items-center justify-center text-muted-foreground">
-          Select a project to start chatting.
+          {projectsLoading ? 'Loading…' : 'Create a project to start chatting.'}
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">
           <aside className="flex min-h-0 w-64 shrink-0 flex-col border-r bg-muted/20">
-            <div className="p-3">
+            <div className="flex flex-col gap-2 p-3">
+              <Select value={projectId ?? undefined} onValueChange={selectProject}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={projectsLoading ? 'Loading…' : 'Select a project'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((project) => (
+                    <SelectItem key={project.id} value={project.id}>
+                      {project.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button size="sm" className="w-full shadow-sm" onClick={newConversation}>
                 <PlusIcon data-icon="inline-start" />
                 New conversation
               </Button>
             </div>
             <ScrollArea className="flex-1">
-              <div className="flex flex-col gap-0.5 px-3 pb-3">
-                {conversations.length === 0 ? (
+              <div className="flex flex-col gap-2 px-3 pb-3">
+                {groups.length === 0 ? (
                   <p className="px-2 py-2 text-xs text-muted-foreground">No conversations yet.</p>
                 ) : (
-                  conversations.map((conversation) => (
-                    <div key={conversation.id} className="group/conv relative">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setConversationId(conversation.id);
-                          setRoute(null);
-                        }}
-                        className={cn(
-                          'w-full truncate rounded-md py-2 pl-3 pr-9 text-left text-sm font-medium transition-all',
-                          conversation.id === conversationId
-                            ? 'bg-accent text-accent-foreground shadow-sm'
-                            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                        )}
-                      >
-                        {conversation.title}
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="Delete conversation"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void deleteConversation(conversation.id);
-                        }}
-                        className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground opacity-60 transition-opacity hover:bg-primary/10 hover:text-primary hover:opacity-100 focus-visible:opacity-100"
-                      >
-                        <Trash2Icon className="size-3.5" />
-                      </button>
+                  groups.map((group) => (
+                    <div key={group.project.id} className="flex flex-col gap-0.5">
+                      <p className="truncate px-2 pt-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {group.project.name}
+                      </p>
+                      {group.conversations.length === 0 ? (
+                        <p className="px-2 py-1 text-xs text-muted-foreground/70">
+                          No conversations yet.
+                        </p>
+                      ) : (
+                        group.conversations.map((conversation) => (
+                          <div key={conversation.id} className="group/conv relative overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() => selectConversation(conversation)}
+                              className={cn(
+                                'max-w-[235px] w-full truncate rounded-md py-2 pl-3 pr-9 text-left text-sm font-medium transition-all',
+                                conversation.id === conversationId
+                                  ? 'bg-accent text-accent-foreground shadow-sm'
+                                  : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                              )}
+                            >
+                              {conversation.title}
+                            </button>
+                            <button
+                              type="button"
+                              aria-label="Delete conversation"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeletingConversationId(conversation.id);
+                              }}
+                              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground opacity-60 transition-opacity hover:bg-primary/10 hover:text-primary hover:opacity-100 focus-visible:opacity-100"
+                            >
+                              <Trash2Icon className="size-3.5" />
+                            </button>
+                          </div>
+                        ))
+                      )}
                     </div>
                   ))
                 )}
@@ -407,5 +468,14 @@ export function ChatPage() {
         </div>
       )}
     </div>
+
+    <ConfirmDialog
+      open={deletingConversationId !== null}
+      onOpenChange={(open) => { if (!open) setDeletingConversationId(null); }}
+      title="Delete conversation"
+      description="Are you sure you want to delete this conversation? This action cannot be undone."
+      onConfirm={confirmDeleteConversation}
+    />
+  </>
   );
 }

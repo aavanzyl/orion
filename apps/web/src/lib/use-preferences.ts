@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from 'react';
-import type { AppPreferences } from '@orion/models';
+import type { AppPreferences, DefaultIssueTypeConfig, NotificationChannelPrefs, NotificationEventKey, NotificationEvents } from '@orion/models';
 import { api } from './api';
 
 const STORAGE_KEY = 'orion-preferences';
@@ -14,18 +14,44 @@ export interface AgentDefaults {
 }
 
 export interface NotificationPreferences {
-  toasts: boolean;
-  desktop: boolean;
-  runComplete: boolean;
-  runFailed: boolean;
-  syncComplete: boolean;
-  approvalRequired: boolean;
+  events: NotificationEvents;
 }
 
 export interface Preferences {
   agentDefaults: AgentDefaults;
   notifications: NotificationPreferences;
+  issueTypeDefaults: DefaultIssueTypeConfig[];
 }
+
+const EVENT_KEYS: NotificationEventKey[] = [
+  'runComplete',
+  'runFailed',
+  'syncComplete',
+  'approvalRequired',
+  'workflowTriggered',
+  'agentRunning',
+  'agentFailed',
+  'scheduleFired',
+  'scheduleCompleted',
+  'scheduleFailed',
+  'transitionIssue',
+  'nodeTransition',
+];
+
+const DEFAULT_EVENT_PREFS: NotificationEvents = {
+  runComplete: { toasts: true, desktop: false },
+  runFailed: { toasts: true, desktop: false },
+  syncComplete: { toasts: false, desktop: false },
+  approvalRequired: { toasts: true, desktop: false },
+  workflowTriggered: { toasts: false, desktop: false },
+  agentRunning: { toasts: false, desktop: false },
+  agentFailed: { toasts: true, desktop: false },
+  scheduleFired: { toasts: false, desktop: false },
+  scheduleCompleted: { toasts: false, desktop: false },
+  scheduleFailed: { toasts: true, desktop: false },
+  transitionIssue: { toasts: false, desktop: false },
+  nodeTransition: { toasts: false, desktop: false },
+};
 
 const DEFAULT_PREFERENCES: Preferences = {
   agentDefaults: {
@@ -37,29 +63,79 @@ const DEFAULT_PREFERENCES: Preferences = {
     maxRetries: 1,
   },
   notifications: {
-    toasts: true,
-    desktop: false,
-    runComplete: true,
-    runFailed: true,
-    syncComplete: false,
-    approvalRequired: true,
+    events: { ...DEFAULT_EVENT_PREFS },
   },
+  issueTypeDefaults: [
+    { name: 'feature', label: 'Feature', workflow: 'default' },
+    { name: 'bug', label: 'Bug', workflow: 'default' },
+    { name: 'issue', label: 'Issue', workflow: 'default' },
+    { name: 'hotfix', label: 'Hotfix', workflow: 'default' },
+  ],
 };
+
+interface OldFlatNotificationPreferences {
+  toasts?: boolean;
+  desktop?: boolean;
+  runComplete?: boolean;
+  runFailed?: boolean;
+  syncComplete?: boolean;
+  approvalRequired?: boolean;
+  workflowTriggered?: boolean;
+  agentRunning?: boolean;
+  agentFailed?: boolean;
+  scheduleFired?: boolean;
+  scheduleCompleted?: boolean;
+  scheduleFailed?: boolean;
+  transitionIssue?: boolean;
+  nodeTransition?: boolean;
+}
+
+function isOldNotificationFormat(notifs: unknown): notifs is OldFlatNotificationPreferences {
+  if (!notifs || typeof notifs !== 'object') return false;
+  const n = notifs as Record<string, unknown>;
+  return !n.events && (typeof n.toasts === 'boolean' || typeof n.runComplete === 'boolean');
+}
+
+function migrateNotifications(oldNotifs: OldFlatNotificationPreferences): NotificationPreferences {
+  const globalToasts = oldNotifs.toasts ?? true;
+  const globalDesktop = oldNotifs.desktop ?? false;
+
+  const events: NotificationEvents = {} as NotificationEvents;
+  for (const key of EVENT_KEYS) {
+    const enabled = (oldNotifs as Record<string, boolean | undefined>)[key] ?? DEFAULT_EVENT_PREFS[key].toasts;
+    events[key] = {
+      toasts: globalToasts && enabled,
+      desktop: globalDesktop && enabled,
+    };
+  }
+  return { events };
+}
 
 function readLocal(): Preferences {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      return {
-        agentDefaults: { ...DEFAULT_PREFERENCES.agentDefaults, ...parsed?.agentDefaults },
-        notifications: { ...DEFAULT_PREFERENCES.notifications, ...parsed?.notifications },
-      };
+      if (isOldNotificationFormat(parsed?.notifications)) {
+        const migratedNotifications = migrateNotifications(parsed.notifications);
+        return {
+          agentDefaults: { ...DEFAULT_PREFERENCES.agentDefaults, ...parsed?.agentDefaults },
+          notifications: migratedNotifications,
+          issueTypeDefaults: parsed?.issueTypeDefaults ?? DEFAULT_PREFERENCES.issueTypeDefaults,
+        };
+      }
+    return {
+      agentDefaults: { ...DEFAULT_PREFERENCES.agentDefaults, ...parsed?.agentDefaults },
+      notifications: {
+        events: { ...DEFAULT_EVENT_PREFS, ...parsed?.notifications?.events },
+      },
+      issueTypeDefaults: parsed?.issueTypeDefaults ?? DEFAULT_PREFERENCES.issueTypeDefaults,
+    };
     }
   } catch {
     // ignore
   }
-  return DEFAULT_PREFERENCES;
+  return { ...DEFAULT_PREFERENCES, notifications: { events: { ...DEFAULT_EVENT_PREFS } } };
 }
 
 function writeLocal(preferences: Preferences) {
@@ -71,16 +147,28 @@ function writeLocal(preferences: Preferences) {
 }
 
 function mapFromDb(db: AppPreferences): Preferences {
+  if (isOldNotificationFormat(db.notifications)) {
+    const migratedNotifications = migrateNotifications(db.notifications);
+    return {
+      agentDefaults: { ...DEFAULT_PREFERENCES.agentDefaults, ...db.agentDefaults },
+      notifications: migratedNotifications,
+      issueTypeDefaults: db.issueTypeDefaults ?? DEFAULT_PREFERENCES.issueTypeDefaults,
+    };
+  }
   return {
     agentDefaults: { ...DEFAULT_PREFERENCES.agentDefaults, ...db.agentDefaults },
-    notifications: { ...DEFAULT_PREFERENCES.notifications, ...db.notifications },
+    notifications: {
+      events: { ...DEFAULT_EVENT_PREFS, ...(db.notifications as unknown as { events?: NotificationEvents })?.events },
+    },
+    issueTypeDefaults: db.issueTypeDefaults ?? DEFAULT_PREFERENCES.issueTypeDefaults,
   };
 }
 
 function mapToDb(prefs: Preferences): Partial<AppPreferences> {
   return {
     agentDefaults: { ...prefs.agentDefaults },
-    notifications: { ...prefs.notifications },
+    notifications: { events: { ...prefs.notifications.events } },
+    issueTypeDefaults: prefs.issueTypeDefaults,
   };
 }
 
@@ -141,10 +229,33 @@ export function usePreferences() {
     }
   }, []);
 
-  const setNotifications = useCallback((next: Partial<NotificationPreferences>) => {
+  const setNotificationEvent = useCallback(
+    (eventKey: NotificationEventKey, next: Partial<NotificationChannelPrefs>) => {
+      currentPreferences = {
+        ...currentPreferences,
+        notifications: {
+          events: {
+            ...currentPreferences.notifications.events,
+            [eventKey]: {
+              ...currentPreferences.notifications.events[eventKey],
+              ...next,
+            },
+          },
+        },
+      };
+      writeLocal(currentPreferences);
+      emitChange();
+      if (loadedFromDb) {
+        persistToDb(currentPreferences);
+      }
+    },
+    [],
+  );
+
+  const setIssueTypeDefaults = useCallback((next: DefaultIssueTypeConfig[]) => {
     currentPreferences = {
       ...currentPreferences,
-      notifications: { ...currentPreferences.notifications, ...next },
+      issueTypeDefaults: next,
     };
     writeLocal(currentPreferences);
     emitChange();
@@ -153,5 +264,5 @@ export function usePreferences() {
     }
   }, []);
 
-  return { preferences, setAgentDefaults, setNotifications };
+  return { preferences, setAgentDefaults, setNotificationEvent, setIssueTypeDefaults };
 }

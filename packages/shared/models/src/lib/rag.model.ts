@@ -42,3 +42,77 @@ export interface SearchResult {
   snippet: string;
   score: number;
 }
+
+export type GraphNodeType = 'file' | 'project_group';
+
+/** A node in the dependency graph — either a file or an NX project group. */
+export interface FileGraphNode {
+  path: string;
+  name: string;
+  extension: string;
+  chunkCount: number;
+  dirname: string;
+  importCount: number;
+  importedByCount: number;
+  /** Pre-computed layout position (server-computed). */
+  x?: number;
+  y?: number;
+  /** Node kind: file node or project group container. */
+  nodeType: GraphNodeType;
+  /** For project_group nodes: the project type ("application" | "library"). */
+  projectType?: string;
+  /** For project_group nodes: the number of files inside this project. */
+  fileCount?: number;
+}
+
+/** Detected NX project metadata parsed from package.json. */
+export interface NxProjectInfo {
+  name: string;
+  root: string;
+  projectType: 'application' | 'library';
+}
+
+/** An import edge between two files in the graph. */
+export interface ImportEdge {
+  source: string;
+  target: string;
+}
+
+/** A directory entry with file counts. */
+export interface DirSummary {
+  path: string;
+  fileCount: number;
+  chunkCount: number;
+  /** Does this directory contain subdirectories? */
+  hasSubdirs: boolean;
+}
+
+/** The complete file dependency graph for a project. */
+export interface FileGraph {
+  nodes: FileGraphNode[];
+  edges: ImportEdge[];
+}
+
+// --- Call graph: function / endpoint / database-level flow ----------
+
+export type CallNodeType = 'endpoint' | 'function' | 'external' | 'database';
+
+export interface CallGraphNode {
+  id: string;
+  name: string;
+  filePath: string;
+  type: CallNodeType;
+  line: number;
+  x?: number;
+  y?: number;
+}
+
+export interface CallEdge {
+  source: string;
+  target: string;
+}
+
+export interface CallGraph {
+  nodes: CallGraphNode[];
+  edges: CallEdge[];
+}

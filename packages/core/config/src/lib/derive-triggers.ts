@@ -1,39 +1,51 @@
-import type { ProjectConfig, WorkflowConfig } from '@orion/models';
+import type { ProjectConfig } from '@orion/models';
 
 /**
- * The swimlane a workflow is "triggered" from is the swimlane of its entry node
- * — the first node that nothing else depends on being reached first, i.e. a node
- * with no `dependsOn`. When every node declares a dependency (unusual), the
- * first node in declaration order is used as a fallback.
+ * Resolve which workflow should run based on a ticket's issue type. If the
+ * project config defines `issueTypes`, the type's linked workflow is used.
+ * Falls back to the ticket's explicit `workflowName`, then the top-level
+ * `workflow`. Returns the workflow name to select.
  */
-export function entrySwimlane(workflow: WorkflowConfig): string | undefined {
-  const entry =
-    workflow.nodes.find((n) => !n.dependsOn || n.dependsOn.length === 0) ??
-    workflow.nodes[0];
-  return entry?.swimlane;
+export function resolveWorkflowForTicketType(
+  config: ProjectConfig,
+  ticketType?: string,
+  ticketWorkflowName?: string,
+): string {
+  if (ticketType && config.issueTypes) {
+    const mapping = config.issueTypes.find((it) => it.name === ticketType);
+    if (mapping) {
+      return mapping.workflow;
+    }
+  }
+  if (ticketWorkflowName) {
+    return ticketWorkflowName;
+  }
+  return config.workflow.name;
 }
 
 /**
- * Derive the swimlane → workflow-name(s) trigger map from the project's
- * workflows. A workflow is auto-started when a ticket enters the swimlane of its
- * entry node. Both the top-level `workflow` and every named entry in `workflows`
- * are considered. Multiple workflows can share a swimlane; callers disambiguate
- * (e.g. via the ticket's chosen `workflowName`).
+ * Collect the set of configured issue types for a project, always including
+ * `epic` which is implicitly available. When no project-specific issue types
+ * are defined, returns the built-in defaults (feature, bug, issue, hotfix, epic).
  */
-export function deriveSwimlaneTriggers(config: ProjectConfig): Record<string, string[]> {
-  const triggers: Record<string, string[]> = {};
-
-  const add = (name: string, workflow: WorkflowConfig) => {
-    const swimlane = entrySwimlane(workflow);
-    if (!swimlane) return;
-    const bucket = (triggers[swimlane] ??= []);
-    if (!bucket.includes(name)) bucket.push(name);
-  };
-
-  add(config.workflow.name, config.workflow);
-  for (const [name, workflow] of Object.entries(config.workflows ?? {})) {
-    add(name, workflow);
+export function resolveIssueTypes(
+  config: ProjectConfig | null,
+): { value: string; label: string; workflow?: string }[] {
+  if (config?.issueTypes && config.issueTypes.length > 0) {
+    return [
+      { value: 'epic', label: 'Epic' },
+      ...config.issueTypes.map((it) => ({
+        value: it.name,
+        label: it.label,
+        workflow: it.workflow,
+      })),
+    ];
   }
-
-  return triggers;
+  return [
+    { value: 'feature', label: 'Feature' },
+    { value: 'bug', label: 'Bug' },
+    { value: 'issue', label: 'Issue' },
+    { value: 'hotfix', label: 'Hotfix' },
+    { value: 'epic', label: 'Epic' },
+  ];
 }

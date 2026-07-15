@@ -45,8 +45,6 @@ export interface NodeExecutionContext {
   signal?: AbortSignal;
   /** Outputs of already-completed upstream nodes, keyed by node id, for data flow. */
   nodeOutputs: Record<string, unknown>;
-  /** When set, this execution is one item of a matrix fan-out. */
-  matrix?: { item: unknown; index: number; total: number; as?: string };
 }
 
 /** Token/cost usage for a node (mirrors HarnessUsage; local to avoid a dep). */

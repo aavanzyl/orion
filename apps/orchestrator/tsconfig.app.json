@@ -18,6 +18,12 @@
   ],
   "references": [
     {
+      "path": "../../packages/core/graph/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/adapters/board/github/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/core/workflow-engine/tsconfig.lib.json"
     },
     {
@@ -34,9 +40,6 @@
     },
     {
       "path": "../../packages/adapters/harness/claude/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/adapters/harness/openai/tsconfig.lib.json"
     },
     {
       "path": "../../packages/adapters/harness/codex/tsconfig.lib.json"

@@ -74,3 +74,19 @@ Surface-specific serialization:
 6. Verify: `npx nx run @orion/web:typecheck`, `npx nx run @orion/web:lint`, and
    the web build. Manually confirm the field survives a Form → YAML → Form and a
    builder → save → config round-trip.
+
+## Event recording and notifications
+
+When a feature changes how state is mutated (new node types, new workflow actions,
+or config-driven side effects), ensure the corresponding events are emitted so the
+debug page, SSE streams, and notification provider can surface them:
+
+- **Engine events**: Extend `RunEventType` in `packages/shared/models/src/lib/event.model.ts`.
+  Emit appropriate events (both lifecycle and `transition` events) in the workflow engine
+  (`packages/core/workflow-engine/src/lib/engine.ts`).
+- **Notification events**: If the new feature should notify users, add a key to
+  `NotificationEventKey` in `packages/shared/models/src/lib/settings.model.ts`.
+- **Notification defaults**: Add defaults in `apps/web/src/lib/use-preferences.ts`
+  (`DEFAULT_EVENT_PREFS`) and render the toggle in the Notifications tab.
+- **Notification provider**: Wire the new event type into
+  `apps/web/src/features/notifications/run-notifications-provider.tsx`.

@@ -5,19 +5,31 @@ import type {
   AppSettings,
   Board,
   BoardConfig,
+  CallGraph,
   ChatMessage,
   CodeIndex,
   Conversation,
   ConversationDetail,
+  CreateEpicInput,
   CreateEvaluationInput,
   CreateMcpServerInput,
   CreateProjectInput,
   CreateProviderInput,
   CreateTicketInput,
   CreateScheduleInput,
+  DirSummary,
+  Epic,
   EvaluationSummary,
+  FileGraph,
+  GodNode,
+  GraphNode,
+  GraphPath,
+  GraphQueryResult,
+  GraphStats,
+  KnowledgeGraph,
   InstallSkillInput,
   InstallSkillResult,
+  IssueTypeConfig,
   Label,
   McpServer,
   Project,
@@ -37,6 +49,7 @@ import type {
   TicketRelationKind,
   Schedule,
   ScheduleOptions,
+  UpdateEpicInput,
   UpdateEvaluationInput,
   UpdateMcpServerInput,
   UpdateProjectInput,
@@ -99,14 +112,16 @@ export interface ProjectConfigResponse {
   workflow: WorkflowConfig;
   /** Names of reusable sub-workflows referenced by `workflow` nodes. */
   workflows?: string[];
+  /** Configured issue types mapping to workflows. */
+  issueTypes?: IssueTypeConfig[];
 }
 
-export interface RawConfigResponse {
+interface RawConfigResponse {
   content: string | null;
   configPath: string;
 }
 
-export interface CommandFileResponse {
+interface CommandFileResponse {
   content: string | null;
   path: string;
 }
@@ -116,7 +131,7 @@ export interface DirEntry {
   path: string;
 }
 
-export interface DirListing {
+interface DirListing {
   root: string;
   dir: string;
   entries: DirEntry[];
@@ -158,7 +173,7 @@ export const api = {
   deleteProvider: (id: string) =>
     request<{ deleted: boolean }>(`/providers/${id}`, { method: 'DELETE' }),
   listProjects: () => request<Project[]>('/projects'),
-  createProject: (input: CreateProjectInput) =>
+  createProject: (input: CreateProjectInput & { config?: string }) =>
     request<Project>('/projects', { method: 'POST', body: JSON.stringify(input) }),
   getProject: (id: string) => request<Project>(`/projects/${id}`),
   updateProject: (id: string, input: UpdateProjectInput) =>
@@ -187,6 +202,7 @@ export const api = {
       body: JSON.stringify({ path, content }),
     }),
   getBoard: (id: string) => request<Board>(`/projects/${id}/board`),
+  getTimeline: (id: string) => request<{ tickets: Ticket[]; epics: Epic[] }>(`/projects/${id}/timeline`),
   createTicket: (
     projectId: string,
     input: Omit<CreateTicketInput, 'projectId'>,
@@ -200,6 +216,8 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(input),
     }),
+  deleteTicket: (ticketId: string) =>
+    request<{ deleted: boolean }>(`/tickets/${ticketId}`, { method: 'DELETE' }),
   getTicketDetail: (ticketId: string) =>
     request<TicketDetail>(`/tickets/${ticketId}/detail`),
   listAllTickets: () => request<Ticket[]>('/tickets'),
@@ -212,6 +230,19 @@ export const api = {
     }),
   deleteLabel: (labelId: string) =>
     request<{ deleted: boolean }>(`/labels/${labelId}`, { method: 'DELETE' }),
+  listEpics: (projectId: string) => request<Epic[]>(`/projects/${projectId}/epics`),
+  createEpic: (projectId: string, input: Omit<CreateEpicInput, 'projectId'>) =>
+    request<Epic>(`/projects/${projectId}/epics`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateEpic: (id: string, input: UpdateEpicInput) =>
+    request<Epic>(`/epics/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  deleteEpic: (id: string) =>
+    request<{ deleted: boolean }>(`/epics/${id}`, { method: 'DELETE' }),
   addTicketRelation: (ticketId: string, kind: TicketRelationKind, relatedTicketId: string) =>
     request<TicketRelation>(`/tickets/${ticketId}/relations`, {
       method: 'POST',
@@ -233,7 +264,21 @@ export const api = {
     request<WorkflowRun>(`/tickets/${ticketId}/run`, { method: 'POST' }),
   listTicketRuns: (ticketId: string) => request<WorkflowRun[]>(`/tickets/${ticketId}/runs`),
   getRun: (runId: string) => request<{ run: WorkflowRun; nodes: RunNode[] }>(`/runs/${runId}`),
-  listRunEvents: (runId: string) => request<RunEvent[]>(`/runs/${runId}/events`),
+  listRunEvents: (runId: string, filters?: { type?: string; nodeId?: string }) => {
+    const qs = new URLSearchParams();
+    if (filters?.type) qs.set('type', filters.type);
+    if (filters?.nodeId) qs.set('nodeId', filters.nodeId);
+    const query = qs.toString();
+    return request<RunEvent[]>(`/runs/${runId}/events${query ? `?${query}` : ''}`);
+  },
+  listTicketLogs: (ticketId: string, filters?: { type?: string; nodeKey?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (filters?.type) qs.set('type', filters.type);
+    if (filters?.nodeKey) qs.set('nodeKey', filters.nodeKey);
+    if (filters?.limit) qs.set('limit', String(filters.limit));
+    const query = qs.toString();
+    return request<RunEvent[]>(`/tickets/${ticketId}/logs${query ? `?${query}` : ''}`);
+  },
   approveRun: (runId: string, nodeKey: string) =>
     request<WorkflowRun>(`/runs/${runId}/approve`, {
       method: 'POST',
@@ -377,6 +422,52 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ query, topK }),
     }),
+  getProjectGraph: (projectId: string, opts?: { maxFiles?: number; connectedOnly?: boolean; dir?: string; extensions?: string }) => {
+    const qs = new URLSearchParams();
+    if (opts?.maxFiles) qs.set('maxFiles', String(opts.maxFiles));
+    if (opts?.connectedOnly === false) qs.set('connectedOnly', 'false');
+    if (opts?.dir) qs.set('dir', opts.dir);
+    if (opts?.extensions) qs.set('extensions', opts.extensions);
+    const query = qs.toString();
+    return request<FileGraph>(`/projects/${projectId}/files/graph${query ? `?${query}` : ''}`);
+  },
+  getCodegenGraph: (projectId: string, opts?: { maxFiles?: number; dir?: string; extensions?: string }) => {
+    const qs = new URLSearchParams();
+    if (opts?.maxFiles) qs.set('maxFiles', String(opts.maxFiles));
+    if (opts?.dir) qs.set('dir', opts.dir);
+    if (opts?.extensions) qs.set('extensions', opts.extensions);
+    const query = qs.toString();
+    return request<FileGraph>(`/projects/${projectId}/codegen-graph${query ? `?${query}` : ''}`);
+  },
+  getKnowledgeGraph: (projectId: string) =>
+    request<KnowledgeGraph>(`/projects/${projectId}/knowledge-graph`),
+  buildKnowledgeGraph: (projectId: string) =>
+    request<KnowledgeGraph>(`/projects/${projectId}/knowledge-graph/build`, { method: 'POST' }),
+  queryKnowledgeGraph: (projectId: string, q: string) =>
+    request<GraphQueryResult>(`/projects/${projectId}/knowledge-graph/query?q=${encodeURIComponent(q)}`),
+  findKnowledgeGraphPath: (projectId: string, source: string, target: string) => {
+    const qs = new URLSearchParams({ source, target });
+    return request<GraphPath>(`/projects/${projectId}/knowledge-graph/path?${qs.toString()}`);
+  },
+  explainKnowledgeGraphNode: (projectId: string, label: string) =>
+    request<GraphNode>(`/projects/${projectId}/knowledge-graph/explain?label=${encodeURIComponent(label)}`),
+  getGodNodes: (projectId: string, n?: number) => {
+    const qs = new URLSearchParams();
+    if (n) qs.set('n', String(n));
+    const query = qs.toString();
+    return request<GodNode[]>(`/projects/${projectId}/knowledge-graph/god-nodes${query ? `?${query}` : ''}`);
+  },
+  getGraphStats: (projectId: string) =>
+    request<GraphStats>(`/projects/${projectId}/knowledge-graph/stats`),
+  getProjectDirs: (projectId: string) =>
+    request<DirSummary[]>(`/projects/${projectId}/files/dirs`),
+  getCallGraph: (projectId: string, opts?: { dir?: string; extensions?: string }) => {
+    const qs = new URLSearchParams();
+    if (opts?.dir) qs.set('dir', opts.dir);
+    if (opts?.extensions) qs.set('extensions', opts.extensions);
+    const query = qs.toString();
+    return request<CallGraph>(`/projects/${projectId}/call-graph${query ? `?${query}` : ''}`);
+  },
   listSkills: (projectId: string) =>
     request<{ skills: SkillCatalogEntry[] }>(`/projects/${projectId}/skills`),
   listGlobalSkills: () =>
@@ -425,6 +516,26 @@ export const api = {
     request<{ deleted: boolean }>(`/skills/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     }),
+  createSkill: (projectId: string, body: { name: string; description: string; content: string }) =>
+    request<{ name: string; description: string }>(`/projects/${projectId}/skills/create`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateSkillContent: (projectId: string, name: string, body: { content: string; name?: string; description?: string }) =>
+    request<{ name: string }>(`/projects/${projectId}/skills/${encodeURIComponent(name)}/content`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  createGlobalSkill: (body: { name: string; description: string; content: string }) =>
+    request<{ name: string; description: string }>('/skills/create', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateGlobalSkillContent: (name: string, body: { content: string; name?: string; description?: string }) =>
+    request<{ name: string }>(`/skills/${encodeURIComponent(name)}/content`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   listMcpServers: () => request<McpServer[]>('/mcp-servers'),
   createMcpServer: (input: CreateMcpServerInput) =>
     request<McpServer>('/mcp-servers', { method: 'POST', body: JSON.stringify(input) }),
@@ -461,9 +572,7 @@ export interface BoardConnectionResponse {
   apiKey?: string;
 }
 
-export type BoardSyncDirection = 'pull' | 'push' | 'both';
-
-export interface BoardConnectionInput {
+interface BoardConnectionInput {
   provider?: string;
   apiKey?: string;
   teamId?: string;
@@ -476,6 +585,8 @@ export interface BoardConnectionInput {
   syncIntervalMs?: number | null;
   enabled?: boolean;
 }
+
+export type BoardSyncDirection = 'pull' | 'push' | 'both';
 
 export interface RunListItem extends WorkflowRun {
   ticketTitle?: string;
@@ -508,11 +619,6 @@ export interface RemoteState {
   type?: string;
 }
 
-/** @deprecated use {@link RemoteContainer}. */
-export type LinearTeam = RemoteContainer;
-/** @deprecated use {@link RemoteState}. */
-export type LinearState = RemoteState;
-
 export function runStreamUrl(runId: string): string {
   return `${getApiBaseUrl()}/runs/${runId}/stream`;
 }
@@ -523,4 +629,8 @@ export function chatStreamUrl(conversationId: string): string {
 
 export function boardStreamUrl(projectId: string): string {
   return `${getApiBaseUrl()}/projects/${projectId}/board/stream`;
+}
+
+export function scheduleStreamUrl(): string {
+  return `${getApiBaseUrl()}/schedules/stream`;
 }

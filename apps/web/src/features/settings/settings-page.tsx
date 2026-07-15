@@ -13,7 +13,7 @@ import {
   XIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { Provider } from '@orion/models';
+import type { Provider, NotificationEventKey } from '@orion/models';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -50,6 +50,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import {
   api,
   getApiBaseUrl,
@@ -64,7 +65,7 @@ import { ProviderFormDialog } from './provider-form-dialog';
 import { McpClientConnectCard } from './mcp-shared';
 import { BoardSyncSection } from '@/features/board-sync/board-sync-section';
 
-const HARNESS_OPTIONS = ['codex', 'openai', 'claude', 'opencode'];
+const HARNESS_OPTIONS = ['codex', 'claude', 'opencode'];
 const REPO_URL = 'https://github.com/aavanzyl/orion';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? '0.0.0';
 const APP_GIT_SHA = import.meta.env.VITE_APP_GIT_SHA ?? 'unknown';
@@ -120,7 +121,8 @@ export function SettingsPage() {
   const [mounted, setMounted] = useState(false);
   const { providers, loading: providersLoading, error: providersError, refetch } = useProviders();
   const { branding, setBranding } = useBranding();
-  const { preferences, setAgentDefaults, setNotifications } = usePreferences();
+  const { preferences, setAgentDefaults, setNotificationEvent, setIssueTypeDefaults } = usePreferences();
+  const issueTypeDefaults = preferences.issueTypeDefaults;
   const [brandingDraft, setBrandingDraft] = useState(branding.title);
   const [apiUrlDraft, setApiUrlDraft] = useState(getApiBaseUrl());
   const [testing, setTesting] = useState(false);
@@ -171,6 +173,8 @@ export function SettingsPage() {
     });
   }, [filtered, sortField, sortDir]);
 
+  const [deletingProvider, setDeletingProvider] = useState<Provider | null>(null);
+
   const openCreate = () => {
     setEditing(null);
     setFormOpen(true);
@@ -181,9 +185,10 @@ export function SettingsPage() {
     setFormOpen(true);
   };
 
-  const remove = async (provider: Provider) => {
+  const remove = async () => {
+    if (!deletingProvider) return;
     try {
-      await api.deleteProvider(provider.id);
+      await api.deleteProvider(deletingProvider.id);
       toast.success('Provider removed');
       refetch();
     } catch (e) {
@@ -191,7 +196,19 @@ export function SettingsPage() {
     }
   };
 
-  const { agentDefaults, notifications } = preferences;
+  const { agentDefaults } = preferences;
+
+  const handleDesktopToggle = async (eventKey: string, enabled: boolean) => {
+    if (enabled && typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        toast.error('Desktop notifications were blocked by the browser.');
+        return;
+      }
+    }
+    setNotificationEvent(eventKey as Parameters<typeof setNotificationEvent>[0], { desktop: enabled });
+  };
+
   const selectedProvider = providers.find((p) => p.id === agentDefaults.providerId) ?? null;
 
   const saveApiUrl = () => {
@@ -213,17 +230,6 @@ export function SettingsPage() {
     } finally {
       setTesting(false);
     }
-  };
-
-  const toggleDesktop = async (enabled: boolean) => {
-    if (enabled && typeof Notification !== 'undefined') {
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        toast.error('Desktop notifications were blocked by the browser.');
-        return;
-      }
-    }
-    setNotifications({ desktop: enabled });
   };
 
   const numberField = (value: number, onChange: (n: number) => void, min: number) => (
@@ -254,6 +260,7 @@ export function SettingsPage() {
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="providers">Providers</TabsTrigger>
             <TabsTrigger value="agents">Agents</TabsTrigger>
+            <TabsTrigger value="issueTypes">Issue Types</TabsTrigger>
             <TabsTrigger value="mcp">MCP</TabsTrigger>
             <TabsTrigger value="board-sync">Board Sync</TabsTrigger>
             <TabsTrigger value="notifications">Notifications</TabsTrigger>
@@ -531,7 +538,7 @@ export function SettingsPage() {
                                         variant="ghost"
                                         size="icon-sm"
                                         className="text-destructive hover:text-destructive"
-                                        onClick={() => remove(provider)}
+                                        onClick={() => setDeletingProvider(provider)}
                                         aria-label={`Delete ${provider.key}`}
                                       >
                                         <Trash2Icon />
@@ -672,6 +679,134 @@ export function SettingsPage() {
             </Card>
           </TabsContent>
 
+          <TabsContent value="issueTypes">
+            <Card className="border-border/50 shadow-none">
+              <CardHeader>
+                <CardTitle>Default issue types</CardTitle>
+                <CardDescription>
+                  Default ticket types applied to new projects. Each type maps to a workflow.
+                  &quot;epic&quot; is always available regardless of configuration.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {issueTypeDefaults.length > 0 && (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Label</TableHead>
+                          <TableHead>Workflow</TableHead>
+                          <TableHead>Color</TableHead>
+                          <TableHead>Icon</TableHead>
+                          <TableHead className="w-0" />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {issueTypeDefaults.map((it, i) => (
+                          <TableRow key={i}>
+                            <TableCell>
+                              <Input
+                                value={it.name}
+                                onChange={(e) => {
+                                  const next = [...issueTypeDefaults];
+                                  const newName = e.target.value;
+                                  next[i] = {
+                                    ...next[i],
+                                    name: newName,
+                                    label: next[i].label || (newName ? newName.charAt(0).toUpperCase() + newName.slice(1) : ''),
+                                  };
+                                  setIssueTypeDefaults(next);
+                                }}
+                                placeholder="feature"
+                                className="font-mono text-xs"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                value={it.label}
+                                onChange={(e) => {
+                                  const next = [...issueTypeDefaults];
+                                  next[i] = { ...next[i], label: e.target.value };
+                                  setIssueTypeDefaults(next);
+                                }}
+                                placeholder="Feature"
+                                className="text-xs"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                value={it.workflow}
+                                onChange={(e) => {
+                                  const next = [...issueTypeDefaults];
+                                  next[i] = { ...next[i], workflow: e.target.value };
+                                  setIssueTypeDefaults(next);
+                                }}
+                                placeholder="default"
+                                className="font-mono text-xs"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                value={it.color ?? ''}
+                                onChange={(e) => {
+                                  const next = [...issueTypeDefaults];
+                                  next[i] = { ...next[i], color: e.target.value || undefined };
+                                  setIssueTypeDefaults(next);
+                                }}
+                                placeholder="#3b82f6"
+                                className="w-24 font-mono text-xs"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                value={it.icon ?? ''}
+                                onChange={(e) => {
+                                  const next = [...issueTypeDefaults];
+                                  next[i] = { ...next[i], icon: e.target.value || undefined };
+                                  setIssueTypeDefaults(next);
+                                }}
+                                placeholder="BugIcon"
+                                className="w-24 font-mono text-xs"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() =>
+                                  setIssueTypeDefaults(issueTypeDefaults.filter((_, j) => j !== i))
+                                }
+                                aria-label="Remove issue type"
+                              >
+                                <XIcon />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+                <div className="mt-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setIssueTypeDefaults([
+                        ...issueTypeDefaults,
+                        { name: '', label: '', workflow: 'default' },
+                      ])
+                    }
+                  >
+                    <PlusIcon data-icon="inline-start" />
+                    Add type
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           <TabsContent value="mcp">
             <McpClientConnectCard />
           </TabsContent>
@@ -685,79 +820,76 @@ export function SettingsPage() {
               <CardHeader>
                 <CardTitle>Notifications</CardTitle>
                 <CardDescription>
-                  Control how the board alerts you about runs and syncs.
+                  Choose which events trigger notifications on each channel.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <Label htmlFor="notif-toasts">In-app toasts</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Show transient notifications inside the app.
-                    </p>
-                  </div>
-                  <Switch
-                    id="notif-toasts"
-                    checked={notifications.toasts}
-                    onCheckedChange={(v) => setNotifications({ toasts: v })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <Label htmlFor="notif-desktop">Desktop notifications</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Deliver system notifications even when the tab is in the background.
-                    </p>
-                  </div>
-                  <Switch
-                    id="notif-desktop"
-                    checked={notifications.desktop}
-                    onCheckedChange={toggleDesktop}
-                  />
-                </div>
-
-                <Separator />
-
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Notify me when
-                </p>
-
-                <div className="flex items-center justify-between gap-4">
-                  <Label htmlFor="notif-run-complete">A run completes</Label>
-                  <Switch
-                    id="notif-run-complete"
-                    checked={notifications.runComplete}
-                    onCheckedChange={(v) => setNotifications({ runComplete: v })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between gap-4">
-                  <Label htmlFor="notif-run-failed">A run fails</Label>
-                  <Switch
-                    id="notif-run-failed"
-                    checked={notifications.runFailed}
-                    onCheckedChange={(v) => setNotifications({ runFailed: v })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between gap-4">
-                  <Label htmlFor="notif-sync">A board sync completes</Label>
-                  <Switch
-                    id="notif-sync"
-                    checked={notifications.syncComplete}
-                    onCheckedChange={(v) => setNotifications({ syncComplete: v })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between gap-4">
-                  <Label htmlFor="notif-approval">A run needs approval</Label>
-                  <Switch
-                    id="notif-approval"
-                    checked={notifications.approvalRequired}
-                    onCheckedChange={(v) => setNotifications({ approvalRequired: v })}
-                  />
-                </div>
+              <CardContent className="overflow-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr>
+                      <th className="py-2 pr-4 text-left text-sm font-medium" />
+                      <th className="px-4 py-2 text-center text-sm font-medium">
+                        <span className="flex items-center justify-center gap-1.5">
+                          In-app Toasts
+                        </span>
+                      </th>
+                      <th className="px-4 py-2 text-center text-sm font-medium">
+                        <span className="flex items-center justify-center gap-1.5">
+                          Desktop
+                        </span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {([
+                      { key: '__workflow_header', label: 'Workflow Events' },
+                      { key: 'runComplete', label: 'A run completes' },
+                      { key: 'runFailed', label: 'A run fails' },
+                      { key: 'workflowTriggered', label: 'A workflow is triggered' },
+                      { key: '__agent_header', label: 'Agent Events' },
+                      { key: 'agentRunning', label: 'An agent starts running' },
+                      { key: 'agentFailed', label: 'An agent fails' },
+                      { key: '__schedule_header', label: 'Schedule Events' },
+                      { key: 'scheduleFired', label: 'A scheduled agent fires' },
+                      { key: 'scheduleCompleted', label: 'A scheduled agent completes' },
+                      { key: 'scheduleFailed', label: 'A scheduled agent fails' },
+                      { key: '__sync_header', label: 'Sync & Other' },
+                      { key: 'syncComplete', label: 'A board sync completes' },
+                      { key: 'approvalRequired', label: 'A run needs approval' },
+                      { key: 'transitionIssue', label: 'A transition issue occurs' },
+                      { key: 'nodeTransition', label: 'A node transitions state' },
+                    ] as const).map(({ key, label }) => {
+                      if (key.startsWith('__')) {
+                        return (
+                          <tr key={key} className="bg-muted/30">
+                            <td className="py-2 pr-4 text-sm font-semibold text-foreground/70" colSpan={3}>
+                              {label}
+                            </td>
+                          </tr>
+                        );
+                      }
+                      return (
+                        <tr key={key} className="hover:bg-muted/30">
+                          <td className="py-3 pr-4 text-sm">{label}</td>
+                          <td className="px-4 py-3 text-center">
+                            <Switch
+                              id={`notif-${key}-toasts`}
+                              checked={preferences.notifications.events[key as NotificationEventKey].toasts}
+                              onCheckedChange={(v) => setNotificationEvent(key as NotificationEventKey, { toasts: v })}
+                            />
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <Switch
+                              id={`notif-${key}-desktop`}
+                              checked={preferences.notifications.events[key as NotificationEventKey].desktop}
+                              onCheckedChange={(v) => handleDesktopToggle(key as NotificationEventKey, v)}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </CardContent>
             </Card>
           </TabsContent>
@@ -825,6 +957,14 @@ export function SettingsPage() {
         onOpenChange={setFormOpen}
         provider={editing}
         onSaved={refetch}
+      />
+
+      <ConfirmDialog
+        open={deletingProvider !== null}
+        onOpenChange={(open) => { if (!open) setDeletingProvider(null); }}
+        title="Delete provider"
+        description={`Remove ${deletingProvider?.key}? This may break agents that depend on this provider.`}
+        onConfirm={remove}
       />
     </div>
   );

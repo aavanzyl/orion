@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Board, Label, TicketDetail } from '@orion/models';
+import type { Board, Epic, Label, TicketDetail } from '@orion/models';
 import { api, type ProjectConfigResponse } from '@/lib/api';
 
 export { useProjects } from '@/features/projects/hooks';
@@ -88,4 +88,23 @@ export function useTicketDetail(ticketId: string | null) {
   useEffect(refetch, [refetch]);
 
   return { detail, loading, refetch };
+}
+
+export function useEpics(projectId: string | null) {
+  const [epics, setEpics] = useState<Epic[]>([]);
+
+  const refetch = useCallback(() => {
+    if (!projectId) {
+      setEpics([]);
+      return;
+    }
+    api
+      .listEpics(projectId)
+      .then(setEpics)
+      .catch(() => undefined);
+  }, [projectId]);
+
+  useEffect(refetch, [refetch]);
+
+  return { epics, refetch };
 }

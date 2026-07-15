@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import {
   DndContext,
   DragOverlay,
@@ -10,6 +11,7 @@ import {
 } from '@dnd-kit/core';
 import { toast } from 'sonner';
 import type { CreateTicketInput, Label, Ticket } from '@orion/models';
+import { ALL_DEFAULT_TICKET_TYPES } from '@orion/models';
 import {
   Select,
   SelectContent,
@@ -18,15 +20,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { useBoard, useLabels, useProjects } from './hooks';
 import { BoardSwimlane } from './board-swimlane';
@@ -37,18 +30,15 @@ import { TicketSheet } from './ticket-sheet';
 import { useBoardStream } from '@/lib/use-board-stream';
 
 export function BoardPage() {
+  const { projectId: urlProjectId } = useParams<{ projectId?: string }>();
   const { projects, loading: projectsLoading } = useProjects();
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [projectId, setProjectId] = useState<string | null>(urlProjectId ?? null);
   const { board, loading: boardLoading, error: boardError, refetch: refetchBoard } = useBoard(projectId);
   const { labels, createLabel } = useLabels(projectId);
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
   const [draggingTicket, setDraggingTicket] = useState<Ticket | null>(null);
   const [filters, setFilters] = useState<BoardFilterState>(EMPTY_FILTERS);
-  const [workflowPicker, setWorkflowPicker] = useState<{
-    ticketId: string;
-    swimlane: string;
-    workflows: string[];
-  } | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -61,6 +51,24 @@ export function BoardPage() {
     for (const label of labels) map.set(label.id, label);
     return map;
   }, [labels]);
+
+  const ticketsById = useMemo(() => {
+    const map = new Map<string, Ticket>();
+    for (const t of allTickets) map.set(t.id, t);
+    return map;
+  }, [allTickets]);
+
+  const epicTickets = useMemo(
+    () => allTickets.filter((t) => t.type === 'epic'),
+    [allTickets],
+  );
+
+  const availableTypes = useMemo(() => {
+    if (board?.issueTypes && board.issueTypes.length > 0) {
+      return board.issueTypes;
+    }
+    return ALL_DEFAULT_TICKET_TYPES;
+  }, [board?.issueTypes]);
 
   const filtered = useMemo(() => {
     if (!board || !isFilterActive(filters)) return board;
@@ -83,10 +91,24 @@ export function BoardPage() {
   }, [board, filters]);
 
   useEffect(() => {
+    if (urlProjectId) return;
     if (!projectId && projects.length > 0) {
       setProjectId(projects[0].id);
     }
-  }, [projects, projectId]);
+  }, [urlProjectId, projects, projectId]);
+
+  useEffect(() => {
+    const ticketId = searchParams.get('ticket');
+    if (!ticketId) return;
+    const existing = allTickets.find((t) => t.id === ticketId);
+    if (existing) {
+      setActiveTicket(existing);
+      return;
+    }
+    api.getTicketDetail(ticketId).then((detail) => {
+      setActiveTicket(detail);
+    }).catch(() => undefined);
+  }, [searchParams, allTickets]);
 
   useBoardStream(projectId, () => {
     void refetchBoard();
@@ -104,17 +126,12 @@ export function BoardPage() {
     if (!swimlane) return;
     const ticket = allTickets.find((t) => t.id === ticketId);
     if (!ticket || ticket.swimlane === swimlane) return;
-    const workflows = board?.swimlanes.find((s) => s.key === swimlane)?.workflows ?? [];
-    if (workflows.length > 1) {
-      setWorkflowPicker({ ticketId, swimlane, workflows });
-      return;
-    }
     await moveTicket(ticketId, swimlane);
   };
 
-  const moveTicket = async (ticketId: string, swimlane: string, workflowName?: string) => {
+  const moveTicket = async (ticketId: string, swimlane: string) => {
     try {
-      await api.moveTicket(ticketId, swimlane, undefined, workflowName);
+      await api.moveTicket(ticketId, swimlane);
       refetchBoard();
     } catch (e) {
       toast.error((e as Error).message);
@@ -159,6 +176,9 @@ export function BoardPage() {
               swimlanes={board.swimlanes}
               labels={labels}
               tickets={allTickets}
+              epicTickets={epicTickets}
+              projectId={projectId}
+              ticketTypes={availableTypes}
               onCreateLabel={createLabel}
               onCreate={createTicket}
             />
@@ -191,6 +211,7 @@ export function BoardPage() {
                   key={swimlane.key}
                   swimlane={swimlane}
                   labelsById={labelsById}
+                  ticketsById={ticketsById}
                   onOpenTicket={setActiveTicket}
                 />
               ))}
@@ -200,6 +221,7 @@ export function BoardPage() {
                 <TicketCardView
                   ticket={draggingTicket}
                   labelsById={labelsById}
+                  ticketsById={ticketsById}
                   className="w-80 cursor-grabbing rotate-2 shadow-xl"
                 />
               ) : null}
@@ -213,48 +235,20 @@ export function BoardPage() {
         projectId={projectId}
         labels={labels}
         tickets={allTickets}
+        epicTickets={epicTickets}
         swimlanes={board?.swimlanes ?? []}
+        ticketTypes={availableTypes}
         onCreateLabel={createLabel}
-        onClose={() => setActiveTicket(null)}
+        onClose={() => {
+          setActiveTicket(null);
+          if (searchParams.has('ticket')) {
+            searchParams.delete('ticket');
+            setSearchParams(searchParams, { replace: true });
+          }
+        }}
         onChanged={refetchBoard}
       />
 
-      <Dialog
-        open={workflowPicker !== null}
-        onOpenChange={(open) => {
-          if (!open) setWorkflowPicker(null);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Choose a workflow</DialogTitle>
-            <DialogDescription>
-              This swimlane can start more than one workflow. Pick which one to run.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-2">
-            {workflowPicker?.workflows.map((name) => (
-              <Button
-                key={name}
-                variant="outline"
-                className="justify-start"
-                onClick={() => {
-                  const picker = workflowPicker;
-                  setWorkflowPicker(null);
-                  if (picker) void moveTicket(picker.ticketId, picker.swimlane, name);
-                }}
-              >
-                {name}
-              </Button>
-            ))}
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setWorkflowPicker(null)}>
-              Cancel
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

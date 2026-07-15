@@ -1,9 +1,31 @@
 import type { ProjectId } from './project.model.js';
 
 export type TicketId = string;
+export type EpicId = string;
 
 /** Where a ticket originates. `native` tickets live only in Orion's board. */
-export type TicketSource = 'native' | 'jira' | 'trello' | 'linear';
+export type TicketSource = 'native' | 'jira' | 'trello' | 'linear' | 'github';
+
+/** The kind of work a ticket represents. Project-configurable via issueTypes. */
+export type TicketType = string;
+
+/** Built-in defaults used when no project-specific issue types are configured. */
+export const DEFAULT_TICKET_TYPES: ReadonlyArray<{ value: TicketType; label: string }> = [
+  { value: 'feature', label: 'Feature' },
+  { value: 'bug', label: 'Bug' },
+  { value: 'issue', label: 'Issue' },
+  { value: 'hotfix', label: 'Hotfix' },
+];
+
+/**
+ * The "epic" issue type is always available regardless of project configuration.
+ * It is not included in `DEFAULT_TICKET_TYPES` because it cannot be removed or
+ * reconfigured.
+ */
+export const EPIC_TYPE = { value: 'epic' as TicketType, label: 'Epic' };
+
+/** All built-in issue types including the always-present epic. */
+export const ALL_DEFAULT_TICKET_TYPES = [...DEFAULT_TICKET_TYPES, EPIC_TYPE];
 
 /**
  * Ticket priority, mirroring Linear's scale.
@@ -18,6 +40,31 @@ export const TICKET_PRIORITIES: ReadonlyArray<{ value: TicketPriority; label: st
   { value: 3, label: 'Medium' },
   { value: 4, label: 'Low' },
 ];
+
+/** A high-level grouping of tickets that spans a milestone or initiative. */
+export interface Epic {
+  id: EpicId;
+  projectId: ProjectId;
+  title: string;
+  description: string;
+  /** Hex color used to render the epic bar / badge. */
+  color: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateEpicInput {
+  projectId: ProjectId;
+  title: string;
+  description?: string;
+  color?: string;
+}
+
+export interface UpdateEpicInput {
+  title?: string;
+  description?: string;
+  color?: string;
+}
 
 /** A reusable, colored label defined per project (Linear-style). */
 export interface Label {
@@ -76,6 +123,14 @@ export interface Ticket {
   order: number;
   /** JIRA-style display key, e.g. ORION-42. */
   displayKey?: string;
+  /** The kind of work this ticket represents. */
+  type: TicketType;
+  /** Optional start date for timeline bar placement. ISO 8601 string. */
+  startDate?: string;
+  /** Optional due date for scheduling and timeline views. ISO 8601 string. */
+  dueDate?: string;
+  /** Optional epic this ticket belongs to. */
+  epicId?: EpicId;
   createdAt: string;
   updatedAt: string;
 }
@@ -114,6 +169,14 @@ export interface CreateTicketInput {
   relations?: NewTicketRelation[];
   source?: TicketSource;
   externalId?: string;
+  /** Ticket type; defaults to `feature`. */
+  type?: TicketType;
+  /** Optional start date in ISO 8601 format. */
+  startDate?: string;
+  /** Optional due date in ISO 8601 format. */
+  dueDate?: string;
+  /** Optional epic to assign this ticket to. */
+  epicId?: EpicId | null;
 }
 
 export interface UpdateTicketInput {
@@ -125,6 +188,14 @@ export interface UpdateTicketInput {
   parentId?: TicketId | null;
   labelIds?: string[];
   agentId?: string | null;
+  /** Ticket type. */
+  type?: TicketType;
+  /** Optional start date in ISO 8601 format. Pass null to clear. */
+  startDate?: string | null;
+  /** Optional due date in ISO 8601 format. Pass null to clear. */
+  dueDate?: string | null;
+  /** Optional epic to assign this ticket to. Pass null to remove. */
+  epicId?: EpicId | null;
 }
 
 export interface MoveTicketInput {

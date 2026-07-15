@@ -51,7 +51,6 @@ import {
 import { InstructionsField } from '../shared/instructions-field';
 import { Checkbox, NumberField } from '../shared/node-properties/fields';
 import { LoopEditor } from '../shared/node-properties/loop-editor';
-import { MatrixEditor } from '../shared/node-properties/matrix-editor';
 import { ScmProperties } from '../shared/node-properties/scm-properties';
 import { MessageProperties } from '../shared/node-properties/message-properties';
 import { ConditionProperties } from '../shared/node-properties/condition-properties';
@@ -142,7 +141,6 @@ export function WorkflowNodeDialog({
   const isHttp = data.type === 'http';
   const isGraphql = data.type === 'graphql';
   const canLoop = isAgent;
-  const canMatrix = isAgent || isShell;
   const supportsRetryPolicy = isAgent || isHttp || isGraphql;
 
   const valid = id.trim().length > 0;
@@ -491,7 +489,55 @@ export function WorkflowNodeDialog({
               Continue on error
             </Checkbox>
 
-            {(canLoop || canMatrix) && (
+            <Checkbox
+              checked={data.onFailureTransitionTo !== undefined}
+              onChange={(v) =>
+                patch({ onFailureTransitionTo: v ? '' : undefined })
+              }
+            >
+              On failure, transition to
+            </Checkbox>
+            {data.onFailureTransitionTo !== undefined && (
+              <div className="ml-6 mt-1">
+                <Select
+                  value={data.onFailureTransitionTo || '__none__'}
+                  onValueChange={(v) =>
+                    patch({ onFailureTransitionTo: v === '__none__' ? '' : v })
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select target node..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Select target node...</SelectItem>
+                    <SelectItem value="__divider__" disabled className="text-[10px] font-semibold text-muted-foreground">
+                      — Nodes —
+                    </SelectItem>
+                    {otherNodes
+                      .filter((o) => o.key !== node?.key)
+                      .map((o) => (
+                        <SelectItem key={o.id} value={o.id}>
+                          {o.id}
+                        </SelectItem>
+                      ))}
+                    {swimlaneOptions.length > 0 && (
+                      <>
+                        <SelectItem value="__divider_sw__" disabled className="text-[10px] font-semibold text-muted-foreground">
+                          — Swimlanes —
+                        </SelectItem>
+                        {swimlaneOptions.map((sw) => (
+                          <SelectItem key={`sw_${sw}`} value={sw}>
+                            {sw}
+                          </SelectItem>
+                        ))}
+                      </>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {(canLoop) && (
               <>
                 <Separator />
                 {canLoop && (
@@ -503,20 +549,6 @@ export function WorkflowNodeDialog({
                       <span className="font-medium">Loop this node</span>
                     </Checkbox>
                     {data.loop && <LoopEditor loop={data.loop} onChange={(loop) => patch({ loop })} />}
-                  </>
-                )}
-
-                {canMatrix && (
-                  <>
-                    <Checkbox
-                      checked={Boolean(data.matrix)}
-                      onChange={(v) => patch({ matrix: v ? { items: [] } : undefined })}
-                    >
-                      <span className="font-medium">Matrix fan-out</span>
-                    </Checkbox>
-                    {data.matrix && (
-                      <MatrixEditor matrix={data.matrix} onChange={(matrix) => patch({ matrix })} />
-                    )}
                   </>
                 )}
               </>

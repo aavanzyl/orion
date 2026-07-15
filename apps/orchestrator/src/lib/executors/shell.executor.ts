@@ -16,23 +16,6 @@ export class ShellNodeExecutor implements NodeExecutor {
     }
     const variables: Record<string, string> = {};
     let scope: Record<string, unknown> | undefined;
-    if (ctx.matrix) {
-      const itemStr =
-        typeof ctx.matrix.item === 'string' ? ctx.matrix.item : JSON.stringify(ctx.matrix.item);
-      const name = ctx.matrix.as ?? 'item';
-      scope = {
-        matrix: {
-          item: ctx.matrix.item,
-          index: ctx.matrix.index,
-          total: ctx.matrix.total,
-          [name]: ctx.matrix.item,
-        },
-      };
-      variables.MATRIX_ITEM = itemStr;
-      variables.MATRIX_INDEX = String(ctx.matrix.index);
-      variables.MATRIX_TOTAL = String(ctx.matrix.total);
-      variables[name.toUpperCase()] = itemStr;
-    }
     const script = renderTemplate(rawScript, variables, ctx.nodeOutputs, scope);
     try {
       const { stdout, stderr } = await execFileAsync('sh', ['-c', script], {

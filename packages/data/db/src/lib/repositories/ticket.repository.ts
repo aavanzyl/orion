@@ -94,6 +94,36 @@ export class TicketRepository {
           and(eq(tickets.projectId, input.projectId), eq(tickets.swimlaneKey, input.swimlane)),
         );
 
+      let priority: number = input.priority ?? 0;
+      let epicId = input.epicId ?? null;
+      const labelIds = dedupe(input.labelIds ?? []);
+
+      if (input.parentId) {
+        const [parent] = await tx
+          .select()
+          .from(tickets)
+          .where(eq(tickets.id, input.parentId));
+        if (parent) {
+          priority = parent.priority;
+          epicId = parent.epicId ?? null;
+        }
+      }
+
+      const inheritedLabelIds: string[] = [];
+      if (input.parentId) {
+        const parentLabels = await tx
+          .select()
+          .from(ticketLabels)
+          .where(eq(ticketLabels.ticketId, input.parentId));
+        for (const pl of parentLabels) {
+          if (!labelIds.includes(pl.labelId)) {
+            inheritedLabelIds.push(pl.labelId);
+          }
+        }
+      }
+
+      const allLabelIds = [...labelIds, ...inheritedLabelIds];
+
       const [row] = await tx
         .insert(tickets)
         .values({
@@ -103,27 +133,30 @@ export class TicketRepository {
           swimlaneKey: input.swimlane,
           agentId: input.agentId ?? null,
           workflowName: input.workflowName ?? null,
-          priority: input.priority ?? 0,
+          priority,
           parentId: input.parentId ?? null,
           position: next,
           source: input.source ?? 'native',
           externalId: input.externalId ?? null,
           displayKey,
+          type: input.type ?? 'feature',
+          startDate: input.startDate ? new Date(input.startDate) : null,
+          dueDate: input.dueDate ? new Date(input.dueDate) : null,
+          epicId,
         })
         .returning();
 
-      const labelIds = dedupe(input.labelIds ?? []);
-      if (labelIds.length > 0) {
+      if (allLabelIds.length > 0) {
         await tx
           .insert(ticketLabels)
-          .values(labelIds.map((labelId) => ({ ticketId: row.id, labelId })));
+          .values(allLabelIds.map((labelId) => ({ ticketId: row.id, labelId })));
       }
 
       for (const relation of input.relations ?? []) {
         await tx.insert(ticketRelations).values(normalizeRelation(row.id, relation));
       }
 
-      return toTicket(row, labelIds);
+      return toTicket(row, allLabelIds);
     });
   }
 
@@ -157,6 +190,14 @@ export class TicketRepository {
       if (input.priority !== undefined) values.priority = input.priority;
       if (input.parentId !== undefined) values.parentId = input.parentId;
       if (input.agentId !== undefined) values.agentId = input.agentId;
+      if (input.type !== undefined) values.type = input.type;
+      if (input.startDate !== undefined) {
+        values.startDate = input.startDate ? new Date(input.startDate) : null;
+      }
+      if (input.dueDate !== undefined) {
+        values.dueDate = input.dueDate ? new Date(input.dueDate) : null;
+      }
+      if (input.epicId !== undefined) values.epicId = input.epicId;
 
       const [row] = await tx
         .update(tickets)
@@ -229,6 +270,14 @@ export class TicketRepository {
 
   async removeRelation(relationId: string): Promise<void> {
     await this.db.delete(ticketRelations).where(eq(ticketRelations.id, relationId));
+  }
+
+  async delete(id: TicketId): Promise<boolean> {
+    const rows = await this.db
+      .delete(tickets)
+      .where(eq(tickets.id, id))
+      .returning({ id: tickets.id });
+    return rows.length > 0;
   }
 
   /** Assemble a ticket with its labels, parent, children and relations. */

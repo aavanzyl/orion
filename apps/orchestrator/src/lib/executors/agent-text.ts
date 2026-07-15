@@ -12,7 +12,7 @@ export interface AgentTextGenerator {
   generate(input: AgentTextRequest): Promise<string>;
 }
 
-export interface AgentTextRequest {
+interface AgentTextRequest {
   /** Prompt describing what to write. */
   prompt: string;
   /** Directory the harness runs in (the run's worktree). */

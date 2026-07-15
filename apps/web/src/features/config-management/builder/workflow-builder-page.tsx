@@ -19,7 +19,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { ArrowLeftIcon, CopyIcon, EyeIcon, LayoutGridIcon, PlusIcon, SaveIcon, SlidersHorizontalIcon, SparklesIcon, XIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import type { BudgetConfig, Provider, SkillCatalogEntry, WorkflowConfig, WorkflowNodeType } from '@orion/models';
+import type { BudgetConfig, IssueTypeConfig, Provider, SkillCatalogEntry, WorkflowConfig, WorkflowNodeType } from '@orion/models';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -32,6 +32,21 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { api, type WorkflowTemplateDetail } from '@/lib/api';
 import { copyToClipboard } from '@/lib/utils';
@@ -78,7 +93,10 @@ interface LoadedData {
   providers: Provider[];
   commandFiles: string[];
   swimlanes: string[];
+  triggerSwimlane?: string;
   workflows: string[];
+  issueTypes?: IssueTypeConfig[];
+  subWorkflows?: Record<string, WorkflowConfig>;
   budget?: BudgetConfig;
   projectSettings: { name: string; defaultBranch: string; branchFormat?: string };
   initialNodes: BuilderNode[];
@@ -111,13 +129,64 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
   const [viewYaml, setViewYaml] = useState(false);
   const [skillCatalog, setSkillCatalog] = useState<SkillCatalogEntry[]>([]);
   const [boardSwimlanes, setBoardSwimlanes] = useState<string[]>(data.swimlanes);
+  const [triggerSwimlane, setTriggerSwimlane] = useState<string>(data.triggerSwimlane ?? '');
   const [projectName, setProjectName] = useState(data.projectSettings.name);
   const [defaultBranch, setDefaultBranch] = useState(data.projectSettings.defaultBranch);
   const [branchFormat, setBranchFormat] = useState(data.projectSettings.branchFormat ?? '');
+  const [issueTypes, setIssueTypes] = useState<IssueTypeConfig[]>(data.issueTypes ?? []);
+  const [subWorkflows, setSubWorkflows] = useState<Record<string, WorkflowConfig>>(data.subWorkflows ?? {});
+  const [activeWorkflowKey, setActiveWorkflowKey] = useState<string>('main');
   const dirtyRef = useRef(false);
   useEffect(() => {
     dirtyRef.current = true;
   }, [nodes, edges]);
+  const mainWorkflowStateRef = useRef<{ workflowName: string; budget: BudgetConfig; nodes: BuilderNode[]; edges: Edge[] }>({
+    workflowName: data.workflowName,
+    budget: data.budget ?? {},
+    nodes: data.initialNodes,
+    edges: data.initialEdges,
+  });
+
+  const mainWorkflowDisplayName = useMemo(
+    () =>
+      activeWorkflowKey === 'main'
+        ? workflowName || 'default'
+        : mainWorkflowStateRef.current.workflowName || 'default',
+    [activeWorkflowKey, workflowName],
+  );
+
+  const switchWorkflow = useCallback((key: string) => {
+    if (key === activeWorkflowKey) return;
+    if (activeWorkflowKey === 'main') {
+      mainWorkflowStateRef.current = { workflowName, budget, nodes, edges };
+    } else {
+      const currentWf = graphToWorkflow(workflowName, nodes, edges, budget);
+      setSubWorkflows((prev) => ({ ...prev, [activeWorkflowKey]: currentWf }));
+    }
+    if (key === 'main') {
+      const saved = mainWorkflowStateRef.current;
+      setWorkflowName(saved.workflowName);
+      setBudget(saved.budget);
+      setNodes(saved.nodes);
+      setEdges(saved.edges);
+      setActiveWorkflowKey('main');
+    } else {
+      const wf = subWorkflows[key];
+      if (wf) {
+        setWorkflowName(wf.name);
+        setBudget(wf.budget ?? {});
+        const graph = workflowToGraph(wf);
+        const laid = layoutSwimlanes(graph.nodes, graph.edges, boardSwimlanes);
+        setNodes(laid.nodes);
+        setEdges(graph.edges.map((e) => ({ ...e, type: 'deletable' })));
+        setActiveWorkflowKey(key);
+      } else {
+        toast.error(`Workflow "${key}" not found`);
+        return;
+      }
+    }
+    setSelectedId(null);
+  }, [activeWorkflowKey, workflowName, nodes, edges, budget, subWorkflows, setNodes, setEdges, boardSwimlanes]);
   const defaultProviderKey = data.providers[0]?.key ?? 'codex';
 
   const selectedNode = useMemo(
@@ -318,12 +387,24 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
   );
 
   const copyYaml = useCallback(async () => {
-    const workflow = graphToWorkflow(workflowName, nodes, edges, budget);
+    const currentWorkflow = graphToWorkflow(workflowName, nodes, edges, budget);
+    const mainWorkflow = activeWorkflowKey === 'main'
+      ? currentWorkflow
+      : graphToWorkflow(
+          mainWorkflowStateRef.current.workflowName,
+          mainWorkflowStateRef.current.nodes,
+          mainWorkflowStateRef.current.edges,
+          mainWorkflowStateRef.current.budget,
+        );
+    const updatedSubWorkflows = activeWorkflowKey === 'main'
+      ? { ...subWorkflows }
+      : { ...subWorkflows, [activeWorkflowKey]: currentWorkflow };
     const yaml = buildFullYaml(rawYaml, {
       project: { name: projectName, defaultBranch: defaultBranch || 'main', branchFormat: branchFormat || undefined },
-      workflow,
-      board: { swimlanes: boardSwimlanes },
-      subWorkflows: undefined,
+      workflow: mainWorkflow,
+      board: { swimlanes: boardSwimlanes, ...(triggerSwimlane && triggerSwimlane !== '__none__' ? { triggerSwimlane } : {}) },
+      subWorkflows: Object.keys(updatedSubWorkflows).length > 0 ? updatedSubWorkflows : undefined,
+      issueTypes: issueTypes.length > 0 ? issueTypes : undefined,
     });
     try {
       await copyToClipboard(yaml);
@@ -331,7 +412,7 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
     } catch (e) {
       toast.error((e as Error).message);
     }
-  }, [workflowName, nodes, edges, budget, rawYaml, projectName, defaultBranch, branchFormat, boardSwimlanes]);
+  }, [workflowName, nodes, edges, budget, rawYaml, projectName, defaultBranch, branchFormat, boardSwimlanes, triggerSwimlane, issueTypes, subWorkflows, activeWorkflowKey]);
 
   const save = useCallback(async () => {
     const issues = validateGraph(nodes);
@@ -339,12 +420,24 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
       toast.error(issues[0]);
       return;
     }
-    const workflow = graphToWorkflow(workflowName, nodes, edges, budget);
+    const currentWorkflow = graphToWorkflow(workflowName, nodes, edges, budget);
+    const mainWorkflow = activeWorkflowKey === 'main'
+      ? currentWorkflow
+      : graphToWorkflow(
+          mainWorkflowStateRef.current.workflowName,
+          mainWorkflowStateRef.current.nodes,
+          mainWorkflowStateRef.current.edges,
+          mainWorkflowStateRef.current.budget,
+        );
+    const updatedSubWorkflows = activeWorkflowKey === 'main'
+      ? { ...subWorkflows }
+      : { ...subWorkflows, [activeWorkflowKey]: currentWorkflow };
     const yaml = buildFullYaml(rawYaml, {
       project: { name: projectName, defaultBranch: defaultBranch || 'main', branchFormat: branchFormat || undefined },
-      workflow,
-      board: { swimlanes: boardSwimlanes },
-      subWorkflows: undefined,
+      workflow: mainWorkflow,
+      board: { swimlanes: boardSwimlanes, ...(triggerSwimlane && triggerSwimlane !== '__none__' ? { triggerSwimlane } : {}) },
+      subWorkflows: Object.keys(updatedSubWorkflows).length > 0 ? updatedSubWorkflows : undefined,
+      issueTypes: issueTypes.length > 0 ? issueTypes : undefined,
     });
     setSaving(true);
     try {
@@ -357,7 +450,7 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
     } finally {
       setSaving(false);
     }
-  }, [nodes, edges, workflowName, budget, rawYaml, projectId, projectName, defaultBranch, branchFormat, boardSwimlanes]);
+  }, [nodes, edges, workflowName, budget, rawYaml, projectId, projectName, defaultBranch, branchFormat, boardSwimlanes, issueTypes, subWorkflows, activeWorkflowKey]);
 
   const setBudgetField = useCallback((key: keyof BudgetConfig, raw: string) => {
     setBudget((b) => ({ ...b, [key]: raw === '' ? undefined : Number(raw) }));
@@ -396,12 +489,21 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
               <h1 className="truncate text-sm font-semibold">{data.projectName}</h1>
               <span className="text-xs text-muted-foreground">workflow</span>
             </div>
-            <Input
-              value={workflowName}
-              onChange={(e) => setWorkflowName(e.target.value)}
-              className="h-6 border-none px-0 text-xs text-muted-foreground shadow-none focus-visible:ring-0"
-              aria-label="Workflow name"
-            />
+            <div className="flex items-center gap-2">
+              <Select value={activeWorkflowKey} onValueChange={switchWorkflow}>
+                <SelectTrigger className="h-6 w-40 border-none px-0 text-xs text-muted-foreground shadow-none focus-visible:ring-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="main">{mainWorkflowDisplayName} (main)</SelectItem>
+                  {Object.keys(subWorkflows).map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {key}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -477,6 +579,33 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
         )}
       </div>
 
+      <div className="flex items-center gap-4 border-t bg-card px-4 py-2">
+        <span className="text-xs font-medium text-muted-foreground">Budget</span>
+        <div className="flex items-center gap-1.5">
+          <label className="text-[11px] text-muted-foreground">Max tokens</label>
+          <Input
+            type="number"
+            min={0}
+            value={budget.maxTokens ?? ''}
+            onChange={(e) => setBudgetField('maxTokens', e.target.value)}
+            placeholder="∞"
+            className="h-6 w-24 text-xs"
+          />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="text-[11px] text-muted-foreground">Max cost (USD)</label>
+          <Input
+            type="number"
+            min={0}
+            step="0.01"
+            value={budget.maxCostUsd ?? ''}
+            onChange={(e) => setBudgetField('maxCostUsd', e.target.value)}
+            placeholder="∞"
+            className="h-6 w-24 text-xs"
+          />
+        </div>
+      </div>
+
       <WorkflowTemplateDialog
         open={templateOpen}
         onOpenChange={setTemplateOpen}
@@ -495,6 +624,8 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
             <TabsList className="w-full">
               <TabsTrigger value="workflow" className="flex-1">Workflow</TabsTrigger>
               <TabsTrigger value="board" className="flex-1">Board</TabsTrigger>
+              <TabsTrigger value="issueTypes" className="flex-1">Types</TabsTrigger>
+              <TabsTrigger value="workflows" className="flex-1">Workflows</TabsTrigger>
               <TabsTrigger value="project" className="flex-1">Project</TabsTrigger>
             </TabsList>
             <TabsContent value="workflow" className="mt-4 flex flex-col gap-4">
@@ -505,29 +636,6 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
                   onChange={(e) => setWorkflowName(e.target.value)}
                   placeholder="default"
                 />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-xs text-muted-foreground">Max tokens</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={budget.maxTokens ?? ''}
-                    onChange={(e) => setBudgetField('maxTokens', e.target.value)}
-                    placeholder="unlimited"
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-xs text-muted-foreground">Max cost (USD)</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={budget.maxCostUsd ?? ''}
-                    onChange={(e) => setBudgetField('maxCostUsd', e.target.value)}
-                    placeholder="unlimited"
-                  />
-                </div>
               </div>
             </TabsContent>
             <TabsContent value="board" className="mt-4 flex flex-col gap-4">
@@ -602,6 +710,229 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
                 <PlusIcon data-icon="inline-start" />
                 Add swimlane
               </Button>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs text-muted-foreground">Auto-trigger swimlane</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Moving a ticket to this swimlane auto-starts a workflow when the ticket has no prior runs.
+                </p>
+                <Select
+                  value={triggerSwimlane}
+                  onValueChange={setTriggerSwimlane}
+                >
+                  <SelectTrigger className="h-8">
+                    <SelectValue placeholder="None (disabled)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None (disabled)</SelectItem>
+                    {boardSwimlanes.filter(Boolean).map((sw) => (
+                      <SelectItem key={sw} value={sw}>{sw}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </TabsContent>
+            <TabsContent value="issueTypes" className="mt-4 flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs text-muted-foreground">Issue types</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Map ticket types to workflows. &quot;epic&quot; is always available.
+                </p>
+              </div>
+              {issueTypes.length === 0 ? (
+                <p className="text-center text-xs text-muted-foreground">
+                  No custom types. Defaults (feature, bug, issue, hotfix) apply.
+                </p>
+              ) : (
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-xs">Name</TableHead>
+                        <TableHead className="text-xs">Label</TableHead>
+                        <TableHead className="text-xs">Workflow</TableHead>
+                        <TableHead className="w-0" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {issueTypes.map((it, i) => {
+                        const wfNames = [workflowName || 'default', ...Object.keys(subWorkflows)].filter(Boolean);
+                        return (
+                          <TableRow key={i}>
+                            <TableCell>
+                              <Input
+                                value={it.name}
+                                onChange={(e) =>
+                                  setIssueTypes((prev) => {
+                                    const next = [...prev];
+                                    const newName = e.target.value;
+                                    next[i] = {
+                                      ...next[i],
+                                      name: newName,
+                                      label: next[i].label || (newName ? newName.charAt(0).toUpperCase() + newName.slice(1) : ''),
+                                    };
+                                    return next;
+                                  })
+                                }
+                                placeholder="feature"
+                                className="h-7 text-xs font-mono"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                value={it.label}
+                                onChange={(e) =>
+                                  setIssueTypes((prev) => {
+                                    const next = [...prev];
+                                    next[i] = { ...next[i], label: e.target.value };
+                                    return next;
+                                  })
+                                }
+                                placeholder="Feature"
+                                className="h-7 text-xs"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Select
+                                value={it.workflow}
+                                onValueChange={(v) =>
+                                  setIssueTypes((prev) => {
+                                    const next = [...prev];
+                                    next[i] = { ...next[i], workflow: v };
+                                    return next;
+                                  })
+                                }
+                              >
+                                <SelectTrigger className="h-7 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {wfNames.map((name) => (
+                                    <SelectItem key={name} value={name}>
+                                      {name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() =>
+                                  setIssueTypes((prev) => prev.filter((_, j) => j !== i))
+                                }
+                                aria-label="Remove issue type"
+                              >
+                                <XIcon />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setIssueTypes((prev) => [
+                    ...prev,
+                    { name: '', label: '', workflow: workflowName || 'default' },
+                  ])
+                }
+              >
+                <PlusIcon data-icon="inline-start" />
+                Add type
+              </Button>
+            </TabsContent>
+            <TabsContent value="workflows" className="mt-4 flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs text-muted-foreground">Workflows</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Additional workflows that issue types or workflow nodes can reference.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2">
+                {Object.keys(subWorkflows).length === 0 ? (
+                  <p className="text-center text-xs text-muted-foreground">
+                    No additional workflows.
+                  </p>
+                ) : (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-xs">Name</TableHead>
+                          <TableHead className="text-xs">Nodes</TableHead>
+                          <TableHead className="w-0" />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {Object.entries(subWorkflows).map(([key, wf]) => (
+                          <TableRow key={key}>
+                            <TableCell>
+                              <Input
+                                value={key}
+                                onChange={(e) =>
+                                  setSubWorkflows((prev) => {
+                                    const next = { ...prev };
+                                    const value = next[key];
+                                    delete next[key];
+                                    next[e.target.value || key] = { ...value, name: e.target.value || key };
+                                    return next;
+                                  })
+                                }
+                                placeholder="workflow-name"
+                                className="h-7 text-xs font-mono"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <span className="text-xs text-muted-foreground">
+                                {wf.nodes.length} node{wf.nodes.length !== 1 ? 's' : ''}
+                              </span>
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => {
+                                  setSubWorkflows((prev) => {
+                                    const next = { ...prev };
+                                    delete next[key];
+                                    return next;
+                                  });
+                                }}
+                                aria-label="Remove workflow"
+                              >
+                                <XIcon />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const name = `workflow-${Date.now().toString(36)}`;
+                  setSubWorkflows((prev) => ({
+                    ...prev,
+                    [name]: {
+                      name,
+                      nodes: [{ id: 'start', type: 'shell', script: 'echo ready' }],
+                    } as WorkflowConfig,
+                  }));
+                }}
+              >
+                <PlusIcon data-icon="inline-start" />
+                Add workflow
+              </Button>
             </TabsContent>
             <TabsContent value="project" className="mt-4 flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
@@ -649,12 +980,24 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
           <div className="overflow-auto">
             <pre className="bg-muted rounded-md p-4 text-xs font-mono whitespace-pre overflow-auto max-h-[60vh]">
               {(() => {
-                const workflow = graphToWorkflow(workflowName, nodes, edges, budget);
+                const currentWorkflow = graphToWorkflow(workflowName, nodes, edges, budget);
+                const mainWorkflow = activeWorkflowKey === 'main'
+                  ? currentWorkflow
+                  : graphToWorkflow(
+                      mainWorkflowStateRef.current.workflowName,
+                      mainWorkflowStateRef.current.nodes,
+                      mainWorkflowStateRef.current.edges,
+                      mainWorkflowStateRef.current.budget,
+                    );
+                const updatedSubWorkflows = activeWorkflowKey === 'main'
+                  ? { ...subWorkflows }
+                  : { ...subWorkflows, [activeWorkflowKey]: currentWorkflow };
                 return buildFullYaml(rawYaml, {
                   project: { name: projectName, defaultBranch: defaultBranch || 'main', branchFormat: branchFormat || undefined },
-                  workflow,
-                  board: { swimlanes: boardSwimlanes },
-                  subWorkflows: undefined,
+                  workflow: mainWorkflow,
+                  board: { swimlanes: boardSwimlanes, ...(triggerSwimlane && triggerSwimlane !== '__none__' ? { triggerSwimlane } : {}) },
+                  subWorkflows: Object.keys(updatedSubWorkflows).length > 0 ? updatedSubWorkflows : undefined,
+                  issueTypes: issueTypes.length > 0 ? issueTypes : undefined,
                 });
               })()}
             </pre>
@@ -691,8 +1034,11 @@ export function WorkflowBuilderPage() {
           api.getRawConfig(projectId),
         ]);
         let swimlanes: string[] = [];
+        let triggerSwimlaneVal: string | undefined;
         let workflows: string[] = [];
         let budget: BudgetConfig | undefined;
+        let issueTypes: IssueTypeConfig[] | undefined;
+        let subWorkflowConfigs: Record<string, WorkflowConfig> | undefined;
         let workflowName = 'default';
         let graph = workflowToGraph(null);
         let projectName = project.name;
@@ -701,6 +1047,7 @@ export function WorkflowBuilderPage() {
         try {
           const config = await api.getProjectConfig(projectId);
           swimlanes = config.board?.swimlanes ?? [];
+          triggerSwimlaneVal = config.board?.triggerSwimlane;
           workflows = config.workflows ?? [];
           budget = config.workflow?.budget;
           workflowName = config.workflow?.name ?? 'default';
@@ -719,6 +1066,10 @@ export function WorkflowBuilderPage() {
                 if (typeof p.defaultBranch === 'string') defaultBranchVal = p.defaultBranch;
                 if (typeof p.branchFormat === 'string') branchFormatVal = p.branchFormat;
               }
+              if (!triggerSwimlaneVal && parsed.board && typeof parsed.board === 'object' && !Array.isArray(parsed.board)) {
+                const b = parsed.board as Record<string, unknown>;
+                if (typeof b.triggerSwimlane === 'string') triggerSwimlaneVal = b.triggerSwimlane;
+              }
             }
           }
         } catch {
@@ -733,7 +1084,37 @@ export function WorkflowBuilderPage() {
             .then((res) => res.files)
             .catch(() => [] as string[]),
         ]);
-        if (cancelled) return;
+          if (cancelled) return;
+        // Extract issue types from raw YAML (not available via config endpoint).
+        try {
+          if (raw.content) {
+            const parsed = parse(raw.content) as Record<string, unknown> | null;
+            if (parsed && typeof parsed === 'object' && Array.isArray(parsed.issueTypes)) {
+              issueTypes = parsed.issueTypes as IssueTypeConfig[];
+            }
+          }
+        } catch {
+          // Raw YAML may be unparseable.
+        }
+        if (!issueTypes) {
+          issueTypes = [
+            { name: 'feature', label: 'Feature', workflow: workflowName },
+            { name: 'bug', label: 'Bug', workflow: workflowName },
+            { name: 'issue', label: 'Issue', workflow: workflowName },
+            { name: 'hotfix', label: 'Hotfix', workflow: workflowName },
+          ];
+        }
+        // Extract sub-workflows from raw YAML.
+        try {
+          if (raw.content) {
+            const parsed = parse(raw.content) as Record<string, unknown> | null;
+            if (parsed && typeof parsed === 'object' && parsed.workflows && typeof parsed.workflows === 'object' && !Array.isArray(parsed.workflows)) {
+              subWorkflowConfigs = parsed.workflows as Record<string, WorkflowConfig>;
+            }
+          }
+        } catch {
+          // Raw YAML may be unparseable.
+        }
         const laid = layoutSwimlanes(graph.nodes, graph.edges, swimlanes);
         setData({
           projectName: project.name,
@@ -743,7 +1124,10 @@ export function WorkflowBuilderPage() {
           providers,
           commandFiles,
           swimlanes,
+          triggerSwimlane: triggerSwimlaneVal,
           workflows,
+          issueTypes,
+          subWorkflows: subWorkflowConfigs,
           budget,
           projectSettings: { name: projectName, defaultBranch: defaultBranchVal, branchFormat: branchFormatVal },
           initialNodes: laid.nodes,

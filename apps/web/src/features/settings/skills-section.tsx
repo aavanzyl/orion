@@ -13,6 +13,7 @@ import {
   XIcon,
   SearchIcon,
   ArrowUpDownIcon,
+  PlusIcon,
 } from 'lucide-react';
 import type { RecommendedSkill, SkillCatalogEntry, SkillDetail, SkillReference } from '@orion/models';
 import { api } from '@/lib/api';
@@ -116,6 +117,13 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
   const [tagsInput, setTagsInput] = useState('');
   const [syncInstall, setSyncInstall] = useState(true);
   const [installing, setInstalling] = useState(false);
+
+  // Create skill dialog
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createDescription, setCreateDescription] = useState('');
+  const [createContent, setCreateContent] = useState('');
+  const [creating, setCreating] = useState(false);
 
   // Recommended catalog
   const [recommended, setRecommended] = useState<RecommendedSkill[]>([]);
@@ -259,6 +267,36 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
       toast.error((e as Error).message);
     } finally {
       setInstalling(false);
+    }
+  };
+
+  const doCreate = async () => {
+    if (!createName.trim() || !createDescription.trim()) return;
+    setCreating(true);
+    try {
+      if (global) {
+        await api.createGlobalSkill({
+          name: createName.trim(),
+          description: createDescription.trim(),
+          content: createContent,
+        });
+      } else {
+        await api.createSkill((projectId ?? ''), {
+          name: createName.trim(),
+          description: createDescription.trim(),
+          content: createContent,
+        });
+      }
+      toast.success(`Created skill "${createName.trim()}"`);
+      setCreateOpen(false);
+      setCreateName('');
+      setCreateDescription('');
+      setCreateContent('');
+      load();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -440,10 +478,16 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
                 : 'Project-scoped skills override global skills of the same name.'}
             </p>
           </div>
-          <Button size="sm" onClick={() => setInstallOpen(true)}>
-            <DownloadIcon data-icon="inline-start" />
-            Add skill
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}>
+              <PlusIcon data-icon="inline-start" />
+              Create skill
+            </Button>
+            <Button size="sm" onClick={() => setInstallOpen(true)}>
+              <DownloadIcon data-icon="inline-start" />
+              Add skill
+            </Button>
+          </div>
         </div>
         <div>
           {/* Sorting and filtering controls */}
@@ -521,7 +565,7 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
                             <Input
                               value={editTagsValue}
                               onChange={(e) => setEditTagsValue(e.target.value)}
-                              className="h-7 w-[100px] text-xs"
+                              className="h-8 w-[100px] text-xs"
                               placeholder="plan, review"
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter') saveTags();
@@ -951,6 +995,69 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
               disabled={deleting}
             >
               {deleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create skill dialog */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Create a skill</DialogTitle>
+            <DialogDescription>
+              Write a new skill from scratch. The skill will be saved to{' '}
+              {global ? '~/.orion/skills/' : '.orion/skills/'} as a SKILL.md
+              file. You can also ask the chat agent to help write skill
+              content — it has access to your project&rsquo;s codebase.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto min-h-0">
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <Label>Name</Label>
+                <Input
+                  value={createName}
+                  onChange={(e) => setCreateName(e.target.value)}
+                  placeholder="my-code-review"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  A unique kebab-case identifier for the skill.
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Description</Label>
+                <Input
+                  value={createDescription}
+                  onChange={(e) => setCreateDescription(e.target.value)}
+                  placeholder="Guides the agent through thorough code reviews"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  A one-line summary of what the skill does.
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Content</Label>
+                <textarea
+                  value={createContent}
+                  onChange={(e) => setCreateContent(e.target.value)}
+                  placeholder="# My Skill\n\nInstructions for the agent..."
+                  rows={14}
+                  className="w-full min-h-[200px] rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Markdown content that will become the body of SKILL.md.
+                  This is what the agent reads and follows.
+                </p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)} disabled={creating}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={doCreate} disabled={!createName.trim() || !createDescription.trim() || creating}>
+              {creating ? 'Creating...' : 'Create'}
             </Button>
           </DialogFooter>
         </DialogContent>

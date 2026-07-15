@@ -104,6 +104,13 @@ export class GitHubScmProvider implements ScmProvider {
       join(repoPath, '..', '.worktrees', options.branch.replace(/[^a-zA-Z0-9._-]+/g, '-'));
     await mkdir(join(worktreePath, '..'), { recursive: true });
 
+    const hasHead = await git(repoPath, ['rev-parse', '--verify', 'HEAD'])
+      .then(() => true)
+      .catch(() => false);
+    if (!hasHead) {
+      await git(repoPath, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    }
+
     await git(repoPath, ['worktree', 'add', '-b', options.branch, worktreePath, options.base]);
 
     return {

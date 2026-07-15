@@ -21,7 +21,7 @@ const DEFAULT_CHAT_PROVIDER = 'codex';
 const DEFAULT_CHAT_MODEL = 'gpt-5-codex';
 
 const SYSTEM_PREFACE =
-  'You are Orion, a helpful coding assistant embedded in a repository. Answer the user directly and concisely. When you inspect or change code, explain what you did.';
+  'You are Orion, a helpful coding assistant embedded in a repository. Always speak in facts — be direct, precise, and evidence-based. Never speculate without clear basis. When you inspect or change code, explain exactly what you did and why. Keep answers concise.';
 
 /**
  * Drives the direct-chat experience: persists conversations/messages, streams an
@@ -162,9 +162,10 @@ export class ChatService {
 
   /** Persist a short error assistant message and publish an error + done event. */
   private async failTurn(conversationId: string, error: string): Promise<void> {
-    this.publish(conversationId, { type: 'error', error });
+    const displayError = normalizeChatError(error);
+    this.publish(conversationId, { type: 'error', error: displayError });
     const message = await this.c.chat
-      .addMessage({ conversationId, role: 'assistant', content: `⚠️ ${error}` })
+      .addMessage({ conversationId, role: 'assistant', content: `⚠️ ${displayError}` })
       .catch(() => null);
     if (message) this.publishMessage(conversationId, message);
     this.publish(conversationId, { type: 'done' });
@@ -282,13 +283,14 @@ export class ChatService {
 
   /**
    * Choose the harness that can actually service the request. The Codex harness
-   * now speaks only OpenAI's Responses API, so a non-OpenAI (Chat Completions)
-   * endpoint such as DeepSeek is redirected to the `openai` harness when it is
-   * registered. Any explicitly non-codex harness is left untouched.
+   * speaks only OpenAI's Responses API, so a non-OpenAI (e.g. DeepSeek) endpoint
+   * configured against `codex` is redirected to the `claude` harness, which
+   * drives Anthropic-compatible providers. Any explicitly chosen harness is left
+   * untouched.
    */
   private selectHarness(harness: string, baseUrl: string | undefined): string {
-    if (harness === 'codex' && baseUrl && !isOpenAiBaseUrl(baseUrl) && this.c.harnesses.has('openai')) {
-      return 'openai';
+    if (harness === 'codex' && baseUrl && !isOpenAiBaseUrl(baseUrl) && this.c.harnesses.has('claude')) {
+      return 'claude';
     }
     return harness;
   }
@@ -328,15 +330,23 @@ export class ChatService {
   }
 
   /**
-   * The built-in Orion MCP servers (codebase + tickets) bound to the chat's
-   * project so the agent can search the repo and read/write tickets. Only takes
-   * effect on a harness that supports MCP (e.g. Codex); the OpenAI
+   * The built-in Orion MCP servers (codebase + tickets) bound and locked to the
+   * chat's project so the agent can search the repo and read/write tickets for
+   * that project only (`lock=1` forbids cross-project access). Only takes effect
+   * on a harness that supports MCP (e.g. Codex, Claude); the OpenAI
    * chat-completions harness ignores `mcpServers`.
    */
   private builtinMcpServers(projectId: string): McpServerMap {
     return {
-      'orion-codebase': { url: `${this.c.env.publicUrl}/mcp/codebase?projectId=${projectId}` },
-      'orion-tickets': { url: `${this.c.env.publicUrl}/mcp/tickets?projectId=${projectId}` },
+      'orion-codebase': {
+        url: `${this.c.env.publicUrl}/mcp/codebase?projectId=${projectId}&lock=1`,
+      },
+      'orion-tickets': {
+        url: `${this.c.env.publicUrl}/mcp/tickets?projectId=${projectId}&lock=1`,
+      },
+      'orion-skills': {
+        url: `${this.c.env.publicUrl}/mcp/skills?projectId=${projectId}&lock=1`,
+      },
     };
   }
 
@@ -470,7 +480,7 @@ function fallbackRoute(
       intent: 'chat',
       reasoning: isQuestion
         ? 'The request looks like a question, so it is better answered in chat.'
-        : 'No workflow clearly matches this request, so continue in chat.',
+        : 'No matching workflow found. Let me help you in chat instead.',
     };
   }
 
@@ -512,4 +522,18 @@ function toChatUsage(usage: HarnessUsage | undefined): ChatUsage | undefined {
     return undefined;
   }
   return { inputTokens, outputTokens, totalTokens, costUsd };
+}
+
+/** Turn raw harness errors into user-friendly messages with recovery hints. */
+function normalizeChatError(error: string): string {
+  if (/exited with code/i.test(error)) {
+    return `${error}. This usually happens when the provider's API is unreachable or the model is not supported. Try again or check your provider configuration in Settings.`;
+  }
+  if (/API key/i.test(error) || /auth/i.test(error) || /unauthorized/i.test(error)) {
+    return `${error}. Check your API key in Settings or set an environment variable for your provider.`;
+  }
+  if (/timeout|ETIMEDOUT/i.test(error)) {
+    return `${error}. The request timed out. Try again or check your network connection.`;
+  }
+  return error;
 }

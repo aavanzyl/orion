@@ -52,9 +52,31 @@ export type McpServerMap = Record<string, McpServerConfig>;
 
 
 
+/**
+ * A configurable issue type that maps to a workflow. "epic" is always available
+ * regardless of configuration, so it does not need to be listed explicitly.
+ */
+export interface IssueTypeConfig {
+  /** Stable key, e.g. `feature`, `bug`. Must be unique across issue types. */
+  name: string;
+  /** Human-readable label, e.g. `Feature`, `Bug`. */
+  label: string;
+  /**
+   * Workflow name this issue type triggers. References either the top-level
+   * `workflow.name` or an entry in the `workflows` map.
+   */
+  workflow: string;
+  /** Optional icon identifier (e.g. Lucide icon name). */
+  icon?: string;
+  /** Optional hex color for badges / indicators. */
+  color?: string;
+}
+
 export interface BoardConfig {
   /** Ordered swimlane keys that make up the Kanban board. */
   swimlanes: string[];
+  /** Swimlane that auto-triggers a workflow run when a ticket is moved into it and has no prior runs. */
+  triggerSwimlane?: string;
 }
 
 /**
@@ -238,16 +260,23 @@ export interface WorkflowNodeConfig {
    */
   continueOnError?: boolean;
   /**
+   * When this node fails, reset the named target node (and all transitive
+   * downstream nodes) back to `pending` so they re-execute. The current node's
+   * error and output are stored on the target node's `input` as
+   * `{ onFailureFrom, error, output }` — accessible in agent templates via
+   * `{{ input.error }}`, `{{ input.onFailureFrom }}`, etc.
+   */
+  onFailureTransitionTo?: string;
+  /**
    * When set, re-run this node's executor iteratively until a stop condition is
    * met. Only valid on `agent` nodes.
    */
   loop?: LoopConfig;
   /**
-   * When set, fan the node out into one concurrent execution per item, injecting
-   * the item into the prompt/script. Only valid on `agent` and `shell` nodes and
-   * cannot be combined with `loop`. The node's output is `{ items: [...] }`.
+   * @deprecated Matrix fan-out has been removed. The MatrixConfig type is kept
+   * for backward compatibility but this field is no longer used.
    */
-  matrix?: MatrixConfig;
+  // matrix?: MatrixConfig;
 }
 
 export interface BudgetConfig {
@@ -300,6 +329,12 @@ export interface ProjectConfig {
   mcpServers?: McpServerMap;
   /** Named reusable sub-workflows, inlined by `workflow` nodes. */
   workflows?: Record<string, WorkflowConfig>;
+  /**
+   * Configurable issue types that map to workflows. The type name `epic` is
+   * always implicitly available regardless of configuration. When omitted the
+   * built-in defaults (feature, bug, issue, hotfix) apply.
+   */
+  issueTypes?: IssueTypeConfig[];
   board: BoardConfig;
   workflow: WorkflowConfig;
 }

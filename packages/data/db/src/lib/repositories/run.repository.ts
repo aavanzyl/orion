@@ -28,7 +28,7 @@ export interface CreateRunNodeInput {
 
 export interface RunListFilter {
   projectId?: string;
-  status?: RunStatus;
+  status?: RunStatus | RunStatus[];
   from?: string;
   to?: string;
   limit?: number;
@@ -100,7 +100,10 @@ export class RunRepository {
   async list(filter?: RunListFilter): Promise<Array<WorkflowRun & { ticketTitle?: string }>> {
     const conditions: SQL<unknown>[] = [];
     if (filter?.projectId) conditions.push(eq(workflowRuns.projectId, filter.projectId));
-    if (filter?.status) conditions.push(eq(workflowRuns.status, filter.status));
+    if (filter?.status) {
+      const statuses = Array.isArray(filter.status) ? filter.status : [filter.status];
+      conditions.push(inArray(workflowRuns.status, statuses));
+    }
     if (filter?.from) conditions.push(gte(workflowRuns.createdAt, new Date(filter.from)));
     if (filter?.to) conditions.push(lte(workflowRuns.createdAt, new Date(filter.to)));
     if (filter?.search) {

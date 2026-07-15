@@ -1,6 +1,6 @@
 import { parse, stringify } from 'yaml';
 import type { Node, Edge } from '@xyflow/react';
-import type { BudgetConfig, WorkflowConfig } from '@orion/models';
+import type { BudgetConfig, IssueTypeConfig, WorkflowConfig } from '@orion/models';
 import {
   dataToNodeConfig,
   nodeConfigToData,
@@ -22,11 +22,12 @@ export {
   type WorkflowNodeConfigLike,
 } from '../shared/node-model';
 
-export interface BuilderConfig {
+interface BuilderConfig {
   project?: { name: string; defaultBranch: string; branchFormat?: string };
   workflow: WorkflowConfig;
-  board?: { swimlanes: string[] };
+  board?: { swimlanes: string[]; triggerSwimlane?: string };
   subWorkflows?: Record<string, WorkflowConfig>;
+  issueTypes?: IssueTypeConfig[];
 }
 
 /**
@@ -356,6 +357,7 @@ export function buildFullYaml(
   if (config.board) {
     root.board = {
       swimlanes: config.board.swimlanes,
+      ...(config.board.triggerSwimlane ? { triggerSwimlane: config.board.triggerSwimlane } : {}),
     };
   }
   // Only replace `workflows` when sub-workflows are explicitly provided; when
@@ -364,12 +366,14 @@ export function buildFullYaml(
   if (config.subWorkflows && Object.keys(config.subWorkflows).length > 0) {
     root.workflows = config.subWorkflows;
   }
+  if (config.issueTypes && config.issueTypes.length > 0) {
+    root.issueTypes = config.issueTypes;
+  }
   return stringify(root, { indent: 2, lineWidth: 0 });
 }
 
 /** A short one-line summary of a node for its canvas card. */
 export function nodeSummary(data: BuilderNodeData): string {
-  if (data.matrix) return 'matrix fan-out';
   if (data.loop) return `loop ×${data.loop.maxIterations}`;
   switch (data.type) {
     case 'agent': {

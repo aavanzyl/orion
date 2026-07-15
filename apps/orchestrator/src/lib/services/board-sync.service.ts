@@ -1,6 +1,7 @@
 import { createLinearClient } from '@orion/board-linear';
 import { createJiraClient } from '@orion/board-jira';
 import { createTrelloClient } from '@orion/board-trello';
+import { createGithubClient } from '@orion/board-github';
 import type {
   BoardRegistry,
   RemoteBoardClient,
@@ -37,6 +38,7 @@ export const DEFAULT_BOARD_CLIENT_FACTORIES: Record<string, RemoteBoardClientFac
   linear: createLinearClient,
   jira: createJiraClient,
   trello: createTrelloClient,
+  github: createGithubClient,
 };
 
 /**

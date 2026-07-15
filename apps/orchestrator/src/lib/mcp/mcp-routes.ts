@@ -4,7 +4,16 @@ import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { TicketPriority } from '@orion/models';
+import {
+  createSkill,
+  updateSkillContent,
+  getSkillDetail,
+  listSkillCatalog,
+  findSkillReferences,
+  uninstallSkill,
+} from '@orion/config';
 import type { Container } from '../container.js';
+import { WorkspaceService } from '../services/workspace.service.js';
 
 /** Wrap any structured payload as a single MCP text content block. */
 function text(payload: unknown): CallToolResult {
@@ -35,13 +44,35 @@ const NO_PROJECT =
   'No project selected. Pass a "projectId" argument, or call list_projects to discover available project ids.';
 
 /**
+ * When a connection is `locked` to a project, tool-supplied `projectId`
+ * arguments are ignored and the bound project always wins. Used by Orion's own
+ * chat/run injections so an agent cannot reach across into another project.
+ */
+function projectResolver(defaultProjectId: string | undefined, locked: boolean) {
+  return (arg: string | undefined): string | null =>
+    locked && defaultProjectId ? defaultProjectId : resolveProjectId(arg, defaultProjectId);
+}
+
+/** Projects visible to `list_projects`: only the bound one when locked. */
+async function listVisibleProjects(
+  c: Container,
+  defaultProjectId: string | undefined,
+  locked: boolean,
+): Promise<Array<{ id: string; name: string }>> {
+  const all = await c.projects.list();
+  const visible = locked && defaultProjectId ? all.filter((p) => p.id === defaultProjectId) : all;
+  return visible.map((p) => ({ id: p.id, name: p.name }));
+}
+
+/**
  * Codebase MCP — semantic code search over a project's embeddings index. Made
  * available to both external agents and Orion's own running agents. When Orion
  * injects it into a run, `defaultProjectId` binds the connection to that project
- * so tools work without an explicit id.
+ * so tools work without an explicit id. When `locked`, that binding is enforced.
  */
-function buildCodebaseServer(c: Container, defaultProjectId?: string): McpServer {
+function buildCodebaseServer(c: Container, defaultProjectId?: string, locked = false): McpServer {
   const server = new McpServer({ name: 'orion-codebase', version: '1.0.0' });
+  const resolve = projectResolver(defaultProjectId, locked);
 
   server.registerTool(
     'list_projects',
@@ -49,7 +80,7 @@ function buildCodebaseServer(c: Container, defaultProjectId?: string): McpServer
       description: 'List the projects Orion manages (id, name) so you can pick one to search.',
       inputSchema: {},
     },
-    async () => text((await c.projects.list()).map((p) => ({ id: p.id, name: p.name }))),
+    async () => text(await listVisibleProjects(c, defaultProjectId, locked)),
   );
 
   server.registerTool(
@@ -63,7 +94,7 @@ function buildCodebaseServer(c: Container, defaultProjectId?: string): McpServer
       },
     },
     async ({ query, topK, projectId }) => {
-      const id = resolveProjectId(projectId, defaultProjectId);
+      const id = resolve(projectId);
       if (!id) return errText(NO_PROJECT);
       return text(await c.ragService.search(id, query, topK ?? 8));
     },
@@ -76,7 +107,7 @@ function buildCodebaseServer(c: Container, defaultProjectId?: string): McpServer
       inputSchema: { projectId: projectIdArg },
     },
     async ({ projectId }) => {
-      const id = resolveProjectId(projectId, defaultProjectId);
+      const id = resolve(projectId);
       if (!id) return errText(NO_PROJECT);
       return text(await c.ragService.getStatus(id));
     },
@@ -89,9 +120,10 @@ function buildCodebaseServer(c: Container, defaultProjectId?: string): McpServer
  * Tickets MCP — read/write access to a project's native board. Intended for
  * external agents; also handed to one-off agent triggers so they can file work.
  */
-function buildTicketsServer(c: Container, defaultProjectId?: string): McpServer {
+function buildTicketsServer(c: Container, defaultProjectId?: string, locked = false): McpServer {
   const server = new McpServer({ name: 'orion-tickets', version: '1.0.0' });
   const board = c.boards.get('native');
+  const resolve = projectResolver(defaultProjectId, locked);
 
   server.registerTool(
     'list_projects',
@@ -99,7 +131,7 @@ function buildTicketsServer(c: Container, defaultProjectId?: string): McpServer 
       description: 'List the projects Orion manages (id, name) so you can pick one to work on.',
       inputSchema: {},
     },
-    async () => text((await c.projects.list()).map((p) => ({ id: p.id, name: p.name }))),
+    async () => text(await listVisibleProjects(c, defaultProjectId, locked)),
   );
 
   server.registerTool(
@@ -112,7 +144,7 @@ function buildTicketsServer(c: Container, defaultProjectId?: string): McpServer 
       },
     },
     async ({ swimlane, projectId }) => {
-      const id = resolveProjectId(projectId, defaultProjectId);
+      const id = resolve(projectId);
       if (!id) return errText(NO_PROJECT);
       const tickets = await c.tickets.listByProject(id);
       return text(swimlane ? tickets.filter((t) => t.swimlane === swimlane) : tickets);
@@ -144,7 +176,7 @@ function buildTicketsServer(c: Container, defaultProjectId?: string): McpServer 
       },
     },
     async (args) => {
-      const id = resolveProjectId(args.projectId, defaultProjectId);
+      const id = resolve(args.projectId);
       if (!id) return errText(NO_PROJECT);
       return text(
         await board.createTicket({
@@ -208,9 +240,149 @@ function buildTicketsServer(c: Container, defaultProjectId?: string): McpServer 
       inputSchema: { projectId: projectIdArg },
     },
     async ({ projectId }) => {
-      const id = resolveProjectId(projectId, defaultProjectId);
+      const id = resolve(projectId);
       if (!id) return errText(NO_PROJECT);
       return text(await board.listLabels(id));
+    },
+  );
+
+  return server;
+}
+
+/**
+ * Skills MCP — create, read, update, and delete Orion skills in a project's
+ * `.orion/skills/` directory. The chat agent uses these tools when the user
+ * asks to create or modify a skill.
+ */
+function buildSkillsServer(c: Container, defaultProjectId?: string, locked = false): McpServer {
+  const server = new McpServer({ name: 'orion-skills', version: '1.0.0' });
+  const resolve = projectResolver(defaultProjectId, locked);
+  const workspaces = new WorkspaceService(c);
+
+  async function resolveConfigRoot(projectId: string): Promise<string> {
+    const project = await c.projects.get(projectId);
+    if (!project) throw new Error(`Project ${projectId} not found`);
+    return workspaces.resolveConfigRoot(project);
+  }
+
+  server.registerTool(
+    'list_projects',
+    {
+      description: 'List the projects Orion manages (id, name) so you can pick one to work on.',
+      inputSchema: {},
+    },
+    async () => text(await listVisibleProjects(c, defaultProjectId, locked)),
+  );
+
+  server.registerTool(
+    'list_skills',
+    {
+      description: "List all skills in a project's catalog (built-ins, global, and project-installed).",
+      inputSchema: { projectId: projectIdArg },
+    },
+    async ({ projectId }) => {
+      const id = resolve(projectId);
+      if (!id) return errText(NO_PROJECT);
+      const configRoot = await resolveConfigRoot(id);
+      const project = await c.projects.get(id);
+      if (!project) return errText('Project not found');
+      const skills = await listSkillCatalog(configRoot, project.configPath);
+      return text(skills);
+    },
+  );
+
+  server.registerTool(
+    'get_skill',
+    {
+      description: "Get a skill's full SKILL.md content, frontmatter, and metadata.",
+      inputSchema: {
+        name: z.string().describe('The skill name'),
+        projectId: projectIdArg,
+      },
+    },
+    async ({ name, projectId }) => {
+      const id = resolve(projectId);
+      if (!id) return errText(NO_PROJECT);
+      const configRoot = await resolveConfigRoot(id);
+      const project = await c.projects.get(id);
+      if (!project) return errText('Project not found');
+      const detail = await getSkillDetail(configRoot, name, project.configPath);
+      if (!detail) return errText(`Skill "${name}" not found`);
+      return text(detail);
+    },
+  );
+
+  server.registerTool(
+    'create_skill',
+    {
+      description: 'Create a new local skill in the project. Provide a name, a short description, and the Markdown body content (instructions for the agent).',
+      inputSchema: {
+        name: z.string().describe('A unique kebab-case name for the skill, e.g. "my-code-review"'),
+        description: z.string().describe('A one-line description of what this skill does'),
+        content: z.string().describe('The Markdown body of SKILL.md — instructions the agent will follow'),
+        projectId: projectIdArg,
+      },
+    },
+    async ({ name, description, content, projectId }) => {
+      const id = resolve(projectId);
+      if (!id) return errText(NO_PROJECT);
+      const configRoot = await resolveConfigRoot(id);
+      const project = await c.projects.get(id);
+      if (!project) return errText('Project not found');
+      await createSkill(configRoot, name, description, content, project.configPath, 'project');
+      return text({ created: true, name, description });
+    },
+  );
+
+  server.registerTool(
+    'update_skill',
+    {
+      description: "Update a local skill's body content. Optionally rename it or change its description.",
+      inputSchema: {
+        name: z.string().describe('The current skill name'),
+        content: z.string().describe('The new Markdown body for SKILL.md'),
+        newName: z.string().optional().describe('Optional new name to rename the skill'),
+        newDescription: z.string().optional().describe('Optional new description'),
+        projectId: projectIdArg,
+      },
+    },
+    async ({ name, content, newName, newDescription, projectId }) => {
+      const id = resolve(projectId);
+      if (!id) return errText(NO_PROJECT);
+      const configRoot = await resolveConfigRoot(id);
+      const project = await c.projects.get(id);
+      if (!project) return errText('Project not found');
+      await updateSkillContent(configRoot, name, content, project.configPath, 'project', newName, newDescription);
+      return text({ updated: true, name: newName ?? name });
+    },
+  );
+
+  server.registerTool(
+    'delete_skill',
+    {
+      description: 'Delete a local skill from the project, including its files. Use with caution.',
+      inputSchema: {
+        name: z.string().describe('The skill name to delete'),
+        projectId: projectIdArg,
+      },
+    },
+    async ({ name, projectId }) => {
+      const id = resolve(projectId);
+      if (!id) return errText(NO_PROJECT);
+      const configRoot = await resolveConfigRoot(id);
+      const project = await c.projects.get(id);
+      if (!project) return errText('Project not found');
+      const references = await findSkillReferences(configRoot, name, project.configPath);
+      if (references.length > 0) {
+        return errText(
+          `Skill "${name}" is referenced by ${references.length} workflow node(s): ${
+            references.map((r) => `${r.workflowName}:${r.nodeId}`).join(', ')
+          }. Remove the references first.`,
+        );
+      }
+      const removed = await uninstallSkill(configRoot, name, project.configPath, 'project');
+      if (!removed) return errText(`Skill "${name}" not found`);
+      return text({ deleted: true, name });
     },
   );
 
@@ -222,23 +394,25 @@ function buildTicketsServer(c: Container, defaultProjectId?: string): McpServer 
  * stream; the client then POSTs JSON-RPC to `/mcp/<kind>/messages?sessionId=...`.
  * An optional `?projectId=` on the stream binds the connection to a project so
  * Orion's own runs work without passing an id; external clients omit it and use
- * `list_projects` + a per-tool `projectId`. One transport is kept per session.
+ * `list_projects` + a per-tool `projectId`. Add `?lock=1` to forbid tool-supplied
+ * project overrides entirely. One transport is kept per session.
  */
 function mountSseServer(
   app: Express,
   kind: string,
-  build: (defaultProjectId?: string) => McpServer,
+  build: (defaultProjectId?: string, locked?: boolean) => McpServer,
 ): void {
   const transports = new Map<string, SSEServerTransport>();
 
   app.get(`/mcp/${kind}`, (req: Request, res: Response) => {
     const defaultProjectId = typeof req.query.projectId === 'string' ? req.query.projectId : undefined;
+    const locked = req.query.lock === '1' || req.query.lock === 'true';
     const transport = new SSEServerTransport(`/mcp/${kind}/messages`, res);
     transports.set(transport.sessionId, transport);
     res.on('close', () => {
       transports.delete(transport.sessionId);
     });
-    build(defaultProjectId)
+    build(defaultProjectId, locked)
       .connect(transport)
       .catch((err: unknown) => {
         transports.delete(transport.sessionId);
@@ -259,8 +433,15 @@ function mountSseServer(
   });
 }
 
-/** Mount the codebase and tickets MCP servers onto the orchestrator app. */
+/** Mount the codebase, tickets, and skills MCP servers onto the orchestrator app. */
 export function mountMcpRoutes(app: Express, c: Container): void {
-  mountSseServer(app, 'codebase', (defaultProjectId) => buildCodebaseServer(c, defaultProjectId));
-  mountSseServer(app, 'tickets', (defaultProjectId) => buildTicketsServer(c, defaultProjectId));
+  mountSseServer(app, 'codebase', (defaultProjectId, locked) =>
+    buildCodebaseServer(c, defaultProjectId, locked),
+  );
+  mountSseServer(app, 'tickets', (defaultProjectId, locked) =>
+    buildTicketsServer(c, defaultProjectId, locked),
+  );
+  mountSseServer(app, 'skills', (defaultProjectId, locked) =>
+    buildSkillsServer(c, defaultProjectId, locked),
+  );
 }

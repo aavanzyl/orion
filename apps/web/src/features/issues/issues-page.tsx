@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { SearchIcon, TicketIcon } from 'lucide-react';
-import type { Label as LabelModel, Ticket, TicketPriority } from '@orion/models';
+import { PlusIcon, SearchIcon, TicketIcon, TrashIcon } from 'lucide-react';
+import { toast } from 'sonner';
+import type { Label as LabelModel, Ticket, TicketPriority, TicketType } from '@orion/models';
+import { ALL_DEFAULT_TICKET_TYPES } from '@orion/models';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Select,
@@ -19,6 +23,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { api } from '@/lib/api';
 import { useProjects } from '@/features/projects/hooks';
 import { IssueDetailSheet } from './issue-detail-sheet';
@@ -44,7 +56,7 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-type SortField = 'key' | 'title' | 'project' | 'swimlane' | 'priority' | 'workflow' | 'createdAt' | 'updatedAt';
+type SortField = 'key' | 'title' | 'project' | 'swimlane' | 'priority' | 'type' | 'labels' | 'workflow' | 'createdAt' | 'updatedAt';
 type SortDir = 'asc' | 'desc';
 
 export function IssuesPage() {
@@ -61,6 +73,14 @@ export function IssuesPage() {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+
+  const [newTicketOpen, setNewTicketOpen] = useState(false);
+  const [newTicketProject, setNewTicketProject] = useState<string>('');
+  const [newTicketTitle, setNewTicketTitle] = useState('');
+  const [newTicketType, setNewTicketType] = useState<TicketType>('feature');
+  const [newTicketCreating, setNewTicketCreating] = useState(false);
+
+  const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -126,6 +146,15 @@ export function IssuesPage() {
         case 'priority':
           cmp = a.priority - b.priority;
           break;
+        case 'type':
+          cmp = a.type.localeCompare(b.type);
+          break;
+        case 'labels': {
+          const la = (a.labelIds ?? []).length;
+          const lb = (b.labelIds ?? []).length;
+          cmp = la - lb;
+          break;
+        }
         case 'workflow':
           cmp = (a.workflowName ?? '').localeCompare(b.workflowName ?? '');
           break;
@@ -159,8 +188,48 @@ export function IssuesPage() {
     refetchProjects();
   };
 
+  const createTicket = async () => {
+    if (!newTicketProject || !newTicketTitle.trim()) return;
+    setNewTicketCreating(true);
+    try {
+      await api.createTicket(newTicketProject, { title: newTicketTitle.trim(), type: newTicketType });
+      toast.success('Ticket created');
+      setNewTicketOpen(false);
+      setNewTicketTitle('');
+      setNewTicketType('feature');
+      setNewTicketProject('');
+      load();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setNewTicketCreating(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deletingTicketId) return;
+    try {
+      await api.deleteTicket(deletingTicketId);
+      setTickets((prev) => prev.filter((t) => t.id !== deletingTicketId));
+      toast.success('Ticket deleted');
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
   const isFiltering = search.trim() || filterProject !== 'all' || filterPriority !== 'all';
   const hasResults = sorted.length > 0;
+
+  const SortHead = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
+    <TableHead>
+      <button
+        onClick={() => toggleSort(field)}
+        className="inline-flex items-center font-medium hover:text-foreground"
+      >
+        {children} <SortArrow field={field} />
+      </button>
+    </TableHead>
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -171,6 +240,10 @@ export function IssuesPage() {
             View and search all tickets across projects.
           </p>
         </div>
+        <Button onClick={() => setNewTicketOpen(true)}>
+          <PlusIcon data-icon="inline-start" />
+          New ticket
+        </Button>
       </header>
 
       <div className="flex items-center gap-3 border-b bg-card px-6 py-3">
@@ -184,7 +257,7 @@ export function IssuesPage() {
           />
         </div>
         <Select value={filterProject} onValueChange={setFilterProject}>
-          <SelectTrigger className="h-9 w-44">
+          <SelectTrigger className="w-44">
             <SelectValue placeholder="All projects" />
           </SelectTrigger>
           <SelectContent>
@@ -197,7 +270,7 @@ export function IssuesPage() {
           </SelectContent>
         </Select>
         <Select value={filterPriority} onValueChange={setFilterPriority}>
-          <SelectTrigger className="h-9 w-36">
+          <SelectTrigger className="w-36">
             <SelectValue placeholder="All priorities" />
           </SelectTrigger>
           <SelectContent>
@@ -239,71 +312,17 @@ export function IssuesPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>
-                    <button
-                      onClick={() => toggleSort('key')}
-                      className="inline-flex items-center font-medium hover:text-foreground"
-                    >
-                      Key <SortArrow field="key" />
-                    </button>
-                  </TableHead>
-                  <TableHead>
-                    <button
-                      onClick={() => toggleSort('title')}
-                      className="inline-flex items-center font-medium hover:text-foreground"
-                    >
-                      Title <SortArrow field="title" />
-                    </button>
-                  </TableHead>
-                  <TableHead>
-                    <button
-                      onClick={() => toggleSort('project')}
-                      className="inline-flex items-center font-medium hover:text-foreground"
-                    >
-                      Project <SortArrow field="project" />
-                    </button>
-                  </TableHead>
-                  <TableHead>
-                    <button
-                      onClick={() => toggleSort('swimlane')}
-                      className="inline-flex items-center font-medium hover:text-foreground"
-                    >
-                      Swimlane <SortArrow field="swimlane" />
-                    </button>
-                  </TableHead>
-                  <TableHead>
-                    <button
-                      onClick={() => toggleSort('priority')}
-                      className="inline-flex items-center font-medium hover:text-foreground"
-                    >
-                      Priority <SortArrow field="priority" />
-                    </button>
-                  </TableHead>
-                  <TableHead>Labels</TableHead>
-                  <TableHead>
-                    <button
-                      onClick={() => toggleSort('workflow')}
-                      className="inline-flex items-center font-medium hover:text-foreground"
-                    >
-                      Workflow <SortArrow field="workflow" />
-                    </button>
-                  </TableHead>
-                  <TableHead>
-                    <button
-                      onClick={() => toggleSort('createdAt')}
-                      className="inline-flex items-center font-medium hover:text-foreground"
-                    >
-                      Created <SortArrow field="createdAt" />
-                    </button>
-                  </TableHead>
-                  <TableHead>
-                    <button
-                      onClick={() => toggleSort('updatedAt')}
-                      className="inline-flex items-center font-medium hover:text-foreground"
-                    >
-                      Updated <SortArrow field="updatedAt" />
-                    </button>
-                  </TableHead>
+                  <SortHead field="key">Key</SortHead>
+                  <SortHead field="title">Title</SortHead>
+                  <SortHead field="project">Project</SortHead>
+                  <SortHead field="swimlane">Swimlane</SortHead>
+                  <SortHead field="priority">Priority</SortHead>
+                  <SortHead field="type">Type</SortHead>
+                  <SortHead field="labels">Labels</SortHead>
+                  <SortHead field="workflow">Workflow</SortHead>
+                  <SortHead field="createdAt">Created</SortHead>
+                  <SortHead field="updatedAt">Updated</SortHead>
+                  <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -336,6 +355,9 @@ export function IssuesPage() {
                         <Badge variant={priority.variant}>{priority.label}</Badge>
                       </TableCell>
                       <TableCell>
+                        <Badge variant="outline" className="capitalize">{ticket.type}</Badge>
+                      </TableCell>
+                      <TableCell>
                         <div className="flex flex-wrap gap-1">
                           {ticketLabels.length === 0 ? (
                             <span className="text-xs text-muted-foreground">—</span>
@@ -366,6 +388,19 @@ export function IssuesPage() {
                       <TableCell className="text-muted-foreground whitespace-nowrap">
                         {formatDate(ticket.updatedAt)}
                       </TableCell>
+                      <TableCell>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeletingTicketId(ticket.id);
+                          }}
+                          className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          aria-label="Delete ticket"
+                        >
+                          <TrashIcon className="size-3.5" />
+                        </button>
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -374,6 +409,72 @@ export function IssuesPage() {
           </div>
         )}
       </main>
+
+      <Dialog open={newTicketOpen} onOpenChange={setNewTicketOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New ticket</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label>Project</Label>
+              <Select value={newTicketProject} onValueChange={setNewTicketProject}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a project" />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="new-ticket-title">Title</Label>
+              <Input
+                id="new-ticket-title"
+                value={newTicketTitle}
+                onChange={(e) => setNewTicketTitle(e.target.value)}
+                placeholder="Ticket title"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void createTicket();
+                }}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Type</Label>
+              <Select value={newTicketType} onValueChange={(v) => setNewTicketType(v as TicketType)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ALL_DEFAULT_TICKET_TYPES.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={createTicket} disabled={!newTicketProject || !newTicketTitle.trim() || newTicketCreating}>
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={deletingTicketId !== null}
+        onOpenChange={(open) => { if (!open) setDeletingTicketId(null); }}
+        title="Delete ticket"
+        description="Are you sure you want to permanently delete this ticket? This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDelete}
+      />
 
       <IssueDetailSheet
         ticket={selectedTicket}

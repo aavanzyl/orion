@@ -1,18 +1,22 @@
 import {
-  deriveSwimlaneTriggers,
+  getWorkflowTemplate,
   installSkillFromGitHub,
   listCommandFiles,
   listSkillCatalog,
   loadProjectConfig,
   readCommandText,
   readProjectConfigText,
+  resolveIssueTypes,
   saveCommandText,
   saveProjectConfigText,
+  serializeProjectConfig,
   uninstallSkill,
   getSkillDetail,
   findSkillReferences,
   updateSkillLockEntry,
   syncSkill,
+  createSkill,
+  updateSkillContent,
 } from '@orion/config';
 import type {
   Board,
@@ -51,8 +55,37 @@ export class ProjectService {
     return this.c.projects.get(id);
   }
 
-  create(input: CreateProjectInput): Promise<Project> {
-    return this.c.projects.create(input);
+  async create(input: CreateProjectInput & { configYaml?: string }): Promise<Project> {
+    const project = await this.c.projects.create(input);
+    const yaml = input.configYaml ?? this.generateDefaultConfigYaml(input);
+    if (yaml) {
+      try {
+        const configRoot = await this.workspaces.resolveConfigRoot(project);
+        await saveProjectConfigText(configRoot, yaml, project.configPath);
+      } catch {
+        // Config root may not be resolvable yet (e.g. remote repo not cloned).
+        // The user can still save config later via the raw config endpoint.
+      }
+    }
+    return project;
+  }
+
+  private generateDefaultConfigYaml(input: CreateProjectInput): string {
+    const defaultTemplate = getWorkflowTemplate('default');
+    const config = {
+      project: {
+        name: input.name,
+        defaultBranch: input.defaultBranch ?? 'main',
+      },
+      board: {
+        swimlanes: defaultTemplate?.suggestedSwimlanes ?? ['backlog', 'in_progress', 'review', 'done'],
+      },
+      workflow: defaultTemplate?.workflow ?? {
+        name: 'default',
+        nodes: [],
+      },
+    };
+    return serializeProjectConfig(config as import('@orion/models').ProjectConfig);
   }
 
   update(id: string, input: UpdateProjectInput): Promise<Project | null> {
@@ -85,7 +118,8 @@ export class ProjectService {
   async getBoard(project: Project): Promise<Board> {
     const config = await this.loadConfig(project);
     const board = this.c.boards.get(project.boardProvider);
-    return board.getBoard(project.id, config.board.swimlanes, deriveSwimlaneTriggers(config));
+    const b = await board.getBoard(project.id, config.board.swimlanes);
+    return { ...b, issueTypes: resolveIssueTypes(config) };
   }
 
   /** List command template files (`.md`) under the project's `.orion/` dir. */
@@ -152,5 +186,23 @@ export class ProjectService {
   async getSkillReferences(project: Project, name: string): Promise<SkillReference[]> {
     const configRoot = await this.workspaces.resolveConfigRoot(project);
     return findSkillReferences(configRoot, name, project.configPath);
+  }
+
+  /** Create a new local skill under the project's `.orion/skills/` directory. */
+  async createSkill(project: Project, name: string, description: string, content: string): Promise<void> {
+    const configRoot = await this.workspaces.resolveConfigRoot(project);
+    await createSkill(configRoot, name, description, content, project.configPath, 'project');
+  }
+
+  /** Update an existing local skill's body content, preserving its frontmatter. */
+  async updateSkillContent(
+    project: Project,
+    name: string,
+    content: string,
+    newName?: string,
+    newDescription?: string,
+  ): Promise<void> {
+    const configRoot = await this.workspaces.resolveConfigRoot(project);
+    await updateSkillContent(configRoot, name, content, project.configPath, 'project', newName, newDescription);
   }
 }

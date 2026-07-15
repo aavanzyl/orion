@@ -4,6 +4,7 @@ export * from './lib/migrate.js';
 export * from './lib/mappers.js';
 export * from './lib/repositories/project.repository.js';
 export * from './lib/repositories/provider.repository.js';
+export * from './lib/repositories/epic.repository.js';
 export * from './lib/repositories/ticket.repository.js';
 export * from './lib/repositories/label.repository.js';
 export * from './lib/repositories/run.repository.js';

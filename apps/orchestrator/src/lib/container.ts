@@ -1,7 +1,6 @@
-import { BoardConnectionRepository, ChatRepository, createDb, type DbHandle, EvaluationRepository, EventRepository, LabelRepository, McpServerRepository, ProjectRepository, ProviderRepository, RagRepository, RunRepository, TicketRepository, ScheduleRepository, SettingsRepository } from '@orion/db';
+import { BoardConnectionRepository, ChatRepository, createDb, type DbHandle, EpicRepository, EvaluationRepository, EventRepository, LabelRepository, McpServerRepository, ProjectRepository, ProviderRepository, RagRepository, RunRepository, TicketRepository, ScheduleRepository, SettingsRepository } from '@orion/db';
 import { HarnessRegistry } from '@orion/harness-core';
 import { CodexHarness } from '@orion/harness-codex';
-import { OpenAiHarness } from '@orion/harness-openai';
 import { ClaudeHarness } from '@orion/harness-claude';
 import { ScmRegistry } from '@orion/scm-core';
 import { GitHubScmProvider } from '@orion/scm-github';
@@ -11,6 +10,7 @@ import { CommunicationRegistry } from '@orion/communication-core';
 import { WebhookNotifier, SlackNotifier } from '@orion/communication-webhook';
 import { BoardSyncService } from './services/board-sync.service.js';
 import { RagService } from './services/rag.service.js';
+import { GraphService } from './services/graph.service.js';
 import { SecretCipher } from './crypto.js';
 import type { OrionEnv } from './env.js';
 import { RunEventBus } from './event-bus.js';
@@ -23,6 +23,7 @@ export interface Container {
   providers: ProviderRepository;
   tickets: TicketRepository;
   labels: LabelRepository;
+  epics: EpicRepository;
   runs: RunRepository;
   events: EventRepository;
   evaluations: EvaluationRepository;
@@ -38,6 +39,7 @@ export interface Container {
   boardSync: BoardSyncService;
   rag: RagRepository;
   ragService: RagService;
+  graphService: GraphService;
   mcpServers: McpServerRepository;
   settings: SettingsRepository;
   oauthStates: Map<string, { mcpServerId: string; expiresAt: number }>;
@@ -52,6 +54,7 @@ export function createContainer(env: OrionEnv): Container {
   const providers = new ProviderRepository(db);
   const tickets = new TicketRepository(db);
   const labels = new LabelRepository(db);
+  const epics = new EpicRepository(db);
   const runs = new RunRepository(db);
   const events = new EventRepository(db);
   const evaluations = new EvaluationRepository(db);
@@ -64,7 +67,6 @@ export function createContainer(env: OrionEnv): Container {
 
   const harnesses = new HarnessRegistry()
     .register(new CodexHarness({ apiKey: env.codexApiKey, baseUrl: env.codexBaseUrl }))
-    .register(new OpenAiHarness({ apiKey: env.codexApiKey, baseUrl: env.codexBaseUrl }))
     .register(new ClaudeHarness({ apiKey: env.claudeApiKey, baseUrl: env.claudeBaseUrl }));
 
   const scm = new ScmRegistry().register(new GitHubScmProvider({ token: env.githubToken }));
@@ -86,6 +88,7 @@ export function createContainer(env: OrionEnv): Container {
     providers,
     tickets,
     labels,
+    epics,
     runs,
     events,
     evaluations,
@@ -106,14 +109,16 @@ export function createContainer(env: OrionEnv): Container {
       new SecretCipher(env.providerEncryptionSalt),
     ),
     rag,
-    // Assigned below; RagService needs the assembled container.
+    // Assigned below; RagService / GraphService need the assembled container.
     ragService: undefined as unknown as RagService,
+    graphService: undefined as unknown as GraphService,
     mcpServers,
     settings,
     oauthStates: new Map(),
   };
 
   container.ragService = new RagService(container);
+  container.graphService = new GraphService(container);
 
   return container;
 }

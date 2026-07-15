@@ -46,6 +46,18 @@ export const projects = pgTable('projects', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const epics = pgTable('epics', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  description: text('description').notNull().default(''),
+  color: text('color').notNull().default('#7c3aed'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const tickets = pgTable('tickets', {
   id: uuid('id').defaultRandom().primaryKey(),
   projectId: uuid('project_id')
@@ -66,6 +78,16 @@ export const tickets = pgTable('tickets', {
   position: integer('position').notNull().default(0),
   /** JIRA-style display key, e.g. ORION-42. Auto-generated from project name + counter. */
   displayKey: text('display_key'),
+  /** The kind of work this ticket represents: feature, bug, issue, hotfix, or epic. */
+  type: text('type').notNull().default('feature'),
+  /** Optional start date for timeline bar placement. */
+  startDate: timestamp('start_date', { withTimezone: true }),
+  /** Optional due date for scheduling and timeline views. */
+  dueDate: timestamp('due_date', { withTimezone: true }),
+  /** Optional epic ticket this ticket belongs to. Must be a ticket with type='epic'. */
+  epicId: uuid('epic_id').references((): AnyPgColumn => tickets.id, {
+    onDelete: 'set null',
+  }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

@@ -103,17 +103,16 @@ describe('default workflow templates', () => {
     expect(pr?.provider).toBeTruthy();
   });
 
-  it('fans an agent and a shell node out over a bounded matrix in fan-out-migration', () => {
+  it('has migrate and test nodes in the fan-out-migration workflow', () => {
     const template = getWorkflowTemplate('fan-out-migration');
     expect(template).toBeDefined();
-    const matrixNodes = template!.workflow.nodes.filter((n) => n.matrix);
-    expect(matrixNodes.map((n) => n.type).sort()).toEqual(['agent', 'shell']);
-    for (const node of matrixNodes) {
-      expect(Array.isArray(node.matrix!.items)).toBe(true);
-      expect(node.matrix!.as).toBe('package');
-      expect(node.matrix!.maxParallel).toBeGreaterThanOrEqual(1);
-      expect(node.loop).toBeUndefined();
-    }
+    const nodeIds = template!.workflow.nodes.map((n) => n.id);
+    expect(nodeIds).toContain('migrate');
+    expect(nodeIds).toContain('test');
+    const migrateNode = template!.workflow.nodes.find((n) => n.id === 'migrate');
+    expect(migrateNode?.type).toBe('agent');
+    const testNode = template!.workflow.nodes.find((n) => n.id === 'test');
+    expect(testNode?.type).toBe('shell');
   });
 
   it('announces via notify and comment message nodes in ship-and-announce', () => {

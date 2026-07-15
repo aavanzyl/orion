@@ -47,7 +47,6 @@ import { McpServersEditor } from '@/features/settings/mcp-servers-editor';
 import { InstructionsField } from '../shared/instructions-field';
 import { FieldLabel, Checkbox, NumberField } from '../shared/node-properties/fields';
 import { LoopEditor } from '../shared/node-properties/loop-editor';
-import { MatrixEditor } from '../shared/node-properties/matrix-editor';
 import { ScmProperties } from '../shared/node-properties/scm-properties';
 import { MessageProperties } from '../shared/node-properties/message-properties';
 import { ConditionProperties } from '../shared/node-properties/condition-properties';
@@ -109,7 +108,6 @@ export function NodePropertiesPanel({
   const isHttp = data.type === 'http';
   const isGraphql = data.type === 'graphql';
   const canLoop = isAgent;
-  const canMatrix = isAgent || isShell;
   const supportsRetryPolicy = isAgent || isHttp || isGraphql;
 
   const skills = data.skills ?? [];
@@ -117,9 +115,6 @@ export function NodePropertiesPanel({
 
   const toggleLoop = (enabled: boolean) => {
     onChange({ loop: enabled ? { maxIterations: 3, until: 'DONE' } : undefined });
-  };
-  const toggleMatrix = (enabled: boolean) => {
-    onChange({ matrix: enabled ? { items: [] } : undefined });
   };
   const addSkill = (skillName: string) => {
     onChange({ skills: [...skills, skillName] });
@@ -405,7 +400,57 @@ export function NodePropertiesPanel({
             Continue on error
           </Checkbox>
 
-          {(canLoop || canMatrix) && (
+          <Checkbox
+            checked={Boolean(data.onFailureTransitionTo)}
+            onChange={(v) =>
+              onChange({
+                onFailureTransitionTo: v ? '' : undefined,
+              })
+            }
+          >
+            On failure, transition to
+          </Checkbox>
+          {data.onFailureTransitionTo !== undefined && (
+            <div className="ml-6 mt-1">
+              <Select
+                value={data.onFailureTransitionTo || NONE}
+                onValueChange={(v) =>
+                  onChange({ onFailureTransitionTo: v === NONE ? '' : v })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select target node..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>Select target node...</SelectItem>
+                  <SelectItem value="__divider__" disabled className="text-[10px] font-semibold text-muted-foreground">
+                    — Nodes —
+                  </SelectItem>
+                  {allNodeIds
+                    .filter((id) => id !== data.nodeId)
+                    .map((id) => (
+                      <SelectItem key={id} value={id}>
+                        {id}
+                      </SelectItem>
+                    ))}
+                  {swimlanes.length > 0 && (
+                    <>
+                      <SelectItem value="__divider_sw__" disabled className="text-[10px] font-semibold text-muted-foreground">
+                        — Swimlanes —
+                      </SelectItem>
+                      {swimlanes.map((sw) => (
+                        <SelectItem key={`sw_${sw}`} value={sw}>
+                          {sw}
+                        </SelectItem>
+                      ))}
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {(canLoop) && (
             <>
               <Separator />
               {canLoop && (
@@ -417,17 +462,6 @@ export function NodePropertiesPanel({
                     <span className="font-medium">Loop this node</span>
                   </Checkbox>
                   {data.loop && <LoopEditor loop={data.loop} onChange={(loop) => onChange({ loop })} />}
-                </>
-              )}
-
-              {canMatrix && (
-                <>
-                  <Checkbox checked={Boolean(data.matrix)} onChange={toggleMatrix}>
-                    <span className="font-medium">Matrix fan-out</span>
-                  </Checkbox>
-                  {data.matrix && (
-                    <MatrixEditor matrix={data.matrix} onChange={(matrix) => onChange({ matrix })} />
-                  )}
                 </>
               )}
             </>

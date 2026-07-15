@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { parse } from 'yaml';
@@ -549,4 +549,77 @@ export async function updateSkillLockEntry(
 
   await writeSkillsLock(repoDir, lock, configPath, scope);
   return entry;
+}
+
+/**
+ * Create a new local skill by writing a SKILL.md with the given name,
+ * description, and body content into the skills directory.
+ */
+export async function createSkill(
+  repoDir: string,
+  name: string,
+  description: string,
+  content: string,
+  configPath: string = DEFAULT_CONFIG_PATH,
+  scope: SkillScope = 'project',
+): Promise<void> {
+  const dir = skillsDir(repoDir, configPath, scope);
+  const skillDir = join(dir, name);
+  await mkdir(skillDir, { recursive: true });
+  const frontmatter = `---\nname: ${name}\ndescription: ${description}\n---\n\n${content}`;
+  await writeFile(join(skillDir, SKILL_MANIFEST_FILENAME), frontmatter, 'utf8');
+}
+
+/**
+ * Update an existing local skill's body content, preserving the YAML
+ * frontmatter. When `newName` or `newDescription` is provided the frontmatter
+ * and directory name are also updated.
+ */
+export async function updateSkillContent(
+  repoDir: string,
+  name: string,
+  content: string,
+  configPath: string = DEFAULT_CONFIG_PATH,
+  scope: SkillScope = 'project',
+  newName?: string,
+  newDescription?: string,
+): Promise<void> {
+  const dir = skillsDir(repoDir, configPath, scope);
+  const skillDir = join(dir, name);
+  const filePath = join(skillDir, SKILL_MANIFEST_FILENAME);
+  const existing = await readFile(filePath, 'utf8');
+  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(existing.replace(/^\uFEFF/, '').trimStart());
+  if (!match) throw new ConfigError('SKILL.md is missing YAML frontmatter');
+
+  let frontmatterYaml = match[1];
+  if (newName) {
+    frontmatterYaml = frontmatterYaml.replace(/^name:.*$/m, `name: ${newName}`);
+  }
+  if (newDescription) {
+    if (/^description:.*$/m.test(frontmatterYaml)) {
+      frontmatterYaml = frontmatterYaml.replace(/^description:.*$/m, `description: ${newDescription}`);
+    } else {
+      frontmatterYaml += `\ndescription: ${newDescription}`;
+    }
+  }
+
+  const frontmatter = `---\n${frontmatterYaml}\n---`;
+  await writeFile(filePath, `${frontmatter}\n\n${content}`, 'utf8');
+
+  if (newName && newName !== name) {
+    const newSkillDir = join(dir, newName);
+    await rename(skillDir, newSkillDir);
+  }
+}
+
+/**
+ * Build YAML frontmatter text from a name and description for a SKILL.md.
+ * Exported for use by the API layer.
+ */
+export function buildSkillFrontmatterText(
+  name: string,
+  description: string,
+  content: string,
+): string {
+  return `---\nname: ${name}\ndescription: ${description}\n---\n\n${content}`;
 }

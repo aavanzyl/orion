@@ -1,5 +1,4 @@
 import { useDroppable } from '@dnd-kit/core';
-import { ZapIcon } from 'lucide-react';
 import type { BoardSwimlane, Label, Ticket } from '@orion/models';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -9,12 +8,12 @@ import { TicketCard } from './ticket-card';
 interface BoardSwimlaneProps {
   swimlane: BoardSwimlane;
   labelsById: Map<string, Label>;
+  ticketsById: Map<string, Ticket>;
   onOpenTicket: (ticket: Ticket) => void;
 }
 
-export function BoardSwimlane({ swimlane, labelsById, onOpenTicket }: BoardSwimlaneProps) {
+export function BoardSwimlane({ swimlane, labelsById, ticketsById, onOpenTicket }: BoardSwimlaneProps) {
   const { setNodeRef, isOver } = useDroppable({ id: swimlane.key });
-  const triggerNames = swimlane.workflows ?? [];
 
   return (
     <div
@@ -29,17 +28,6 @@ export function BoardSwimlane({ swimlane, labelsById, onOpenTicket }: BoardSwiml
           <h2 className="text-sm font-semibold tracking-tight">{swimlane.title}</h2>
           <Badge variant="secondary" className="tabular-nums">{swimlane.tickets.length}</Badge>
         </div>
-        {triggerNames.map((name) => (
-          <Badge
-            key={name}
-            variant="outline"
-            className="w-fit gap-1 text-muted-foreground"
-            title={`Moving a ticket here runs the "${name}" workflow`}
-          >
-            <ZapIcon data-icon="inline-start" />
-            runs {name}
-          </Badge>
-        ))}
       </div>
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-3 p-3">
@@ -48,6 +36,7 @@ export function BoardSwimlane({ swimlane, labelsById, onOpenTicket }: BoardSwiml
               key={ticket.id}
               ticket={ticket}
               labelsById={labelsById}
+              ticketsById={ticketsById}
               onOpen={onOpenTicket}
             />
           ))}

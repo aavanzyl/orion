@@ -142,7 +142,7 @@ export function useChatStream(conversationId: string | null): ChatStreamState {
           break;
         }
         case 'error': {
-          setError(event.error ?? 'Chat turn failed');
+          setError(event.error ? normalizeStreamError(event.error) : 'Chat turn failed');
           setStreaming(false);
           break;
         }
@@ -160,4 +160,11 @@ export function useChatStream(conversationId: string | null): ChatStreamState {
   }, [conversationId]);
 
   return { messages, streamingText, items, streaming, error };
+}
+
+function normalizeStreamError(error: string): string {
+  if (/exited with code/i.test(error)) {
+    return `${error}. This usually happens when the provider's API is unreachable or the model is not supported. Try again or check your provider configuration in Settings.`;
+  }
+  return error;
 }

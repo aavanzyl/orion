@@ -50,12 +50,15 @@ export function IssueDetailSheet({ ticket, onClose, onChanged }: IssueDetailShee
     setLabels(updated);
   };
 
+  const epicTickets = tickets.filter((t) => t.type === 'epic');
+
   return (
     <TicketSheet
       ticket={loaded ? ticket : null}
       projectId={ticket?.projectId ?? null}
       labels={labels}
       tickets={tickets}
+      epicTickets={epicTickets}
       swimlanes={swimlanes}
       onCreateLabel={createLabel}
       onClose={onClose}
