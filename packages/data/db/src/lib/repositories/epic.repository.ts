@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import type { CreateEpicInput, Epic, EpicId, ProjectId, UpdateEpicInput } from '@orion/models';
 import type { Database } from '../client.js';
 import { epics } from '../schema.js';
@@ -21,7 +21,15 @@ export class EpicRepository {
     return row ? toEpic(row) : null;
   }
 
-  async create(input: CreateEpicInput): Promise<Epic> {
+  async getByExternal(projectId: ProjectId, externalId: string): Promise<Epic | null> {
+    const [row] = await this.db
+      .select()
+      .from(epics)
+      .where(and(eq(epics.projectId, projectId), eq(epics.externalId, externalId)));
+    return row ? toEpic(row) : null;
+  }
+
+  async create(input: CreateEpicInput & { externalId?: string }): Promise<Epic> {
     const [row] = await this.db
       .insert(epics)
       .values({
@@ -29,6 +37,7 @@ export class EpicRepository {
         title: input.title,
         description: input.description ?? '',
         color: input.color ?? '#7c3aed',
+        externalId: input.externalId ?? null,
       })
       .returning();
     return toEpic(row);

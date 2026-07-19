@@ -81,6 +81,9 @@ export function createContainer(env: OrionEnv): Container {
     communication.register(new SlackNotifier({ url: env.slackWebhookUrl }));
   }
 
+  const bus = new RunEventBus();
+  const chatBus = new ChatEventBus();
+
   const container: Container = {
     env,
     dbHandle,
@@ -98,14 +101,17 @@ export function createContainer(env: OrionEnv): Container {
     scm,
     boards,
     communication,
-    bus: new RunEventBus(),
-    chatBus: new ChatEventBus(),
+    bus,
+    chatBus,
     boardConnections,
     boardSync: new BoardSyncService(
       boardConnections,
       tickets,
       projects,
+      labels,
+      epics,
       boards,
+      bus,
       new SecretCipher(env.providerEncryptionSalt),
     ),
     rag,

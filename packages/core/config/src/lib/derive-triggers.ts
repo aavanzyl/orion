@@ -24,6 +24,32 @@ export function resolveWorkflowForTicketType(
 }
 
 /**
+ * Determine which workflow (if any) should auto-start when a ticket enters a
+ * swimlane. The workflow is resolved from the ticket's issue type, and it only
+ * triggers when one of its starting nodes (nodes with zero dependencies) is
+ * associated with the destination swimlane. Returns the workflow name to
+ * start, or `null` when the move should not trigger anything.
+ */
+export function resolveTriggerWorkflowForSwimlane(
+  config: ProjectConfig,
+  swimlane: string,
+  ticketType?: string,
+  ticketWorkflowName?: string,
+): string | null {
+  const name = resolveWorkflowForTicketType(config, ticketType, ticketWorkflowName);
+  const isSubWorkflow =
+    name !== config.workflow.name && config.workflows?.[name] !== undefined;
+  const workflow =
+    isSubWorkflow && config.workflows?.[name]
+      ? config.workflows[name]
+      : config.workflow;
+  const startNodes = workflow.nodes.filter((n) => (n.dependsOn ?? []).length === 0);
+  return startNodes.some((n) => n.swimlane === swimlane)
+    ? (isSubWorkflow ? name : config.workflow.name)
+    : null;
+}
+
+/**
  * Collect the set of configured issue types for a project, always including
  * `epic` which is implicitly available. When no project-specific issue types
  * are defined, returns the built-in defaults (feature, bug, issue, hotfix, epic).

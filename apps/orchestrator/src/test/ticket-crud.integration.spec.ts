@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { createTestApp, seedProjectRepo, SAMPLE_CONFIG_YAML, type TestApp } from './app.js';
+import { createTestApp, seedProjectRepo, type TestApp } from './app.js';
 
 describe('ticket CRUD (integration)', () => {
   let ctx: TestApp;

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
-import type { ApiResponse, CreateMcpServerInput, McpOAuthStored, McpServerConfig, McpServerMap, RunEventType, RunStatus, UpdateMcpServerInput } from '@orion/models';
+import type { ApiResponse, CreateMcpServerInput, McpOAuthStored, McpServerConfig, McpServerMap, MoveTriggerResult, RunEventType, RunStatus, UpdateMcpServerInput } from '@orion/models';
+import { ACTIVE_RUN_STATUSES } from '@orion/models';
 import {
   ConfigError,
   getWorkflowTemplate,
@@ -20,6 +21,7 @@ import {
 import type { Container } from '../container.js';
 import { ProjectService } from '../services/project.service.js';
 import { RunService } from '../services/run.service.js';
+import { TriggerService } from '../services/trigger.service.js';
 import { ChatService } from '../services/chat.service.js';
 import { ScheduleService } from '../services/schedule.service.js';
 import { FilesystemService } from '../services/filesystem.service.js';
@@ -138,8 +140,8 @@ function fireResponse(agentResponse: string): Record<string, unknown> {
   return { agentResponse };
 }
 
-function fail(res: Response, error: string, status = 400): void {
-  const body: ApiResponse<null> = { data: null, success: false, error };
+function fail(res: Response, error: string, status = 400, data?: unknown): void {
+  const body: ApiResponse<unknown> = { data: data ?? null, success: false, error };
   res.status(status).json(body);
 }
 
@@ -170,11 +172,27 @@ export function createApiRouter(
   runs: RunService,
   chat: ChatService,
   schedules: ScheduleService,
+  triggerService: TriggerService,
 ): Router {
   const router = Router();
   const projects = new ProjectService(c);
   const filesystem = new FilesystemService(c);
   const graphService = new GraphService(c);
+
+  /**
+   * Resolve an event filter `nodeId` query param. If it matches a run node's
+   * `id` (UUID) directly, return it as-is. If it matches a node's `nodeKey`,
+   * return that node's UUID. Otherwise return `null` so the API returns an
+   * empty list — never a raw DB error from a type mismatch.
+   */
+  async function resolveEventNodeId(runId: string, value: string): Promise<string | null> {
+    const nodes = await runs.listNodes(runId);
+    const byId = nodes.find((n) => n.id === value);
+    if (byId) return byId.id;
+    const byKey = nodes.find((n) => n.nodeKey === value);
+    if (byKey) return byKey.id;
+    return null;
+  }
 
   // Global skills service (project-independent, stored under ~/.orion/skills/)
   const skills = {
@@ -722,7 +740,9 @@ export function createApiRouter(
         c.tickets.listByProject(req.params.id),
         c.epics.listByProject(req.params.id),
       ]);
-      const epicTickets = all.filter((t) => t.type === 'epic' && t.startDate && t.dueDate);
+      const epicTickets = all.filter(
+        (t) => t.startDate && t.dueDate && (t.epicId || t.type === 'epic'),
+      );
       epicTickets.sort((a, b) => new Date(a.startDate!).getTime() - new Date(b.startDate!).getTime());
       ok(res, { tickets: epicTickets, epics });
     }),
@@ -828,7 +848,7 @@ export function createApiRouter(
       const project = await projects.get(req.params.id);
       if (!project) return fail(res, 'Project not found', 404);
       const graph = await graphService.getGraph(project.id);
-      res.json(graph);
+      ok(res, graph);
     }),
   );
 
@@ -838,7 +858,7 @@ export function createApiRouter(
       const project = await projects.get(req.params.id);
       if (!project) return fail(res, 'Project not found', 404);
       const graph = await graphService.buildGraph(project.id);
-      res.json(graph);
+      ok(res, graph);
     }),
   );
 
@@ -1113,37 +1133,43 @@ export function createApiRouter(
   router.post(
     '/tickets/:id/move',
     asyncHandler(async (req, res) => {
+      const destSwimlane = req.body?.swimlane;
+      const forceCancel = req.body?.force === 'cancel';
+
       const board = c.boards.get('native');
+
+      // Guard: active run → 409 unless force:'cancel'.
+      const allRuns = await c.runs.getByTicket(req.params.id);
+      const activeRun = allRuns.find((r) => ACTIVE_RUN_STATUSES.has(r.status));
+      if (activeRun && !forceCancel) {
+        return fail(res, 'Ticket has an active run. Cancel it first or force the move.', 409, {
+          activeRunId: activeRun.id,
+          activeRunStatus: activeRun.status,
+        });
+      }
+
+      if (activeRun && forceCancel) {
+        await runs.cancel(activeRun.id).catch(() => undefined);
+      }
+
       const result = await board.moveTicket({
         ticketId: req.params.id,
-        swimlane: req.body?.swimlane,
+        swimlane: destSwimlane,
         order: req.body?.order,
       });
       c.boardSync.pushTicketState(req.params.id).catch(() => undefined);
 
-      const destSwimlane = req.body?.swimlane;
+      let trigger: MoveTriggerResult = { action: 'none' };
+
       if (typeof destSwimlane === 'string' && destSwimlane) {
         try {
-          const ticket = await c.tickets.get(req.params.id);
-          if (ticket) {
-            const project = await c.projects.get(ticket.projectId);
-            if (project) {
-              const config = await projects.loadConfig(project);
-              const triggerSwimlane = config.board.triggerSwimlane || config.board.swimlanes[0];
-              if (triggerSwimlane && triggerSwimlane === destSwimlane) {
-                const existing = await c.runs.getByTicket(req.params.id);
-                if (existing.length === 0) {
-                  void runs.start(req.params.id).catch(() => undefined);
-                }
-              }
-            }
-          }
+          trigger = await triggerService.onTicketEnteredSwimlane(req.params.id, destSwimlane, { source: 'move' });
         } catch {
           // Auto-trigger is best-effort; never fail the move request.
         }
       }
 
-      ok(res, result);
+      ok(res, { ticket: result, trigger });
     }),
   );
 
@@ -1157,7 +1183,19 @@ export function createApiRouter(
 
   router.post(
     '/tickets/:id/run',
-    asyncHandler(async (req, res) => ok(res, await runs.start(req.params.id), 201)),
+    asyncHandler(async (req, res) => {
+      try {
+        ok(res, await runs.start(req.params.id), 201);
+      } catch (err) {
+        if (err instanceof RunService.ActiveRunConflictError) {
+          return fail(res, err.message, 409, {
+            activeRunId: err.activeRunId,
+            activeRunStatus: err.activeRunStatus,
+          });
+        }
+        throw err;
+      }
+    }),
   );
 
   router.get(
@@ -1178,7 +1216,16 @@ export function createApiRouter(
     '/runs/:id/events',
     asyncHandler(async (req, res) => {
       const type = typeof req.query.type === 'string' ? req.query.type as RunEventType : undefined;
-      const nodeId = typeof req.query.nodeId === 'string' ? req.query.nodeId : undefined;
+      const rawNodeId = typeof req.query.nodeId === 'string' ? req.query.nodeId : undefined;
+      let nodeId: string | undefined;
+      if (rawNodeId) {
+        const resolved = await resolveEventNodeId(req.params.id, rawNodeId);
+        if (resolved) {
+          nodeId = resolved;
+        } else {
+          return ok(res, []);
+        }
+      }
       ok(res, await runs.listEvents(req.params.id, type || nodeId ? { type, nodeId } : undefined));
     }),
   );
@@ -1714,6 +1761,7 @@ export function createApiRouter(
       if (!project) return fail(res, 'Project not found', 404);
       const conn = await c.boardSync.getConnection(req.params.id);
       if (!conn) return ok(res, { connected: false });
+      const latestSyncLog = await c.boardSync.getLatestSyncLog(req.params.id);
       ok(res, {
         connected: true,
         provider: conn.provider,
@@ -1728,6 +1776,17 @@ export function createApiRouter(
         syncIntervalMs: conn.syncIntervalMs,
         hasApiKey: Boolean(conn.apiKey),
         lastSyncedAt: conn.lastSyncedAt,
+        lastSync: latestSyncLog
+          ? {
+              at: latestSyncLog.finishedAt,
+              status: latestSyncLog.status,
+              imported: latestSyncLog.imported,
+              updated: latestSyncLog.updated,
+              epicsLinked: latestSyncLog.epicsLinked,
+              error: latestSyncLog.error,
+              durationMs: latestSyncLog.durationMs,
+            }
+          : null,
       });
     }),
   );
@@ -1780,11 +1839,21 @@ export function createApiRouter(
       const project = await projects.get(req.params.id);
       if (!project) return fail(res, 'Project not found', 404);
       try {
-        const summary = await c.boardSync.syncNow(req.params.id);
+        const summary = await c.boardSync.syncNow(req.params.id, 'manual');
         ok(res, summary);
       } catch (err) {
         fail(res, err instanceof Error ? err.message : String(err), 422);
       }
+    }),
+  );
+
+  router.get(
+    '/projects/:id/board-connection/sync-history',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const logs = await c.boardSync.getSyncLogs(req.params.id, 20);
+      ok(res, logs);
     }),
   );
 

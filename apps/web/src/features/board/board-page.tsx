@@ -20,7 +20,16 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { api } from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { api, ApiError } from '@/lib/api';
 import { useBoard, useLabels, useProjects } from './hooks';
 import { BoardSwimlane } from './board-swimlane';
 import { TicketCardView } from './ticket-card';
@@ -39,6 +48,7 @@ export function BoardPage() {
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
   const [draggingTicket, setDraggingTicket] = useState<Ticket | null>(null);
   const [filters, setFilters] = useState<BoardFilterState>(EMPTY_FILTERS);
+  const [conflict, setConflict] = useState<{ ticketId: string; swimlane: string; activeRunId: string } | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -129,11 +139,25 @@ export function BoardPage() {
     await moveTicket(ticketId, swimlane);
   };
 
-  const moveTicket = async (ticketId: string, swimlane: string) => {
+  const moveTicket = async (ticketId: string, swimlane: string, force?: string) => {
     try {
-      await api.moveTicket(ticketId, swimlane);
+      const result = await api.moveTicket(ticketId, swimlane, undefined, force);
       refetchBoard();
+      if (result.trigger) {
+        if (result.trigger.action === 'started') {
+          toast.success('Workflow started');
+        } else if (result.trigger.action === 'retried') {
+          toast.success('Workflow resumed');
+        } else if (result.trigger.reason === 'mid-workflow-lane') {
+          toast.info('Ticket moved — this lane belongs to an in-progress step, not the workflow start');
+        }
+      }
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        const data = e.data as { activeRunId?: string } | undefined;
+        setConflict({ ticketId, swimlane, activeRunId: data?.activeRunId ?? '' });
+        return;
+      }
       toast.error((e as Error).message);
     }
   };
@@ -247,7 +271,36 @@ export function BoardPage() {
           }
         }}
         onChanged={refetchBoard}
+        onMoveTicket={moveTicket}
       />
+
+      <Dialog open={conflict !== null} onOpenChange={() => setConflict(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Active workflow in progress</DialogTitle>
+            <DialogDescription>
+              This ticket has a running workflow. To move it you must first cancel the run.
+              The ticket will be moved after the run is cancelled.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConflict(null)}>
+              Keep run
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!conflict) return;
+                const c = conflict;
+                setConflict(null);
+                await moveTicket(c.ticketId, c.swimlane, 'cancel');
+              }}
+            >
+              Cancel run & move
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

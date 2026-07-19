@@ -18,7 +18,6 @@ export const boardConfigSchema = z
   .object({
     swimlanes: z.array(z.string().min(1)).min(1).optional(),
     columns: z.array(z.string().min(1)).min(1).optional(),
-    triggerSwimlane: z.string().min(1).optional(),
   })
   .refine((data) => (data.swimlanes ?? data.columns) !== undefined, {
     message: 'Either swimlanes or columns is required',

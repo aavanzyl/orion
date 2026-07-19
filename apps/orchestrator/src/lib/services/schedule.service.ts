@@ -211,12 +211,14 @@ export class ScheduleService {
     const config = await loadProjectConfig(configRoot, project.configPath).catch(() => null);
 
     const agentNode = config?.workflow.nodes.find((n) => n.type === 'agent');
-    const provider = agentNode?.provider ?? DEFAULT_PROVIDER;
+    const rawProvider = agentNode?.provider ?? DEFAULT_PROVIDER;
     const model = agentNode?.model ?? DEFAULT_MODEL;
-    const baseUrl = agentNode?.baseUrl ?? this.c.env.codexBaseUrl;
     const nodeConfig = agentNode?.config;
 
-    const harness = this.c.harnesses.get(provider);
+    const { resolvedProvider, harness, baseUrl } = await this.resolveProvider(
+      rawProvider,
+      agentNode?.baseUrl,
+    );
 
     const branch = `${BRANCH_PREFIX}/${schedule.id.slice(0, 8)}-${randomSuffix()}`;
     const { workspace, cleanup } = await this.workspaces.prepare(
@@ -256,7 +258,7 @@ export class ScheduleService {
         workingDirectory: workspace.rootPath,
         model,
         baseUrl,
-        apiKey: this.c.env.codexApiKey,
+        apiKey: await this.resolveApiKey(resolvedProvider),
         mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
         config: nodeConfig,
       });
@@ -360,6 +362,79 @@ export class ScheduleService {
 
   private computeNextFire(expression: string, from: Date = new Date()): Date {
     return parseExpression(expression, { currentDate: from }).next().toDate();
+  }
+
+  /**
+   * Resolve a provider name (from the project workflow config) to an actual
+   * harness instance, harness key, and base URL. When the name is a known
+   * harness (e.g. "codex") it is used directly; otherwise a DB provider record
+   * is consulted to find the backing harness and its stored base URL.
+   */
+  private async resolveProvider(
+    providerName: string,
+    nodeBaseUrl?: string,
+  ): Promise<{
+    resolvedProvider: string;
+    harness: import('@orion/harness-core').AgentProvider;
+    baseUrl?: string;
+  }> {
+    let resolvedProvider = providerName;
+    let harness: import('@orion/harness-core').AgentProvider | undefined;
+    let baseUrl: string | undefined = nodeBaseUrl;
+
+    if (this.c.harnesses.has(providerName)) {
+      harness = this.c.harnesses.get(providerName);
+      baseUrl =
+        baseUrl ??
+        (providerName === 'codex'
+          ? this.c.env.codexBaseUrl
+          : providerName === 'claude'
+            ? this.c.env.claudeBaseUrl
+            : undefined);
+    } else {
+      const dbProvider = await this.resolveDbProvider(providerName);
+      if (dbProvider?.harness && this.c.harnesses.has(dbProvider.harness)) {
+        resolvedProvider = dbProvider.harness;
+        harness = this.c.harnesses.get(dbProvider.harness);
+        baseUrl =
+          baseUrl ??
+          dbProvider.baseUrl ??
+          (dbProvider.harness === 'codex'
+            ? this.c.env.codexBaseUrl
+            : dbProvider.harness === 'claude'
+              ? this.c.env.claudeBaseUrl
+              : undefined);
+      }
+    }
+
+    if (!harness) {
+      const keys = this.c.harnesses.keys();
+      if (keys.length === 0) throw new Error('No harness providers registered');
+      harness = this.c.harnesses.get(keys[0]);
+    }
+
+    return { resolvedProvider, harness, baseUrl };
+  }
+
+  private async resolveDbProvider(providerKey: string) {
+    const allProviders = await this.c.providers.list().catch(() => []);
+    return allProviders.find((p) => p.key === providerKey);
+  }
+
+  private async resolveApiKey(harnessKey: string): Promise<string | undefined> {
+    const allProviders = await this.c.providers.list().catch(() => []);
+    const matching = allProviders.find((p) => p.harness === harnessKey);
+    if (matching) {
+      const stored = await this.c.providers.getApiKey(matching.id).catch(() => null);
+      if (stored) {
+        return this.c.env.providerEncryptionSalt
+          ? decrypt(stored, this.c.env.providerEncryptionSalt)
+          : stored;
+      }
+    }
+    if (harnessKey === 'codex') return this.c.env.codexApiKey;
+    if (harnessKey === 'claude') return this.c.env.claudeApiKey;
+    return undefined;
   }
 }
 

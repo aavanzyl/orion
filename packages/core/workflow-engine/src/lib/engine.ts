@@ -65,7 +65,7 @@ export function isConditionSkipped(node: Pick<RunNode, 'status' | 'output'>): bo
 
 /** Outcome of processing a single ready node during one scheduling pass. */
 interface NodeStepResult {
-  result: 'completed' | 'waiting' | 'failed' | 'skipped';
+  result: 'completed' | 'waiting' | 'failed' | 'skipped' | 'cancelled';
   threadId?: string;
 }
 
@@ -76,6 +76,7 @@ interface NodeStepResult {
  */
 export class WorkflowEngine {
   private readonly executors: Map<string, NodeExecutor>;
+  private readonly transitionCountsByRun = new Map<string, Map<string, number>>();
 
   constructor(private readonly deps: EngineDeps) {
     this.executors = new Map(deps.executors.map((e) => [e.type, e]));
@@ -108,6 +109,11 @@ export class WorkflowEngine {
   ): Promise<WorkflowRun> {
     let current = await this.setRunStatus(run, 'running');
 
+    if (!this.transitionCountsByRun.has(run.id)) {
+      this.transitionCountsByRun.set(run.id, new Map());
+    }
+    const counts = this.transitionCountsByRun.get(run.id)!;
+
     for (;;) {
       const nodes = await this.deps.store.listNodes(current.id);
       const byKey = new Map(nodes.map((n) => [n.nodeKey, n]));
@@ -118,6 +124,7 @@ export class WorkflowEngine {
           type: 'log',
           payload: { message: 'Run failed: one or more nodes failed', transition: 'run.failed' },
         });
+        this.transitionCountsByRun.delete(current.id);
         return this.setRunStatus(current, 'failed');
       }
       if (nodes.every((n) => TERMINAL_NODE.has(n.status))) {
@@ -126,6 +133,7 @@ export class WorkflowEngine {
           type: 'log',
           payload: { message: 'All nodes have reached a terminal state', transition: 'run.completed' },
         });
+        this.transitionCountsByRun.delete(current.id);
         return this.setRunStatus(current, 'completed');
       }
 
@@ -139,6 +147,7 @@ export class WorkflowEngine {
               type: 'log',
               payload: { message: `Budget exceeded: maxTokens (${budget.maxTokens}) limit reached`, transition: 'budget.exceeded' },
             });
+            this.transitionCountsByRun.delete(current.id);
             return this.setRunStatus(current, 'failed', `Budget exceeded: maxTokens limit (${budget.maxTokens}) reached`);
           }
           if (budget.maxCostUsd && (latest.costUsd ?? 0) >= budget.maxCostUsd) {
@@ -147,6 +156,7 @@ export class WorkflowEngine {
               type: 'log',
               payload: { message: `Budget exceeded: maxCostUsd (${budget.maxCostUsd}) limit reached`, transition: 'budget.exceeded' },
             });
+            this.transitionCountsByRun.delete(current.id);
             return this.setRunStatus(current, 'failed', `Budget exceeded: maxCostUsd limit (${budget.maxCostUsd}) reached`);
           }
         }
@@ -190,13 +200,19 @@ export class WorkflowEngine {
 
       const results = await Promise.all(
         ready.map((node) =>
-          this.processNode(current, node, config, workspace, signal, nodeOutputs, byKey),
+          this.processNode(current, node, config, workspace, signal, nodeOutputs, byKey, counts),
         ),
       );
 
       // A hard failure (one that isn't opted into continueOnError) fails the run.
       if (results.some((r) => r.result === 'failed')) {
+        this.transitionCountsByRun.delete(current.id);
         return this.setRunStatus(current, 'failed');
+      }
+
+      if (results.some((r) => r.result === 'cancelled')) {
+        this.transitionCountsByRun.delete(current.id);
+        return current;
       }
 
       const threaded = results.find((r) => r.threadId);
@@ -219,6 +235,7 @@ export class WorkflowEngine {
     signal: AbortSignal | undefined,
     nodeOutputs: Record<string, unknown>,
     byKey: Map<string, RunNode>,
+    counts: Map<string, number>,
   ): Promise<NodeStepResult> {
     const nodeConfig = config.workflow.nodes.find((c) => c.id === node.nodeKey);
     if (!nodeConfig) {
@@ -283,6 +300,33 @@ export class WorkflowEngine {
       durationMs: number;
     };
 
+    if (outcome.status === 'cancelled') {
+      await this.deps.store.updateNode(node.id, {
+        status: 'cancelled',
+        completedAt: new Date().toISOString(),
+        ...telemetry,
+      });
+      await this.deps.emit({
+        runId: run.id,
+        nodeId: node.id,
+        type: 'node.cancelled',
+        payload: { nodeKey: node.nodeKey },
+      });
+      await this.deps.emit({
+        runId: run.id,
+        nodeId: node.id,
+        type: 'transition',
+        payload: { nodeKey: node.nodeKey, from: node.status, to: 'cancelled' },
+      });
+      await this.deps.emit({
+        runId: run.id,
+        nodeId: node.id,
+        type: 'log',
+        payload: { message: `Node "${node.nodeKey}" cancelled`, transition: 'node.cancelled', nodeKey: node.nodeKey },
+      });
+      return { result: 'cancelled' };
+    }
+
     if (outcome.status === 'failed') {
       if (nodeConfig.continueOnError) {
         await this.deps.store.updateNode(node.id, {
@@ -313,6 +357,35 @@ export class WorkflowEngine {
       }
 
       if (nodeConfig.onFailureTransitionTo) {
+        const limit = nodeConfig.onFailureTransitionLimit ?? 3;
+        const prev = counts.get(node.nodeKey) ?? 0;
+        const currentCount = prev + 1;
+        counts.set(node.nodeKey, currentCount);
+
+        if (currentCount > limit) {
+          const error = `${outcome.error} (onFailureTransitionTo limit (${limit}) reached)`;
+          await this.failNode(node, error, telemetry);
+          await this.deps.emit({
+            runId: run.id,
+            nodeId: node.id,
+            type: 'node.failed',
+            payload: { nodeKey: node.nodeKey, error },
+          });
+          await this.deps.emit({
+            runId: run.id,
+            nodeId: node.id,
+            type: 'transition',
+            payload: { nodeKey: node.nodeKey, from: node.status, to: 'failed', error },
+          });
+          await this.deps.emit({
+            runId: run.id,
+            nodeId: node.id,
+            type: 'log',
+            payload: { message: `Node "${node.nodeKey}" onFailureTransitionTo limit (${limit}) reached: ${outcome.error}`, transition: 'node.failed.transition.limit', nodeKey: node.nodeKey, error, limit },
+          });
+          return { result: 'failed' };
+        }
+
         const targetKey = nodeConfig.onFailureTransitionTo;
         const targetNode = byKey.get(targetKey);
         if (targetNode) {
@@ -369,12 +442,7 @@ export class WorkflowEngine {
         const swimlanes = config.board.swimlanes ?? [];
         if (swimlanes.includes(targetKey)) {
           await this.deps.moveTicket(run.ticketId, targetKey);
-          await this.deps.store.updateNode(node.id, {
-            status: 'skipped',
-            error: outcome.error,
-            completedAt: new Date().toISOString(),
-            ...telemetry,
-          });
+          await this.failNode(node, outcome.error, telemetry);
           await this.deps.emit({
             runId: run.id,
             nodeId: node.id,
@@ -385,9 +453,9 @@ export class WorkflowEngine {
             runId: run.id,
             nodeId: node.id,
             type: 'log',
-            payload: { message: `Node "${node.nodeKey}" failed, moving ticket to swimlane "${targetKey}": ${outcome.error}`, transition: 'node.failed.transition.swimlane', nodeKey: node.nodeKey, targetSwimlane: targetKey, error: outcome.error },
+            payload: { message: `Node "${node.nodeKey}" failed, ticket moved to swimlane "${targetKey}" (run failed — move ticket back to retry): ${outcome.error}`, transition: 'node.failed.transition.swimlane', nodeKey: node.nodeKey, targetSwimlane: targetKey, error: outcome.error },
           });
-          return { result: 'skipped' };
+          return { result: 'failed' };
         }
 
         await this.failNode(
@@ -853,10 +921,16 @@ export class WorkflowEngine {
       if (timedOut) {
         return { status: 'failed', error: `node timed out after ${timeoutMs}ms`, telemetry: { ...outcome.telemetry, timedOut: true } };
       }
+      if (outerSignal?.aborted) {
+        return { status: 'cancelled' };
+      }
       return outcome;
     } catch (err) {
       if (timedOut) {
         return { status: 'failed', error: `node timed out after ${timeoutMs}ms`, telemetry: { timedOut: true } };
+      }
+      if (outerSignal?.aborted) {
+        return { status: 'cancelled' };
       }
       return { status: 'failed', error: err instanceof Error ? err.message : String(err) };
     } finally {

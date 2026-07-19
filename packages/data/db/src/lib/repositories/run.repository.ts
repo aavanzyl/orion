@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, lte, ne, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, sql, type SQL } from 'drizzle-orm';
 import type {
   RunId,
   RunNode,
@@ -284,9 +284,9 @@ export class RunRepository {
   }
 
   /**
-   * Reset every non-completed node of a run back to `pending`, clearing its
-   * error/output/timestamps. Completed nodes are preserved so a retry resumes
-   * from the last successful step instead of redoing finished work.
+   * Reset every node of a run back to `pending`, clearing error/output/timestamps.
+   * A retry always recreates the worktree from the base branch, so all nodes
+   * must re-execute — even previously completed ones.
    */
   async resetForRetry(runId: RunId): Promise<void> {
     await this.db
@@ -295,13 +295,14 @@ export class RunRepository {
         status: 'pending',
         error: null,
         output: null,
+        input: null,
         attempts: null,
         timedOut: null,
         durationMs: null,
         startedAt: null,
         completedAt: null,
       })
-      .where(and(eq(runNodes.runId, runId), ne(runNodes.status, 'completed')));
+      .where(eq(runNodes.runId, runId));
   }
 
   async updateNode(id: string, patch: Partial<Omit<RunNode, 'id' | 'runId'>>): Promise<RunNode> {

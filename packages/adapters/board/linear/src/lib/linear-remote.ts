@@ -29,7 +29,21 @@ export class LinearRemoteBoardClient implements RemoteBoardClient {
   }
 
   async listIssues(containerId: string): Promise<RemoteIssue[]> {
-    return this.client.listIssues(containerId);
+    const issues = await this.client.listIssues(containerId);
+    return issues.map((dto) => ({
+      id: dto.id,
+      identifier: dto.identifier,
+      title: dto.title,
+      description: dto.description,
+      stateId: dto.stateId,
+      stateName: dto.stateName,
+      url: dto.url,
+      priority: dto.priority,
+      dueDate: dto.dueDate,
+      startedAt: dto.startedAt,
+      labels: dto.labels,
+      epic: dto.epic,
+    }));
   }
 
   async updateIssueState(issueId: string, stateId: string): Promise<void> {

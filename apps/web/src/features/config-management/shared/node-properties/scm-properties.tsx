@@ -141,6 +141,28 @@ export function ScmProperties({ data, onChange }: NodeTypeEditorProps) {
               spellCheck={false}
             />
           </div>
+
+          {data.agentGenerated && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <FieldLabel>Provider</FieldLabel>
+                <Input
+                  value={data.provider ?? ''}
+                  onChange={(e) => onChange({ provider: e.target.value || undefined })}
+                  placeholder="e.g. codex"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <FieldLabel>Model</FieldLabel>
+                <Input
+                  value={data.model ?? ''}
+                  onChange={(e) => onChange({ model: e.target.value || undefined })}
+                  placeholder="e.g. gpt-5-codex"
+                />
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col gap-1.5">
             <FieldLabel>Base branch</FieldLabel>
             <Input

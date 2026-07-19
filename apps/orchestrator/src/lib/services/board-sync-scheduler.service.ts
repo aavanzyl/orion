@@ -64,7 +64,7 @@ export class BoardSyncScheduler {
         if (conn.direction === 'push') continue;
         if (this.dueIn(conn, now) > 0) continue;
         try {
-          await this.c.boardSync.syncNow(conn.projectId);
+          await this.c.boardSync.syncNow(conn.projectId, 'auto');
         } catch (err) {
           console.error(
             `[ orion orchestrator ] board sync failed for project ${conn.projectId}:`,

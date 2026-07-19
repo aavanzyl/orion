@@ -17,10 +17,16 @@ COPY . .
 RUN npm install --no-audit --no-fund
 RUN npx nx build @orion/orchestrator
 
+# Create non-root user for security and Claude Code compatibility.
+RUN groupadd -r orion && useradd -r -g orion -m -d /data -s /bin/bash orion \
+  && chown -R orion:orion /app /data
+
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3333
 
 EXPOSE 3333
+
+USER orion
 
 CMD ["node", "apps/orchestrator/dist/main.mjs"]

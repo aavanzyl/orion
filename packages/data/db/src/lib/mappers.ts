@@ -1,5 +1,8 @@
 import type {
   BoardConnection,
+  BoardSyncLog,
+  BoardSyncLogStatus,
+  BoardSyncTrigger,
   ChatMessage,
   ChatRole,
   ChatUsage,
@@ -34,6 +37,7 @@ import type { RunEventType } from '@orion/models';
 import type {
   appSettings,
   boardConnections,
+  boardSyncLogs,
   chatMessages,
   codeIndexes,
   conversations,
@@ -64,6 +68,7 @@ type EvaluationRow = typeof runEvaluations.$inferSelect;
 type ConversationRow = typeof conversations.$inferSelect;
 type ChatMessageRow = typeof chatMessages.$inferSelect;
 type BoardConnectionRow = typeof boardConnections.$inferSelect;
+type BoardSyncLogRow = typeof boardSyncLogs.$inferSelect;
 type ScheduleRow = typeof schedules.$inferSelect;
 type CodeIndexRow = typeof codeIndexes.$inferSelect;
 type McpServerRow = typeof mcpServers.$inferSelect;
@@ -135,6 +140,7 @@ export function toEpic(row: EpicRow): Epic {
     title: row.title,
     description: row.description,
     color: row.color,
+    externalId: opt(row.externalId),
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
   };
@@ -312,6 +318,22 @@ export function toBoardConnection(row: BoardConnectionRow): BoardConnection {
     lastSyncedAt: row.lastSyncedAt ? iso(row.lastSyncedAt) : undefined,
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
+  };
+}
+
+export function toBoardSyncLog(row: BoardSyncLogRow): BoardSyncLog {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    startedAt: iso(row.startedAt),
+    finishedAt: iso(row.finishedAt),
+    status: row.status as BoardSyncLogStatus,
+    imported: row.imported,
+    updated: row.updated,
+    epicsLinked: row.epicsLinked,
+    error: row.error,
+    durationMs: row.durationMs,
+    trigger: row.trigger as BoardSyncTrigger,
   };
 }
 

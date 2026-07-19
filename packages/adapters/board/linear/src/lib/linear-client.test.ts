@@ -11,6 +11,10 @@ class FakeLinearClient implements LinearClientLike {
       stateId: 'state-todo',
       stateName: 'Todo',
       url: 'https://linear.app/issue/TST-1',
+      priority: 1,
+      dueDate: '2026-08-01',
+      labels: [{ name: 'frontend', color: '#ff0000' }],
+      epic: { id: 'proj-1', name: 'Platform', color: '#7c3aed' },
     },
     {
       id: 'issue-2',
@@ -20,6 +24,9 @@ class FakeLinearClient implements LinearClientLike {
       stateId: 'state-in-progress',
       stateName: 'In Progress',
       url: 'https://linear.app/issue/TST-2',
+      priority: 3,
+      startedAt: '2026-07-01T12:00:00.000Z',
+      labels: [{ name: 'backend' }],
     },
   ];
 
@@ -77,6 +84,19 @@ describe('LinearBoardClient — fake client', () => {
     expect(issues[0].stateId).toBe('state-todo');
     expect(issues[0].stateName).toBe('Todo');
     expect(issues[0].url).toMatch(/linear\.app/);
+  });
+
+  it('returns enriched fields: priority, dueDate, labels, epic', async () => {
+    const client = new FakeLinearClient();
+    const issues = await client.listIssues('team-1');
+    expect(issues[0].priority).toBe(1);
+    expect(issues[0].dueDate).toBe('2026-08-01');
+    expect(issues[0].labels).toEqual([{ name: 'frontend', color: '#ff0000' }]);
+    expect(issues[0].epic).toEqual({ id: 'proj-1', name: 'Platform', color: '#7c3aed' });
+    expect(issues[1].priority).toBe(3);
+    expect(issues[1].startedAt).toBe('2026-07-01T12:00:00.000Z');
+    expect(issues[1].labels).toEqual([{ name: 'backend' }]);
+    expect(issues[1].epic).toBeUndefined();
   });
 
   it('returns workflow states', async () => {

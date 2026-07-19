@@ -1,8 +1,10 @@
-import { eq } from 'drizzle-orm';
-import type { BoardConnection, ProjectId, UpsertBoardConnectionInput } from '@orion/models';
+import { desc, eq, inArray } from 'drizzle-orm';
+import type { BoardConnection, BoardSyncLog, ProjectId, UpsertBoardConnectionInput } from '@orion/models';
 import type { Database } from '../client.js';
-import { boardConnections } from '../schema.js';
-import { toBoardConnection } from '../mappers.js';
+import { boardConnections, boardSyncLogs } from '../schema.js';
+import { toBoardConnection, toBoardSyncLog } from '../mappers.js';
+
+const MAX_LOGS_PER_PROJECT = 50;
 
 export class BoardConnectionRepository {
   constructor(private readonly db: Database) {}
@@ -84,5 +86,63 @@ export class BoardConnectionRepository {
       .update(boardConnections)
       .set({ lastSyncedAt: date, updatedAt: new Date() })
       .where(eq(boardConnections.projectId, projectId));
+  }
+
+  // --- Sync logs ---
+
+  async insertSyncLog(
+    log: Pick<BoardSyncLog, 'projectId' | 'startedAt' | 'finishedAt' | 'status' | 'imported' | 'updated' | 'epicsLinked' | 'error' | 'durationMs' | 'trigger'>,
+  ): Promise<BoardSyncLog> {
+    const [row] = await this.db
+      .insert(boardSyncLogs)
+      .values({
+        projectId: log.projectId,
+        startedAt: new Date(log.startedAt),
+        finishedAt: new Date(log.finishedAt),
+        status: log.status,
+        imported: log.imported,
+        updated: log.updated,
+        epicsLinked: log.epicsLinked,
+        error: log.error,
+        durationMs: log.durationMs,
+        trigger: log.trigger,
+      })
+      .returning();
+
+    await this.pruneSyncLogs(log.projectId);
+
+    return toBoardSyncLog(row);
+  }
+
+  async getSyncLogs(projectId: ProjectId, limit: number): Promise<BoardSyncLog[]> {
+    const rows = await this.db
+      .select()
+      .from(boardSyncLogs)
+      .where(eq(boardSyncLogs.projectId, projectId))
+      .orderBy(desc(boardSyncLogs.startedAt))
+      .limit(limit);
+    return rows.map(toBoardSyncLog);
+  }
+
+  async getLatestSyncLog(projectId: ProjectId): Promise<BoardSyncLog | null> {
+    const [row] = await this.db
+      .select()
+      .from(boardSyncLogs)
+      .where(eq(boardSyncLogs.projectId, projectId))
+      .orderBy(desc(boardSyncLogs.startedAt))
+      .limit(1);
+    return row ? toBoardSyncLog(row) : null;
+  }
+
+  private async pruneSyncLogs(projectId: ProjectId): Promise<void> {
+    const existing = await this.getSyncLogs(projectId, 2000);
+    if (existing.length <= MAX_LOGS_PER_PROJECT) return;
+
+    const idsToDelete = existing.slice(MAX_LOGS_PER_PROJECT).map((l) => l.id);
+    if (idsToDelete.length === 0) return;
+
+    await this.db
+      .delete(boardSyncLogs)
+      .where(inArray(boardSyncLogs.id, idsToDelete));
   }
 }

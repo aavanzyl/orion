@@ -83,7 +83,7 @@ export const openPullRequest: ScmAction = async (ctx, { scm, tickets, agentText 
 
   for (const repo of ctx.workspace.repos) {
     if (await scm.hasChanges(repo.path)) {
-      await scm.commitAll(repo.path, `Orion: ${prTitle}`);
+      await scm.commitAll(repo.path, prTitle);
     }
     const base = prBase ?? repo.baseBranch;
     if ((await scm.commitsAhead(repo.path, base)) === 0) {

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectConfig } from '@orion/models';
-import { resolveWorkflowForTicketType, resolveIssueTypes } from './derive-triggers.js';
+import {
+  resolveWorkflowForTicketType,
+  resolveIssueTypes,
+  resolveTriggerWorkflowForSwimlane,
+} from './derive-triggers.js';
 
 const base: ProjectConfig = {
   project: { name: 'p', defaultBranch: 'main' },
@@ -63,6 +67,88 @@ describe('resolveWorkflowForTicketType', () => {
 
   it('returns default workflow when no config and no workflowName', () => {
     expect(resolveWorkflowForTicketType(base)).toBe('default');
+  });
+});
+
+describe('resolveTriggerWorkflowForSwimlane', () => {
+  it('returns the workflow name when a zero-dependency start node matches the swimlane', () => {
+    expect(resolveTriggerWorkflowForSwimlane(base, 'in_progress')).toBe('default');
+  });
+
+  it('returns null when the swimlane belongs to a node with dependencies', () => {
+    expect(resolveTriggerWorkflowForSwimlane(base, 'review')).toBeNull();
+  });
+
+  it('returns null when no node is associated with the swimlane', () => {
+    expect(resolveTriggerWorkflowForSwimlane(base, 'backlog')).toBeNull();
+    expect(resolveTriggerWorkflowForSwimlane(base, 'triage')).toBeNull();
+  });
+
+  it('resolves the workflow via the ticket type before matching', () => {
+    const config: ProjectConfig = {
+      ...base,
+      issueTypes: [
+        { name: 'feature', label: 'Feature', workflow: 'feature-flow' },
+        { name: 'bug', label: 'Bug', workflow: 'bug-fix' },
+      ],
+      workflows: {
+        'feature-flow': {
+          name: 'feature-flow',
+          nodes: [{ id: 'do', type: 'shell', script: 'x', swimlane: 'triage' }],
+        },
+        'bug-fix': {
+          name: 'bug-fix',
+          nodes: [
+            { id: 'fix', type: 'shell', script: 'y', swimlane: 'in_progress' },
+            { id: 'check', type: 'approval', dependsOn: ['fix'], swimlane: 'review' },
+          ],
+        },
+      },
+    };
+    expect(resolveTriggerWorkflowForSwimlane(config, 'triage', 'feature')).toBe('feature-flow');
+    expect(resolveTriggerWorkflowForSwimlane(config, 'in_progress', 'bug')).toBe('bug-fix');
+    expect(resolveTriggerWorkflowForSwimlane(config, 'in_progress', 'feature')).toBeNull();
+    expect(resolveTriggerWorkflowForSwimlane(config, 'review', 'bug')).toBeNull();
+  });
+
+  it('supports the explicit ticket workflowName override', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflows: {
+        hotfix: {
+          name: 'hotfix',
+          nodes: [{ id: 'patch', type: 'shell', script: 'z', swimlane: 'triage' }],
+        },
+      },
+    };
+    expect(resolveTriggerWorkflowForSwimlane(config, 'triage', undefined, 'hotfix')).toBe('hotfix');
+    expect(resolveTriggerWorkflowForSwimlane(config, 'triage')).toBeNull();
+  });
+
+  it('returns null when start nodes have no swimlane association', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflow: {
+        name: 'default',
+        nodes: [{ id: 'implement', type: 'agent', provider: 'codex' }],
+      },
+    };
+    expect(resolveTriggerWorkflowForSwimlane(config, 'backlog')).toBeNull();
+    expect(resolveTriggerWorkflowForSwimlane(config, 'in_progress')).toBeNull();
+  });
+
+  it('returns the actual main workflow name when issue-type ref is broken and falls back', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflow: {
+        name: 'default',
+        nodes: [{ id: 'implement', type: 'agent', provider: 'codex', swimlane: 'in_progress' }],
+      },
+      issueTypes: [
+        { name: 'feature', label: 'Feature', workflow: 'investigate-only' },
+      ],
+    };
+    expect(resolveTriggerWorkflowForSwimlane(config, 'in_progress', 'feature')).toBe('default');
   });
 });
 

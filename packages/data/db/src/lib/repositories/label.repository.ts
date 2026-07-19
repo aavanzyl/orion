@@ -1,4 +1,4 @@
-import { asc, eq, inArray } from 'drizzle-orm';
+import { asc, eq, inArray, sql } from 'drizzle-orm';
 import type { CreateLabelInput, Label, ProjectId } from '@orion/models';
 import type { Database } from '../client.js';
 import { labels } from '../schema.js';
@@ -30,6 +30,16 @@ export class LabelRepository {
     if (ids.length === 0) return [];
     const rows = await this.db.select().from(labels).where(inArray(labels.id, ids));
     return rows.map(toLabel);
+  }
+
+  async getByName(projectId: ProjectId, name: string): Promise<Label | null> {
+    const [row] = await this.db
+      .select()
+      .from(labels)
+      .where(
+        sql`${labels.projectId} = ${projectId} AND LOWER(${labels.name}) = LOWER(${name})`,
+      );
+    return row ? toLabel(row) : null;
   }
 
   async create(input: CreateLabelInput): Promise<Label> {

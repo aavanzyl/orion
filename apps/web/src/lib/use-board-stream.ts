@@ -12,6 +12,10 @@ export function useBoardStream(projectId: string | null, onEvent: (event: { type
     const handler = (e: MessageEvent) => {
       try {
         const payload = JSON.parse(e.data) as { type: string; ticketId: string; column: string };
+        if (payload.type === 'sync.completed' || payload.type === 'sync.failed') {
+          onEventRef.current(payload);
+          return;
+        }
         onEventRef.current(payload);
       } catch {
         // ignore malformed frames
@@ -19,6 +23,9 @@ export function useBoardStream(projectId: string | null, onEvent: (event: { type
     };
 
     source.addEventListener('ticket.updated', handler as EventListener);
+    source.addEventListener('ticket.created', handler as EventListener);
+    source.addEventListener('sync.completed', handler as EventListener);
+    source.addEventListener('sync.failed', handler as EventListener);
 
     return () => source.close();
   }, [projectId]);

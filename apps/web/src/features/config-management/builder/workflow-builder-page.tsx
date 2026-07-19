@@ -62,6 +62,7 @@ import {
   NODE_TYPES,
   nextNodeKey,
   UNASSIGNED_LANE,
+  validateBuilderSettings,
   validateGraph,
   workflowToGraph,
   wouldCreateCycle,
@@ -75,6 +76,7 @@ import { SwimlaneLayer } from './swimlane-layer';
 import { DeletableEdge } from './deletable-edge';
 import { NodePropertiesPanel } from './node-properties-panel';
 import { WorkflowTemplateDialog } from '../shared/workflow-template-dialog';
+import { remapIssueTypeWorkflows } from '../config/config-model';
 
 const nodeTypes = { workflow: WorkflowNode };
 const edgeTypes = { deletable: DeletableEdge };
@@ -93,7 +95,6 @@ interface LoadedData {
   providers: Provider[];
   commandFiles: string[];
   swimlanes: string[];
-  triggerSwimlane?: string;
   workflows: string[];
   issueTypes?: IssueTypeConfig[];
   subWorkflows?: Record<string, WorkflowConfig>;
@@ -129,7 +130,6 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
   const [viewYaml, setViewYaml] = useState(false);
   const [skillCatalog, setSkillCatalog] = useState<SkillCatalogEntry[]>([]);
   const [boardSwimlanes, setBoardSwimlanes] = useState<string[]>(data.swimlanes);
-  const [triggerSwimlane, setTriggerSwimlane] = useState<string>(data.triggerSwimlane ?? '');
   const [projectName, setProjectName] = useState(data.projectSettings.name);
   const [defaultBranch, setDefaultBranch] = useState(data.projectSettings.defaultBranch);
   const [branchFormat, setBranchFormat] = useState(data.projectSettings.branchFormat ?? '');
@@ -371,10 +371,16 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
         for (const sw of detail.suggestedSwimlanes ?? []) {
           if (!mergedSwimlanes.includes(sw)) mergedSwimlanes.push(sw);
         }
+        const remappedIssueTypes = remapIssueTypeWorkflows(
+          issueTypes.length > 0 ? issueTypes : undefined,
+          nextName,
+          subWorkflows as unknown as Record<string, unknown> | undefined,
+        );
         const laid = layoutSwimlanes(graph.nodes, graph.edges, mergedSwimlanes);
         setBoardSwimlanes(mergedSwimlanes);
         setWorkflowName(nextName);
         if (wf.budget) setBudget(wf.budget);
+        if (remappedIssueTypes) setIssueTypes(remappedIssueTypes);
         setNodes(laid.nodes);
         setEdges(graph.edges.map((e) => ({ ...e, type: 'deletable' })));
         setSelectedId(null);
@@ -383,7 +389,7 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
         toast.error((e as Error).message);
       }
     },
-    [boardSwimlanes, workflowName, setNodes, setEdges, projectId],
+    [boardSwimlanes, workflowName, setNodes, setEdges, projectId, issueTypes, subWorkflows],
   );
 
   const copyYaml = useCallback(async () => {
@@ -402,7 +408,7 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
     const yaml = buildFullYaml(rawYaml, {
       project: { name: projectName, defaultBranch: defaultBranch || 'main', branchFormat: branchFormat || undefined },
       workflow: mainWorkflow,
-      board: { swimlanes: boardSwimlanes, ...(triggerSwimlane && triggerSwimlane !== '__none__' ? { triggerSwimlane } : {}) },
+      board: { swimlanes: boardSwimlanes },
       subWorkflows: Object.keys(updatedSubWorkflows).length > 0 ? updatedSubWorkflows : undefined,
       issueTypes: issueTypes.length > 0 ? issueTypes : undefined,
     });
@@ -412,10 +418,13 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
     } catch (e) {
       toast.error((e as Error).message);
     }
-  }, [workflowName, nodes, edges, budget, rawYaml, projectName, defaultBranch, branchFormat, boardSwimlanes, triggerSwimlane, issueTypes, subWorkflows, activeWorkflowKey]);
+  }, [workflowName, nodes, edges, budget, rawYaml, projectName, defaultBranch, branchFormat, boardSwimlanes, issueTypes, subWorkflows, activeWorkflowKey]);
 
   const save = useCallback(async () => {
-    const issues = validateGraph(nodes);
+    const issues = [
+      ...validateGraph(nodes),
+      ...validateBuilderSettings(issueTypes, workflowName, subWorkflows),
+    ];
     if (issues.length > 0) {
       toast.error(issues[0]);
       return;
@@ -435,7 +444,7 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
     const yaml = buildFullYaml(rawYaml, {
       project: { name: projectName, defaultBranch: defaultBranch || 'main', branchFormat: branchFormat || undefined },
       workflow: mainWorkflow,
-      board: { swimlanes: boardSwimlanes, ...(triggerSwimlane && triggerSwimlane !== '__none__' ? { triggerSwimlane } : {}) },
+      board: { swimlanes: boardSwimlanes },
       subWorkflows: Object.keys(updatedSubWorkflows).length > 0 ? updatedSubWorkflows : undefined,
       issueTypes: issueTypes.length > 0 ? issueTypes : undefined,
     });
@@ -710,26 +719,6 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
                 <PlusIcon data-icon="inline-start" />
                 Add swimlane
               </Button>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-xs text-muted-foreground">Auto-trigger swimlane</Label>
-                <p className="text-[11px] text-muted-foreground">
-                  Moving a ticket to this swimlane auto-starts a workflow when the ticket has no prior runs.
-                </p>
-                <Select
-                  value={triggerSwimlane}
-                  onValueChange={setTriggerSwimlane}
-                >
-                  <SelectTrigger className="h-8">
-                    <SelectValue placeholder="None (disabled)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">None (disabled)</SelectItem>
-                    {boardSwimlanes.filter(Boolean).map((sw) => (
-                      <SelectItem key={sw} value={sw}>{sw}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
             </TabsContent>
             <TabsContent value="issueTypes" className="mt-4 flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
@@ -995,7 +984,7 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
                 return buildFullYaml(rawYaml, {
                   project: { name: projectName, defaultBranch: defaultBranch || 'main', branchFormat: branchFormat || undefined },
                   workflow: mainWorkflow,
-                  board: { swimlanes: boardSwimlanes, ...(triggerSwimlane && triggerSwimlane !== '__none__' ? { triggerSwimlane } : {}) },
+                  board: { swimlanes: boardSwimlanes },
                   subWorkflows: Object.keys(updatedSubWorkflows).length > 0 ? updatedSubWorkflows : undefined,
                   issueTypes: issueTypes.length > 0 ? issueTypes : undefined,
                 });
@@ -1034,7 +1023,6 @@ export function WorkflowBuilderPage() {
           api.getRawConfig(projectId),
         ]);
         let swimlanes: string[] = [];
-        let triggerSwimlaneVal: string | undefined;
         let workflows: string[] = [];
         let budget: BudgetConfig | undefined;
         let issueTypes: IssueTypeConfig[] | undefined;
@@ -1047,7 +1035,6 @@ export function WorkflowBuilderPage() {
         try {
           const config = await api.getProjectConfig(projectId);
           swimlanes = config.board?.swimlanes ?? [];
-          triggerSwimlaneVal = config.board?.triggerSwimlane;
           workflows = config.workflows ?? [];
           budget = config.workflow?.budget;
           workflowName = config.workflow?.name ?? 'default';
@@ -1065,10 +1052,6 @@ export function WorkflowBuilderPage() {
                 if (typeof p.name === 'string') projectName = p.name;
                 if (typeof p.defaultBranch === 'string') defaultBranchVal = p.defaultBranch;
                 if (typeof p.branchFormat === 'string') branchFormatVal = p.branchFormat;
-              }
-              if (!triggerSwimlaneVal && parsed.board && typeof parsed.board === 'object' && !Array.isArray(parsed.board)) {
-                const b = parsed.board as Record<string, unknown>;
-                if (typeof b.triggerSwimlane === 'string') triggerSwimlaneVal = b.triggerSwimlane;
               }
             }
           }
@@ -1124,7 +1107,6 @@ export function WorkflowBuilderPage() {
           providers,
           commandFiles,
           swimlanes,
-          triggerSwimlane: triggerSwimlaneVal,
           workflows,
           issueTypes,
           subWorkflows: subWorkflowConfigs,

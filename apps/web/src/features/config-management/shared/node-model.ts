@@ -133,6 +133,7 @@ export type WorkflowNodeConfigLike = WorkflowNodeConfig & {
  *  Legacy `notify`/`comment` types are migrated to the unified `message` type. */
 export function coerceNodeType(value: unknown): WorkflowNodeType {
   if (value === 'notify' || value === 'comment') return 'message';
+  if (value === 'workflow') return 'workflow';
   return (NODE_TYPES as readonly string[]).includes(value as string)
     ? (value as WorkflowNodeType)
     : 'agent';
@@ -219,11 +220,16 @@ export function dataToNodeConfig(
   if (isScm && data.action?.trim()) node.action = data.action.trim();
   if (isScm && data.action === 'open_pull_request' && data.agentGenerated) {
     node.agentGenerated = true;
+    if (data.provider?.trim()) node.provider = data.provider.trim();
+    if (data.model?.trim()) node.model = data.model.trim();
   }
   if (isShell && data.script?.trim()) node.script = data.script.trim();
   if (isMessage) {
     node.messageTarget = data.messageTarget ?? 'notify';
-    if (data.agentGenerated) node.agentGenerated = true;
+    if (data.agentGenerated) {
+      node.agentGenerated = true;
+      if (data.model?.trim()) node.model = data.model.trim();
+    }
     if (data.message?.trim()) node.message = data.message.trim();
     if (node.messageTarget === 'notify') {
       if (data.provider?.trim()) node.provider = data.provider.trim();
@@ -243,6 +249,7 @@ export function dataToNodeConfig(
   if (isGraphql && data.query?.trim()) node.query = data.query.trim();
   if (isGraphql && data.variables?.trim()) node.variables = data.variables.trim();
   if ((isHttp || isGraphql) && data.token?.trim()) node.token = data.token.trim();
+  if (data.type === 'workflow' && data.workflow?.trim()) node.workflow = data.workflow.trim();
   if (data.swimlane?.trim()) node.swimlane = data.swimlane.trim();
   if (supportsRetryPolicy && typeof data.retries === 'number') node.retries = data.retries;
   if (supportsRetryPolicy && typeof data.retryDelayMs === 'number') {

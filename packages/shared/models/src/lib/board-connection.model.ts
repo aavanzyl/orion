@@ -6,6 +6,23 @@ export type BoardSyncDirection = 'pull' | 'push' | 'both';
 /** Providers that can back a board connection. */
 export type BoardConnectionProvider = 'linear' | 'jira' | 'trello' | 'github';
 
+export type BoardSyncLogStatus = 'completed' | 'failed';
+export type BoardSyncTrigger = 'manual' | 'auto';
+
+export interface BoardSyncLog {
+  id: string;
+  projectId: ProjectId;
+  startedAt: string;
+  finishedAt: string;
+  status: BoardSyncLogStatus;
+  imported: number;
+  updated: number;
+  epicsLinked: number;
+  error: string | null;
+  durationMs: number;
+  trigger: BoardSyncTrigger;
+}
+
 export interface BoardConnection {
   id: string;
   projectId: ProjectId;

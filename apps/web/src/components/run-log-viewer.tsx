@@ -32,6 +32,7 @@ const EVENT_GROUPS: { label: string; types: RunEventType[] }[] = [
   { label: 'Node lifecycle', types: ['node.started', 'node.completed', 'node.failed', 'node.skipped', 'node.status', 'node.retry', 'node.iteration', 'node.matrix'] },
   { label: 'Transitions', types: ['run.transition', 'transition', 'ticket.moved', 'ticket.updated', 'ticket.created', 'ticket.deleted'] },
   { label: 'Agent messages', types: ['agent.message', 'agent.item', 'agent.usage'] },
+  { label: 'Comments', types: ['ticket.comment'] },
   { label: 'Run lifecycle', types: ['run.created', 'run.status', 'run.diff'] },
   { label: 'Ticket updates', types: ['ticket.moved', 'ticket.updated', 'ticket.created', 'ticket.deleted'] },
 ];
@@ -58,7 +59,7 @@ export function RunLogViewer({
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [eventGroup, setEventGroup] = useState<string>('Logs & transitions');
+  const [eventGroup, setEventGroup] = useState<string>('All events');
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -201,14 +202,21 @@ export function RunLogViewer({
           <div className="flex flex-col">
             {filtered.map((event, i) => {
               const payload = event.payload as Record<string, unknown> | null;
-              const message = typeof payload?.message === 'string' ? payload.message : undefined;
+              const message = typeof payload?.message === 'string' ? payload.message
+                : event.type === 'agent.message' && typeof payload?.text === 'string' ? payload.text
+                : event.type === 'ticket.comment' && typeof payload?.body === 'string' ? payload.body
+                : event.type === 'agent.usage' ? undefined
+                : typeof payload?.error === 'string' ? payload.error
+                : undefined;
               const nodeKey = typeof payload?.nodeKey === 'string' ? payload.nodeKey : undefined;
               const isLog = event.type === 'log';
+              const isComment = event.type === 'ticket.comment';
+              const isAgentMessage = event.type === 'agent.message';
 
               return (
                 <div
                   key={event.id ?? i}
-                  className={`flex items-start gap-2 border-b px-2 py-1.5 last:border-0 ${eventBg(event.type)}`}
+                  className={`flex items-start gap-2 border-b px-2 py-1.5 last:border-0 ${eventBg(event.type)} ${isComment ? 'bg-indigo-500/5 border-l-2 border-l-indigo-500' : ''}`}
                 >
                   <span className="mt-0.5 shrink-0">{eventIcon(event.type)}</span>
                   <div className="min-w-0 flex-1">
@@ -223,7 +231,14 @@ export function RunLogViewer({
                           {event.type}
                         </Badge>
                       )}
-                      {isLog ? (
+                      {isComment ? (
+                        <div className="w-full">
+                          <span className="text-xs font-medium text-indigo-500">Comment</span>
+                          <pre className="mt-0.5 whitespace-pre-wrap text-xs text-foreground/80">{message}</pre>
+                        </div>
+                      ) : isAgentMessage && message ? (
+                        <span className="text-xs text-foreground/80">{message}</span>
+                      ) : isLog ? (
                         <span className="text-xs text-foreground/80">{message ?? JSON.stringify(payload)}</span>
                       ) : (
                         <span className="text-xs text-muted-foreground">

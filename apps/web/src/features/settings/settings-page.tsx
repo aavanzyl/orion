@@ -855,6 +855,8 @@ export function SettingsPage() {
                       { key: 'scheduleFailed', label: 'A scheduled agent fails' },
                       { key: '__sync_header', label: 'Sync & Other' },
                       { key: 'syncComplete', label: 'A board sync completes' },
+                      { key: 'sync.completed', label: 'Board sync completed' },
+                      { key: 'sync.failed', label: 'Board sync failed' },
                       { key: 'approvalRequired', label: 'A run needs approval' },
                       { key: 'transitionIssue', label: 'A transition issue occurs' },
                       { key: 'nodeTransition', label: 'A node transitions state' },

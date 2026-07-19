@@ -1,7 +1,6 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { loadProjectConfig, flattenProjectConfig, resolveWorkflowForTicketType } from '@orion/config';
 import type { CreateRunEventInput, ProjectConfig, RunEventType, RunStatus, WorkflowRun } from '@orion/models';
+import { ACTIVE_RUN_STATUSES } from '@orion/models';
 import {
   WorkflowEngine,
   type NodeExecutor,
@@ -18,8 +17,7 @@ import { HttpNodeExecutor } from '../executors/http.executor.js';
 import { GraphqlNodeExecutor } from '../executors/graphql.executor.js';
 import { HarnessTextGenerator } from '../executors/agent-text.js';
 import { WorkspaceService } from './workspace.service.js';
-
-const execFileAsync = promisify(execFile);
+import { computeRunDiff } from './diff.js';
 
 interface ActiveRun {
   config: ProjectConfig;
@@ -102,17 +100,45 @@ export class RunService {
     return this.c.runs.getByTicket(ticketId);
   }
 
+  /**
+   * Error thrown when a ticket already has an active run. The caller can
+   * cancel the existing run and retry the operation.
+   */
+  static ActiveRunConflictError = class ActiveRunConflictError extends Error {
+    constructor(
+      public readonly activeRunId: string,
+      public readonly activeRunStatus: string,
+    ) {
+      super(`Ticket has an active run (${activeRunId}: ${activeRunStatus}). Cancel it first.`);
+      this.name = 'ActiveRunConflictError';
+    }
+  };
+
   /** Create a run for a ticket and begin (or queue) executing its workflow.
    *
    * The workflow is resolved from the ticket's type via the project's
    * `issueTypes` config. When `workflowName` is provided it serves as an
    * explicit override.
+   *
+   * When `opts.background` is true, only the run row is created and admitted
+   * synchronously; the heavy work (worktree creation + engine launch) fires
+   * in the background via `admit` so the caller gets an immediate response.
    */
-  async start(ticketId: string, workflowName?: string): Promise<WorkflowRun> {
+  async start(
+    ticketId: string,
+    workflowName?: string,
+    opts?: { background?: boolean },
+  ): Promise<WorkflowRun> {
     const ticket = await this.c.tickets.get(ticketId);
     if (!ticket) throw new Error(`Ticket ${ticketId} not found`);
     const project = await this.c.projects.get(ticket.projectId);
     if (!project) throw new Error(`Project ${ticket.projectId} not found`);
+
+    const allRuns = await this.c.runs.getByTicket(ticketId);
+    const activeRun = allRuns.find((r) => ACTIVE_RUN_STATUSES.has(r.status));
+    if (activeRun) {
+      throw new RunService.ActiveRunConflictError(activeRun.id, activeRun.status);
+    }
 
     const config = await this.workspaces
       .resolveConfigRoot(project)
@@ -132,13 +158,17 @@ export class RunService {
     await this.emitStatus(run.id, 'run.created', { ticketId });
     await this.emitStatus(run.id, 'log', { message: `Run created for workflow "${selected.name}"`, transition: 'run.created' });
 
+    if (opts?.background) {
+      void this.admit(run).catch(() => undefined);
+      return run;
+    }
     return this.admit(run);
   }
 
   /**
-   * Re-run a failed (or cancelled) run, resuming from the last successful node.
-   * Completed nodes are preserved; everything else is reset and re-executed in a
-   * fresh worktree.
+   * Re-run a failed (or cancelled) run. All nodes are reset to `pending` and
+   * the run gets a freshly prepared worktree from the base branch, so the full
+   * workflow re-executes.
    */
   async retry(runId: string): Promise<WorkflowRun> {
     const run = await this.c.runs.get(runId);
@@ -149,7 +179,7 @@ export class RunService {
     await this.cleanup(runId);
     await this.c.runs.resetForRetry(runId);
     const reset = await this.c.runs.update(runId, { status: 'created', error: null });
-    await this.emitStatus(runId, 'log', { message: 'Run retried', transition: 'run.retried' });
+    await this.emitStatus(runId, 'log', { message: 'Retry re-runs all nodes: the run workspace is recreated from the base branch', transition: 'run.retried' });
     return this.admit(reset);
   }
 
@@ -254,9 +284,9 @@ export class RunService {
       await this.emitStatus(run.id, 'log', { message: `Worktree prepared at "${workspace.rootPath}" on branch "${branch}"`, transition: 'run.launched' });
 
       const controller = new AbortController();
-      const agentText = new HarnessTextGenerator(this.c.harnesses, this.c.env);
+      const agentText = new HarnessTextGenerator(this.c.harnesses, this.c.providers, this.c.env);
       const executors: NodeExecutor[] = [
-        new AgentNodeExecutor(this.c.harnesses, this.c.tickets, this.c.env),
+        new AgentNodeExecutor(this.c.harnesses, this.c.tickets, this.c.providers, this.c.env),
         new ShellNodeExecutor(),
         new ApprovalNodeExecutor(),
         new ScmNodeExecutor(scm, this.c.tickets, agentText),
@@ -282,7 +312,7 @@ export class RunService {
 
       this.active.set(run.id, { config, workspace, engine, cleanupWorkspace, controller });
 
-      // Fresh run: materialize nodes. Retry: nodes already exist (and were reset).
+      // Fresh run: materialize nodes. Retry: nodes already exist (all were reset to pending).
       const existing = await this.c.runs.listNodes(run.id);
       if (existing.length === 0) {
         await engine.initializeNodes(run.id, config);
@@ -323,11 +353,17 @@ export class RunService {
         await this.notifyRun(result, 'info', 'Run completed');
       } else if (result.status === 'failed') {
         await this.aggregateArtifacts(run.id);
-        await this.emitStatus(run.id, 'log', { message: `Run failed: ${result.error ?? 'unknown error'}`, transition: 'run.failed' });
-        await this.notifyRun(result, 'error', 'Run failed', result.error);
+        const nodes = await this.c.runs.listNodes(run.id);
+        const failedNode = nodes.find((n) => n.status === 'failed');
+        const errorMsg = result.error || failedNode?.error;
+        const detail = failedNode ? `node "${failedNode.nodeKey}": ${errorMsg ?? 'unknown error'}` : (errorMsg ?? 'unknown error');
+        await this.emitStatus(run.id, 'log', { message: `Run failed: ${detail}`, transition: 'run.failed' });
+        await this.notifyRun(result, 'error', 'Run failed', errorMsg);
       } else if (result.status === 'waiting') {
         await this.emitStatus(run.id, 'log', { message: 'Run paused: awaiting approval', transition: 'run.waiting' });
         await this.notifyRun(result, 'warn', 'Run awaiting approval');
+      } else if (result.status === 'cancelled') {
+        // Run was cancelled externally; status already updated by cancel().
       }
 
       // A waiting run keeps its worktree and slot until it is approved.
@@ -347,11 +383,14 @@ export class RunService {
 
   private async captureDiff(runId: string, workspace: RunWorkspace): Promise<void> {
     try {
-      const { stdout } = await execFileAsync('sh', ['-c', 'git diff --stat HEAD~1'], {
-        cwd: workspace.rootPath,
-        maxBuffer: 1024 * 1024 * 32,
-      });
-      const diff = stdout.trim();
+      const diffs: string[] = [];
+      for (const repo of workspace.repos) {
+        const d = await computeRunDiff(repo.path, repo.baseBranch);
+        if (d) {
+          diffs.push(workspace.repos.length > 1 ? `${repo.name}:\n${d}` : d);
+        }
+      }
+      const diff = diffs.join('\n\n');
       if (diff) {
         await this.c.runs.update(runId, { diff });
         await this.emitStatus(runId, 'run.diff', { diff });

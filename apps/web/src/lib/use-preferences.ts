@@ -36,9 +36,11 @@ const EVENT_KEYS: NotificationEventKey[] = [
   'scheduleFailed',
   'transitionIssue',
   'nodeTransition',
+  'sync.completed',
+  'sync.failed',
 ];
 
-const DEFAULT_EVENT_PREFS: NotificationEvents = {
+const DEFAULT_EVENT_PREFS: Record<string, NotificationChannelPrefs> = {
   runComplete: { toasts: true, desktop: false },
   runFailed: { toasts: true, desktop: false },
   syncComplete: { toasts: false, desktop: false },
@@ -51,6 +53,8 @@ const DEFAULT_EVENT_PREFS: NotificationEvents = {
   scheduleFailed: { toasts: true, desktop: false },
   transitionIssue: { toasts: false, desktop: false },
   nodeTransition: { toasts: false, desktop: false },
+  'sync.completed': { toasts: false, desktop: false },
+  'sync.failed': { toasts: true, desktop: false },
 };
 
 const DEFAULT_PREFERENCES: Preferences = {
@@ -63,7 +67,7 @@ const DEFAULT_PREFERENCES: Preferences = {
     maxRetries: 1,
   },
   notifications: {
-    events: { ...DEFAULT_EVENT_PREFS },
+    events: { ...DEFAULT_EVENT_PREFS } as NotificationEvents,
   },
   issueTypeDefaults: [
     { name: 'feature', label: 'Feature', workflow: 'default' },
@@ -127,7 +131,7 @@ function readLocal(): Preferences {
     return {
       agentDefaults: { ...DEFAULT_PREFERENCES.agentDefaults, ...parsed?.agentDefaults },
       notifications: {
-        events: { ...DEFAULT_EVENT_PREFS, ...parsed?.notifications?.events },
+        events: { ...DEFAULT_EVENT_PREFS, ...parsed?.notifications?.events } as NotificationEvents,
       },
       issueTypeDefaults: parsed?.issueTypeDefaults ?? DEFAULT_PREFERENCES.issueTypeDefaults,
     };
@@ -135,7 +139,7 @@ function readLocal(): Preferences {
   } catch {
     // ignore
   }
-  return { ...DEFAULT_PREFERENCES, notifications: { events: { ...DEFAULT_EVENT_PREFS } } };
+  return { ...DEFAULT_PREFERENCES, notifications: { events: { ...DEFAULT_EVENT_PREFS } as NotificationEvents } };
 }
 
 function writeLocal(preferences: Preferences) {
@@ -158,7 +162,7 @@ function mapFromDb(db: AppPreferences): Preferences {
   return {
     agentDefaults: { ...DEFAULT_PREFERENCES.agentDefaults, ...db.agentDefaults },
     notifications: {
-      events: { ...DEFAULT_EVENT_PREFS, ...(db.notifications as unknown as { events?: NotificationEvents })?.events },
+      events: { ...DEFAULT_EVENT_PREFS, ...(db.notifications as unknown as { events?: NotificationEvents })?.events } as NotificationEvents,
     },
     issueTypeDefaults: db.issueTypeDefaults ?? DEFAULT_PREFERENCES.issueTypeDefaults,
   };

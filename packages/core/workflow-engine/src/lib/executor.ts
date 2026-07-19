@@ -75,7 +75,8 @@ export interface NodeTelemetry {
 export type NodeOutcome =
   | { status: 'completed'; output?: unknown; threadId?: string; usage?: NodeUsage; telemetry?: NodeTelemetry }
   | { status: 'waiting'; output?: unknown; telemetry?: NodeTelemetry }
-  | { status: 'failed'; error: string; telemetry?: NodeTelemetry };
+  | { status: 'failed'; error: string; telemetry?: NodeTelemetry }
+  | { status: 'cancelled'; telemetry?: NodeTelemetry };
 
 /** Executes exactly one node type. Injected into the engine by the host app. */
 export interface NodeExecutor {

@@ -234,3 +234,117 @@ describe('assertValidConfig – sub-workflows', () => {
     expect(() => assertValidConfig(config)).not.toThrow();
   });
 });
+
+describe('assertValidConfig – issue type workflow refs', () => {
+  it('accepts issue types referencing the main workflow', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflow: {
+        name: 'default',
+        nodes: [{ id: 'n1', type: 'shell', script: 'echo ok', swimlane: 'todo' }],
+      },
+      issueTypes: [
+        { name: 'feature', label: 'Feature', workflow: 'default' },
+        { name: 'bug', label: 'Bug', workflow: 'default' },
+      ],
+    };
+    expect(() => assertValidConfig(config)).not.toThrow();
+  });
+
+  it('accepts issue types referencing a workflows map entry', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflow: {
+        name: 'default',
+        nodes: [{ id: 'n1', type: 'shell', script: 'echo ok', swimlane: 'todo' }],
+      },
+      workflows: {
+        'feature-flow': {
+          name: 'feature-flow',
+          nodes: [{ id: 'f1', type: 'shell', script: 'echo f' }],
+        },
+      },
+      issueTypes: [
+        { name: 'feature', label: 'Feature', workflow: 'feature-flow' },
+      ],
+    };
+    expect(() => assertValidConfig(config)).not.toThrow();
+  });
+
+  it('rejects issue types referencing an unknown workflow', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflow: {
+        name: 'default',
+        nodes: [{ id: 'n1', type: 'shell', script: 'echo ok', swimlane: 'todo' }],
+      },
+      issueTypes: [
+        { name: 'feature', label: 'Feature', workflow: 'investigate-only' },
+      ],
+    };
+    expect(() => assertValidConfig(config)).toThrow(/references unknown workflow/);
+  });
+
+  it('rejects issue types when workflow map exists but ref is unknown', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflow: {
+        name: 'default',
+        nodes: [{ id: 'n1', type: 'shell', script: 'echo ok', swimlane: 'todo' }],
+      },
+      workflows: {
+        'review': {
+          name: 'review',
+          nodes: [{ id: 'r1', type: 'approval' }],
+        },
+      },
+      issueTypes: [
+        { name: 'bug', label: 'Bug', workflow: 'review' },
+        { name: 'feature', label: 'Feature', workflow: 'stale-ref' },
+      ],
+    };
+    expect(() => assertValidConfig(config)).toThrow(/references unknown workflow.*stale-ref/);
+  });
+
+  it('accepts no issue types defined', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflow: {
+        name: 'default',
+        nodes: [{ id: 'n1', type: 'shell', script: 'echo ok', swimlane: 'todo' }],
+      },
+    };
+    expect(() => assertValidConfig(config)).not.toThrow();
+  });
+});
+
+describe('assertValidConfig – onFailureTransitionLimit scoping', () => {
+  it('rejects onFailureTransitionLimit without onFailureTransitionTo', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflow: {
+        name: 'default',
+        nodes: [
+          { id: 'n1', type: 'shell', script: 'echo ok', onFailureTransitionLimit: 5, swimlane: 'todo' },
+        ],
+      },
+    };
+    expect(() => assertValidConfig(config)).toThrow(
+      /sets onFailureTransitionLimit but has no onFailureTransitionTo/,
+    );
+  });
+
+  it('accepts onFailureTransitionLimit alongside onFailureTransitionTo', () => {
+    const config: ProjectConfig = {
+      ...base,
+      workflow: {
+        name: 'default',
+        nodes: [
+          { id: 'flaky', type: 'shell', script: 'x', onFailureTransitionTo: 'fixer', onFailureTransitionLimit: 5, swimlane: 'todo' },
+          { id: 'fixer', type: 'shell', script: 'x', dependsOn: ['flaky'] },
+        ],
+      },
+    };
+    expect(() => assertValidConfig(config)).not.toThrow();
+  });
+});

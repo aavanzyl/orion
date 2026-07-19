@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { api, runStreamUrl, scheduleStreamUrl, type RunListItem } from '@/lib/api';
+import { api, runStreamUrl, scheduleStreamUrl, boardStreamUrl, type RunListItem } from '@/lib/api';
 import { usePreferences } from '@/lib/use-preferences';
 import { useNotifications } from '@/lib/use-notifications';
 
@@ -31,6 +31,17 @@ interface ScheduleEventPayload {
   createdAt: string;
 }
 
+interface BoardSyncEventPayload {
+  type: 'sync.completed' | 'sync.failed';
+  projectId: string;
+  imported: number;
+  updated: number;
+  epicsLinked: number;
+  error?: string;
+  durationMs: number;
+  at: string;
+}
+
 export function RunNotificationsProvider() {
   const { preferences } = usePreferences();
   const { notify } = useNotifications();
@@ -44,6 +55,15 @@ export function RunNotificationsProvider() {
   const scheduleCompletedEnabled = events.scheduleCompleted.toasts || events.scheduleCompleted.desktop;
   const scheduleFailedEnabled = events.scheduleFailed.toasts || events.scheduleFailed.desktop;
   const scheduleEventsEnabled = scheduleFiredEnabled || scheduleCompletedEnabled || scheduleFailedEnabled;
+  const syncCompletedEnabled =
+    (events as Record<string, { toasts: boolean; desktop: boolean }>)['sync.completed']?.toasts ||
+    (events as Record<string, { toasts: boolean; desktop: boolean }>)['sync.completed']?.desktop ||
+    false;
+  const syncFailedEnabled =
+    (events as Record<string, { toasts: boolean; desktop: boolean }>)['sync.failed']?.toasts ||
+    (events as Record<string, { toasts: boolean; desktop: boolean }>)['sync.failed']?.desktop ||
+    false;
+  const syncEventsEnabled = syncCompletedEnabled || syncFailedEnabled;
   const sseAvailable = typeof EventSource !== 'undefined';
   const activeSubscriptions = useRef<Map<string, EventSource>>(new Map());
   const notifiedRuns = useRef<Set<string>>(new Set());
@@ -271,6 +291,78 @@ export function RunNotificationsProvider() {
       source?.close();
     };
   }, [scheduleEventsEnabled, scheduleFiredEnabled, scheduleCompletedEnabled, scheduleFailedEnabled, notify]);
+
+  useEffect(() => {
+    if (!syncEventsEnabled) return;
+    if (!sseAvailable) return;
+
+    let cancelled = false;
+    const boardSources = new Map<string, EventSource>();
+
+    const subscribeToBoard = (projectId: string) => {
+      if (boardSources.has(projectId)) return;
+      const source = new EventSource(boardStreamUrl(projectId));
+      boardSources.set(projectId, source);
+
+      source.onmessage = (e: MessageEvent) => {
+        try {
+          const event = JSON.parse(e.data) as BoardSyncEventPayload;
+
+          if (event.type === 'sync.completed' && syncCompletedEnabled) {
+            notify('sync.completed', {
+              title: `Board sync: ${event.imported} imported, ${event.updated} updated`,
+              description: `${event.epicsLinked} epics linked`,
+            });
+          }
+
+          if (event.type === 'sync.failed' && syncFailedEnabled) {
+            notify('sync.failed', {
+              title: `Board sync failed: ${event.error ?? 'Unknown error'}`,
+              description: `${event.imported} imported, ${event.updated} updated`,
+            });
+          }
+        } catch {
+          // ignore malformed frames
+        }
+      };
+
+      source.onerror = () => {
+        source.close();
+        boardSources.delete(projectId);
+      };
+    };
+
+    const discoverAndSubscribe = async () => {
+      try {
+        const projects = await api.listProjects();
+        for (const project of projects) {
+          if (cancelled) return;
+          try {
+            const conn = await api.getBoardConnection(project.id);
+            if (conn.connected) {
+              subscribeToBoard(project.id);
+            }
+          } catch {
+            // skip projects without board connections
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    discoverAndSubscribe();
+    const interval = setInterval(discoverAndSubscribe, 60_000);
+
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+      for (const [, source] of boardSources) {
+        source.close();
+      }
+      boardSources.clear();
+    };
+  }, [syncEventsEnabled, syncCompletedEnabled, syncFailedEnabled, notify]);
 
   return null;
 }

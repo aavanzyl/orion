@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { makeId, extractFile } from './extract.js';
-import type { GraphNode, GraphEdge } from '@orion/models';
 
 // ---------------------------------------------------------------------------
 // makeId

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PlusIcon, TrashIcon, XIcon, PlayIcon, HistoryIcon, SquarePenIcon } from 'lucide-react';
+import { PlusIcon, TrashIcon, XIcon, PlayIcon, HistoryIcon, SquarePenIcon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import type {
   BoardSwimlane,
@@ -11,7 +11,7 @@ import type {
   UpdateTicketInput,
   WorkflowRun,
 } from '@orion/models';
-import { ALL_DEFAULT_TICKET_TYPES } from '@orion/models';
+import { ACTIVE_RUN_STATUSES, ALL_DEFAULT_TICKET_TYPES } from '@orion/models';
 import {
   Sheet,
   SheetContent,
@@ -58,6 +58,7 @@ interface TicketSheetProps {
   onCreateLabel: (name: string, color: string) => Promise<void>;
   onClose: () => void;
   onChanged: () => void;
+  onMoveTicket?: (ticketId: string, swimlane: string, force?: string) => Promise<void>;
 }
 
 export function TicketSheet({
@@ -71,6 +72,7 @@ export function TicketSheet({
   onCreateLabel,
   onClose,
   onChanged,
+  onMoveTicket,
 }: TicketSheetProps) {
   const { detail, refetch } = useTicketDetail(ticket?.id ?? null);
 
@@ -166,6 +168,12 @@ export function TicketSheet({
 
   const moveToSwimlane = async (swimlane: string) => {
     if (!ticket) return;
+    if (onMoveTicket) {
+      await onMoveTicket(ticket.id, swimlane);
+      refetch();
+      onChanged();
+      return;
+    }
     try {
       await api.moveTicket(ticket.id, swimlane);
       refetch();
@@ -623,22 +631,108 @@ export function TicketSheet({
                         };
                         return (
                           <div key={run.id} className="flex flex-col rounded-md border">
-                            <button
-                              type="button"
-                              onClick={() => setExpandedRunId(expandedRunId === run.id ? null : run.id)}
-                              className="flex items-center justify-between px-2.5 py-1.5 text-left hover:bg-muted/30"
-                            >
-                              <div className="flex items-center gap-2 text-xs">
-                                <HistoryIcon className="size-3 text-muted-foreground" />
-                                <span className="font-medium">{run.workflowName}</span>
-                                <Badge variant={STATUS_VARIANT[run.status] ?? 'outline'} className="h-4 px-1 text-[10px]">
-                                  {run.status}
-                                </Badge>
-                              </div>
-                              <span className="text-[10px] text-muted-foreground">
-                                {new Date(run.createdAt).toLocaleString()}
-                              </span>
-                            </button>
+                            <div className="flex items-center px-2.5 py-1.5 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setExpandedRunId(expandedRunId === run.id ? null : run.id)}
+                                className="flex flex-1 items-center justify-between text-left hover:bg-muted/30 min-w-0"
+                              >
+                                <div className="flex items-center gap-2 text-xs">
+                                  <HistoryIcon className="size-3 text-muted-foreground" />
+                                  <span className="font-medium">{run.workflowName}</span>
+                                  <Badge variant={STATUS_VARIANT[run.status] ?? 'outline'} className="h-4 px-1 text-[10px]">
+                                    {run.status}
+                                  </Badge>
+                                </div>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {new Date(run.createdAt).toLocaleString()}
+                                </span>
+                              </button>
+                              {ACTIVE_RUN_STATUSES.has(run.status) && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-6 px-2 text-[10px] text-destructive border-destructive hover:bg-destructive/10 shrink-0"
+                                      onClick={async () => {
+                                        try {
+                                          await api.cancelRun(run.id);
+                                          toast.success('Run cancelled');
+                                          api.listTicketRuns(ticket!.id).then(setRuns).catch(() => undefined);
+                                          onChanged();
+                                        } catch (e) {
+                                          toast.error((e as Error).message);
+                                        }
+                                      }}
+                                    >
+                                      <XCircleIcon data-icon="inline-start" />
+                                      Cancel
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Cancel this run</TooltipContent>
+                                </Tooltip>
+                              )}
+                              {run.status === 'waiting' && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-6 px-2 text-[10px] text-green-600 border-green-600 hover:bg-green-600/10 shrink-0"
+                                      onClick={async () => {
+                                        try {
+                                          const detail = await api.getRun(run.id);
+                                          const waitingNode = detail.nodes.find((n) => n.status === 'waiting');
+                                          if (!waitingNode) {
+                                            toast.error('No waiting approval node found');
+                                            return;
+                                          }
+                                          await api.approveRun(run.id, waitingNode.nodeKey);
+                                          toast.success('Approved — resuming workflow');
+                                          api.listTicketRuns(ticket!.id).then(setRuns).catch(() => undefined);
+                                          onChanged();
+                                        } catch (e) {
+                                          toast.error((e as Error).message);
+                                        }
+                                      }}
+                                    >
+                                      <CheckCircle2Icon data-icon="inline-start" />
+                                      Approve
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Approve the waiting node and resume the run</TooltipContent>
+                                </Tooltip>
+                              )}
+                              {(run.status === 'failed' || run.status === 'cancelled') && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-6 px-2 text-[10px] text-amber-600 border-amber-600 hover:bg-amber-600/10 shrink-0"
+                                      onClick={async () => {
+                                        try {
+                                          await api.retryRun(run.id);
+                                          toast.success('Run retrying');
+                                          api.listTicketRuns(ticket!.id).then(setRuns).catch(() => undefined);
+                                          onChanged();
+                                        } catch (e) {
+                                          toast.error((e as Error).message);
+                                        }
+                                      }}
+                                    >
+                                      <RefreshCwIcon data-icon="inline-start" />
+                                      Retry
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Retry this run</TooltipContent>
+                                </Tooltip>
+                              )}
+                            </div>
                             {expandedRunId === run.id && (
                               <div className="border-t px-2.5 py-2">
                                 <RunLogViewer runId={run.id} compact maxHeight="250px" />

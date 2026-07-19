@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { basename } from 'node:path';
+import { basename, join } from 'node:path';
 import type {
   KnowledgeGraph,
   GraphQueryResult,
@@ -1547,18 +1547,19 @@ export class GraphService {
     const files = await walkRepo(root);
     const extracted: Array<{ nodes: GraphNode[]; edges: GraphEdge[] }> = [];
 
-    for (const filePath of files) {
-      const ext = filePath.slice(filePath.lastIndexOf('.'));
+    for (const relPath of files) {
+      const ext = relPath.slice(relPath.lastIndexOf('.'));
       if (!CODE_EXTENSIONS.has(ext)) continue;
 
+      const absPath = join(root, relPath);
       let source: string;
       try {
-        source = await readFile(filePath, 'utf-8');
+        source = await readFile(absPath, 'utf-8');
       } catch {
         continue;
       }
 
-      extracted.push(lib.extractFile(filePath, source, root));
+      extracted.push(lib.extractFile(absPath, source, root));
     }
 
     let graph = lib.buildGraph(extracted, { maxNodes: 10000, maxEdges: 50000, rootDir: root });
@@ -1573,21 +1574,22 @@ export class GraphService {
     const extracted: Array<{ nodes: GraphNode[]; edges: GraphEdge[] }> = [];
 
     let fileCount = 0;
-    for (const filePath of files) {
+    for (const relPath of files) {
       if (fileCount >= MAX_FILES_PER_BUILD) break;
 
-      const ext = filePath.slice(filePath.lastIndexOf('.'));
+      const ext = relPath.slice(relPath.lastIndexOf('.'));
       if (!CODE_EXTENSIONS.has(ext)) continue;
 
+      const absPath = join(root, relPath);
       let source: string;
       try {
-        source = await readFile(filePath, 'utf-8');
+        source = await readFile(absPath, 'utf-8');
       } catch {
         continue;
       }
 
       fileCount++;
-      extracted.push(extractFile(filePath, source, root));
+      extracted.push(extractFile(absPath, source, root));
     }
 
     return this.inlineBuildGraph(extracted);

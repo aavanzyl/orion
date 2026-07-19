@@ -85,7 +85,7 @@ export function BoardSyncSection() {
     setSyncingId(project.id);
     try {
       const result = await api.syncBoardConnection(project.id);
-      toast.success(`Synced: ${result.imported} imported, ${result.updated} updated`);
+      toast.success(`Synced: ${result.imported} imported, ${result.updated} updated, ${result.epicsLinked} epics linked`);
       await load();
     } catch (e) {
       toast.error((e as Error).message);
@@ -202,8 +202,8 @@ export function BoardSyncSection() {
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {row.connection.lastSyncedAt
-                      ? new Date(row.connection.lastSyncedAt).toLocaleString()
+                    {row.connection.lastSync?.at
+                      ? new Date(row.connection.lastSync.at).toLocaleString()
                       : 'Never'}
                   </TableCell>
                   <TableCell>

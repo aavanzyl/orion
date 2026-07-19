@@ -54,6 +54,7 @@ export const epics = pgTable('epics', {
   title: text('title').notNull(),
   description: text('description').notNull().default(''),
   color: text('color').notNull().default('#7c3aed'),
+  externalId: text('external_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -278,6 +279,22 @@ export const boardConnections = pgTable('board_connections', {
   lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const boardSyncLogs = pgTable('board_sync_logs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }).notNull(),
+  status: text('status').notNull(),
+  imported: integer('imported').notNull().default(0),
+  updated: integer('updated').notNull().default(0),
+  epicsLinked: integer('epics_linked').notNull().default(0),
+  error: text('error'),
+  durationMs: integer('duration_ms').notNull().default(0),
+  trigger: text('trigger').notNull().default('manual'),
 });
 
 export const schedules = pgTable('schedules', {

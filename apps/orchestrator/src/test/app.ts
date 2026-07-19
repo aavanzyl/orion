@@ -7,6 +7,7 @@ import type { OrionEnv } from '../lib/env.js';
 import { createContainer, type Container } from '../lib/container.js';
 import { createApiRouter } from '../lib/http/api.js';
 import { RunService } from '../lib/services/run.service.js';
+import { TriggerService } from '../lib/services/trigger.service.js';
 import { ChatService } from '../lib/services/chat.service.js';
 import { ScheduleService } from '../lib/services/schedule.service.js';
 
@@ -99,12 +100,17 @@ export async function createTestApp(): Promise<TestApp> {
   await runMigrations(container.dbHandle, MIGRATIONS_DIR);
 
   const runs = new RunService(container);
+  const triggerService = new TriggerService(container, runs);
   const chat = new ChatService(container);
   const schedules = new ScheduleService(container);
 
+  container.boardSync.setOnTicketEnteredSwimlane((ticketId, swimlane) =>
+    triggerService.onTicketEnteredSwimlane(ticketId, swimlane, { source: 'sync' }),
+  );
+
   const app = express();
   app.use(express.json());
-  app.use('/api', createApiRouter(container, runs, chat, schedules));
+  app.use('/api', createApiRouter(container, runs, chat, schedules, triggerService));
 
   const dispose = async (): Promise<void> => {
     schedules.stopScheduler();

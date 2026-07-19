@@ -190,6 +190,20 @@
       "when": 1783361200000,
       "tag": "0028_add_ticket_type_and_start_date",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1783361300000,
+      "tag": "0030_add_trigger_on_import",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1783361400000,
+      "tag": "0031_enriched_sync",
+      "breakpoints": true
     }
   ]
 }

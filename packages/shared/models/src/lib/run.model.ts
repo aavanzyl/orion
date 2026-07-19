@@ -20,6 +20,18 @@ export type RunStatus =
   | 'failed'
   | 'cancelled';
 
+export const ACTIVE_RUN_STATUSES = new Set<RunStatus>([
+  'created',
+  'queued',
+  'scheduled',
+  'running',
+  'waiting',
+]);
+
+export function isActiveRun(status: RunStatus): boolean {
+  return ACTIVE_RUN_STATUSES.has(status);
+}
+
 export type RunNodeStatus =
   | 'pending'
   | 'blocked'

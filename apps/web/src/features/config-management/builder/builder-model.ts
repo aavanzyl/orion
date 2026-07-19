@@ -25,7 +25,7 @@ export {
 interface BuilderConfig {
   project?: { name: string; defaultBranch: string; branchFormat?: string };
   workflow: WorkflowConfig;
-  board?: { swimlanes: string[]; triggerSwimlane?: string };
+  board?: { swimlanes: string[] };
   subWorkflows?: Record<string, WorkflowConfig>;
   issueTypes?: IssueTypeConfig[];
 }
@@ -357,7 +357,6 @@ export function buildFullYaml(
   if (config.board) {
     root.board = {
       swimlanes: config.board.swimlanes,
-      ...(config.board.triggerSwimlane ? { triggerSwimlane: config.board.triggerSwimlane } : {}),
     };
   }
   // Only replace `workflows` when sub-workflows are explicitly provided; when
@@ -424,6 +423,32 @@ export function validateGraph(nodes: BuilderNode[]): string[] {
   if (idSet.size !== ids.filter(Boolean).length) issues.push('Node ids must be unique.');
   for (const n of nodes) {
     issues.push(...validateNodeData(n.data, n.data.nodeId));
+  }
+  return issues;
+}
+
+/**
+ * Validate issue type workflow references against the known workflow names
+ * (main workflow + sub-workflows). Stale references to deleted/renamed
+ * workflows are flagged so users can fix them before saving.
+ */
+export function validateBuilderSettings(
+  issueTypes: IssueTypeConfig[] | undefined,
+  workflowName: string,
+  subWorkflows?: Record<string, WorkflowConfig>,
+): string[] {
+  const issues: string[] = [];
+  if (!issueTypes || issueTypes.length === 0) return issues;
+  const wfNames = new Set<string>([workflowName || 'default']);
+  if (subWorkflows) {
+    for (const key of Object.keys(subWorkflows)) wfNames.add(key);
+  }
+  for (const it of issueTypes) {
+    if (it.workflow && !wfNames.has(it.workflow)) {
+      issues.push(
+        `Issue type "${it.name || '(unnamed)'}" references unknown workflow "${it.workflow}".`,
+      );
+    }
   }
   return issues;
 }

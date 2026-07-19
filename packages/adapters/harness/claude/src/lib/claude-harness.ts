@@ -158,6 +158,7 @@ export class ClaudeHarness implements AgentProvider {
 
     let accumulated = '';
     let finalResponse = '';
+    let lastYieldedText: string | undefined;
     let threadId = options.threadId;
     let usage: HarnessUsage | undefined;
     const items: unknown[] = [];
@@ -171,6 +172,7 @@ export class ClaudeHarness implements AgentProvider {
             if (block.type === 'text' && typeof block.text === 'string') {
               accumulated = accumulated ? `${accumulated}\n${block.text}` : block.text;
               finalResponse = accumulated;
+              lastYieldedText = accumulated;
               yield { type: 'message', text: accumulated };
             } else {
               items.push(block);
@@ -184,7 +186,10 @@ export class ClaudeHarness implements AgentProvider {
           usage = toHarnessUsage(message.usage, message.total_cost_usd);
           if (message.subtype === 'success' && typeof message.result === 'string') {
             finalResponse = message.result || finalResponse;
-            if (finalResponse) yield { type: 'message', text: finalResponse };
+            if (finalResponse && finalResponse !== lastYieldedText) {
+              lastYieldedText = finalResponse;
+              yield { type: 'message', text: finalResponse };
+            }
           } else if (message.is_error) {
             const detail =
               'errors' in message && Array.isArray(message.errors)

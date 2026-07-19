@@ -19,6 +19,16 @@ export interface RemoteIssue {
   stateName: string;
   /** Deep link back to the remote issue. */
   url: string;
+  /** Priority 0-4, Linear scale (0 = none, 1 = urgent, 4 = low). */
+  priority?: number;
+  /** Due date in YYYY-MM-DD format. */
+  dueDate?: string;
+  /** When the issue was started, ISO 8601. */
+  startedAt?: string;
+  /** Labels attached to the remote issue. */
+  labels?: Array<{ name: string; color?: string }>;
+  /** The parent container/project grouping (Linear project, Jira epic, etc.). */
+  epic?: { id: string; name: string; color?: string };
 }
 
 /** A remote workflow state / board column / list. */

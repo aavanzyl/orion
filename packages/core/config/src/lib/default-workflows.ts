@@ -693,10 +693,10 @@ const CONTEXT_AWARE_FIX: WorkflowTemplate = {
 
 const FAN_OUT_MIGRATION: WorkflowTemplate = {
   name: 'fan-out-migration',
-  title: 'Fan-out migration (matrix across packages)',
+  title: 'Migration workflow (plan → migrate → test → PR)',
   description:
-    'Plan a repetitive change once, then fan an implementer out across several packages in parallel with a bounded matrix, run each package\'s tests in parallel too, gate on approval, and open a PR. Edit the matrix `items` to list your own packages.',
-  tags: ['refactor', 'maintenance', 'parallel', 'matrix'],
+    'Plan the change with an agent, apply the migration across the codebase, run the test suite, gate on approval, and open a pull request. A linear, single-repository workflow for scoped migrations and refactors.',
+  tags: ['refactor', 'maintenance', 'linear'],
   suggestedSwimlanes: ['backlog', 'planning', 'in_progress', 'review', 'done'],
   workflow: {
     name: 'fan-out-migration',

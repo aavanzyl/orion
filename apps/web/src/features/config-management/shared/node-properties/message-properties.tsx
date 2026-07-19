@@ -78,6 +78,17 @@ export function MessageProperties({ data, onChange }: NodeTypeEditorProps) {
         </Tooltip>
       </label>
 
+      {agentGenerated && (
+        <div className="flex flex-col gap-1.5">
+          <FieldLabel>Model</FieldLabel>
+          <Input
+            value={data.model ?? ''}
+            onChange={(e) => onChange({ model: e.target.value || undefined })}
+            placeholder="e.g. gpt-5-codex"
+          />
+        </div>
+      )}
+
       <div className="flex flex-col gap-1.5">
         <FieldLabel>{agentGenerated ? 'Guidance (optional)' : 'Message'}</FieldLabel>
         <Textarea

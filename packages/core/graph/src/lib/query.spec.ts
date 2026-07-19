@@ -117,7 +117,7 @@ describe('scoreNodes', () => {
 
     expect(subScore).toBeDefined();
     expect(subScore).toBeGreaterThan(0);
-    expect(exactScore).toBeGreaterThan(subScore);
+    expect(exactScore).toBeGreaterThan(subScore ?? 0);
   });
 
   it('source file match contributes to score', () => {

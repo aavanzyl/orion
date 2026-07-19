@@ -14,6 +14,7 @@ export type RunEventType =
   | 'node.completed'
   | 'node.failed'
   | 'node.skipped'
+  | 'node.cancelled'
   | 'node.retry'
   | 'node.iteration'
   | 'node.matrix'
@@ -24,8 +25,11 @@ export type RunEventType =
   | 'ticket.updated'
   | 'ticket.created'
   | 'ticket.deleted'
+  | 'ticket.comment'
   | 'transition'
-  | 'log';
+  | 'log'
+  | 'sync.completed'
+  | 'sync.failed';
 
 export interface RunEvent<T = unknown> {
   id: string;

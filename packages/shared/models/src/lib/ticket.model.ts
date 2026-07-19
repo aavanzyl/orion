@@ -49,6 +49,8 @@ export interface Epic {
   description: string;
   /** Hex color used to render the epic bar / badge. */
   color: string;
+  /** Optional identifier from an external system (e.g. Linear project id). */
+  externalId?: string;
   createdAt: string;
   updatedAt: string;
 }

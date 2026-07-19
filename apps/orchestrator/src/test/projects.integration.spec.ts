@@ -71,7 +71,7 @@ describe('projects & board (integration)', () => {
       .post(`/api/tickets/${ticketId}/move`)
       .send({ swimlane: 'in_progress' });
     expect(res.status).toBe(200);
-    expect(res.body.data.swimlane).toBe('in_progress');
+    expect(res.body.data.ticket.swimlane).toBe('in_progress');
   });
 
   it('patches a ticket', async () => {
@@ -80,5 +80,46 @@ describe('projects & board (integration)', () => {
       .send({ title: 'Renamed ticket' });
     expect(res.status).toBe(200);
     expect(res.body.data.title).toBe('Renamed ticket');
+  });
+
+  it('timeline returns tickets linked to epics via epicId', async () => {
+    const epic = await request(ctx.app)
+      .post(`/api/projects/${projectId}/epics`)
+      .send({ title: 'Timeline Epic', color: '#00ff00' });
+    expect(epic.status).toBe(201);
+    const epicId = epic.body.data.id;
+
+    const ticket = await request(ctx.app)
+      .post(`/api/projects/${projectId}/tickets`)
+      .send({
+        title: 'Linked Ticket',
+        swimlane: 'backlog',
+        epicId,
+        startDate: '2026-04-01',
+        dueDate: '2026-04-10',
+      });
+    expect(ticket.status).toBe(201);
+
+    const timeline = await request(ctx.app).get(`/api/projects/${projectId}/timeline`);
+    expect(timeline.status).toBe(200);
+    expect(timeline.body.data.epics.map((e: { id: string }) => e.id)).toContain(epicId);
+    expect(timeline.body.data.tickets.map((t: { id: string }) => t.id)).toContain(ticket.body.data.id);
+  });
+
+  it('timeline returns tickets of literal type epic (backward compat)', async () => {
+    const ticket = await request(ctx.app)
+      .post(`/api/projects/${projectId}/tickets`)
+      .send({
+        title: 'Epic Type Ticket',
+        swimlane: 'backlog',
+        type: 'epic',
+        startDate: '2026-05-01',
+        dueDate: '2026-05-15',
+      });
+    expect(ticket.status).toBe(201);
+
+    const timeline = await request(ctx.app).get(`/api/projects/${projectId}/timeline`);
+    expect(timeline.status).toBe(200);
+    expect(timeline.body.data.tickets.map((t: { id: string }) => t.id)).toContain(ticket.body.data.id);
   });
 });

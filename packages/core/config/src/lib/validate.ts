@@ -51,6 +51,20 @@ export function assertValidConfig(config: ProjectConfig): void {
     }
   }
 
+  if (config.issueTypes && config.issueTypes.length > 0) {
+    const wfNames = new Set<string>([config.workflow.name]);
+    if (config.workflows) {
+      for (const key of Object.keys(config.workflows)) wfNames.add(key);
+    }
+    for (const it of config.issueTypes) {
+      if (it.workflow && !wfNames.has(it.workflow)) {
+        issues.push(
+          `issue type "${it.name}" references unknown workflow "${it.workflow}" — update the reference to "${config.workflow.name}" or another defined workflow`,
+        );
+      }
+    }
+  }
+
   if (issues.length === 0) {
     try {
       const flattened = flattenProjectConfig(config);
@@ -147,6 +161,14 @@ function validateNode(
   }
   if ((node as { loop?: unknown }).loop && node.type !== 'agent') {
     issues.push(`node "${node.id}" has a loop but only agent nodes may loop`);
+  }
+  if (
+    (node as { onFailureTransitionLimit?: number }).onFailureTransitionLimit !== undefined &&
+    !(node as { onFailureTransitionTo?: string }).onFailureTransitionTo
+  ) {
+    issues.push(
+      `node "${node.id}" sets onFailureTransitionLimit but has no onFailureTransitionTo`,
+    );
   }
 }
 

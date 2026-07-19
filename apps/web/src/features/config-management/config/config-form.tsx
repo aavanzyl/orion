@@ -270,28 +270,6 @@ export function ConfigForm({
         </div>
       </section>
 
-      <div className="flex flex-col gap-1.5 -mt-1.5">
-        <Label htmlFor="trigger-swimlane" className="text-sm">Auto-trigger swimlane</Label>
-        <p className="text-xs text-muted-foreground">
-          Moving a ticket to this swimlane auto-starts a workflow when the ticket has no prior runs.
-        </p>
-        <Select
-          value={model.triggerSwimlane ?? ''}
-          onValueChange={(v) => patch({ triggerSwimlane: v === '__none__' ? undefined : v || undefined })}
-          disabled={disabled}
-        >
-          <SelectTrigger id="trigger-swimlane">
-            <SelectValue placeholder="None (disabled)" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">None (disabled)</SelectItem>
-            {model.swimlanes.filter((c) => c.trim()).map((sw) => (
-              <SelectItem key={sw} value={sw}>{sw}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
       <Separator />
 
       {/* Issue Types */}

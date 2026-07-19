@@ -39,7 +39,9 @@ export type NotificationEventKey =
   | 'scheduleCompleted'
   | 'scheduleFailed'
   | 'transitionIssue'
-  | 'nodeTransition';
+  | 'nodeTransition'
+  | 'sync.completed'
+  | 'sync.failed';
 
 export type NotificationEvents = Record<NotificationEventKey, NotificationChannelPrefs>;
 

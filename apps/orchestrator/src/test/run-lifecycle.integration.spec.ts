@@ -89,19 +89,29 @@ describe('run lifecycle (integration)', () => {
   });
 
   it('gets run detail with nodes', async () => {
-    const start = await request(ctx.app).post(`/api/tickets/${ticketId}/run`);
+    const ticket = await request(ctx.app)
+      .post(`/api/projects/${projectId}/tickets`)
+      .send({ title: 'Detail test ticket', swimlane: 'backlog' });
+    const detailTicketId = ticket.body.data.id;
+
+    const start = await request(ctx.app).post(`/api/tickets/${detailTicketId}/run`);
     const runId = start.body.data.id;
 
     const res = await request(ctx.app).get(`/api/runs/${runId}`);
     expect(res.status).toBe(200);
     expect(res.body.data.run.id).toBe(runId);
-    expect(res.body.data.run.ticketId).toBe(ticketId);
+    expect(res.body.data.run.ticketId).toBe(detailTicketId);
     expect(Array.isArray(res.body.data.nodes)).toBe(true);
     expect(res.body.data.nodes.length).toBeGreaterThanOrEqual(1);
   });
 
   it('lists run events', async () => {
-    const start = await request(ctx.app).post(`/api/tickets/${ticketId}/run`);
+    const ticket = await request(ctx.app)
+      .post(`/api/projects/${projectId}/tickets`)
+      .send({ title: 'Events test ticket', swimlane: 'backlog' });
+    const eventsTicketId = ticket.body.data.id;
+
+    const start = await request(ctx.app).post(`/api/tickets/${eventsTicketId}/run`);
     const runId = start.body.data.id;
     await settle(500);
 
@@ -112,18 +122,23 @@ describe('run lifecycle (integration)', () => {
   });
 
   it('lists ticket logs across all runs', async () => {
-    const start = await request(ctx.app).post(`/api/tickets/${ticketId}/run`);
+    const ticket = await request(ctx.app)
+      .post(`/api/projects/${projectId}/tickets`)
+      .send({ title: 'Logs test ticket', swimlane: 'backlog' });
+    const logsTicketId = ticket.body.data.id;
+
+    const start = await request(ctx.app).post(`/api/tickets/${logsTicketId}/run`);
     const runId = start.body.data.id;
     await settle(500);
 
-    const res = await request(ctx.app).get(`/api/tickets/${ticketId}/logs`);
+    const res = await request(ctx.app).get(`/api/tickets/${logsTicketId}/logs`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.data)).toBe(true);
     expect(res.body.data.length).toBeGreaterThanOrEqual(1);
     expect(res.body.data.some((e: { runId: string }) => e.runId === runId)).toBe(true);
 
     const typeFiltered = await request(ctx.app).get(
-      `/api/tickets/${ticketId}/logs?type=run.created`,
+      `/api/tickets/${logsTicketId}/logs?type=run.created`,
     );
     expect(typeFiltered.status).toBe(200);
     expect(typeFiltered.body.data.length).toBeGreaterThanOrEqual(1);
@@ -131,7 +146,7 @@ describe('run lifecycle (integration)', () => {
       true,
     );
 
-    const limited = await request(ctx.app).get(`/api/tickets/${ticketId}/logs?limit=5`);
+    const limited = await request(ctx.app).get(`/api/tickets/${logsTicketId}/logs?limit=5`);
     expect(limited.status).toBe(200);
     expect(limited.body.data.length).toBeLessThanOrEqual(5);
   });
@@ -190,7 +205,12 @@ describe('run lifecycle (integration)', () => {
   });
 
   it('cancels a run', async () => {
-    const start = await request(ctx.app).post(`/api/tickets/${ticketId}/run`);
+    const ticket = await request(ctx.app)
+      .post(`/api/projects/${projectId}/tickets`)
+      .send({ title: 'Cancel test ticket', swimlane: 'backlog' });
+    const cancelTicketId = ticket.body.data.id;
+
+    const start = await request(ctx.app).post(`/api/tickets/${cancelTicketId}/run`);
     expect(start.status).toBe(201);
     const runId = start.body.data.id;
 
@@ -209,7 +229,12 @@ describe('run lifecycle (integration)', () => {
   });
 
   it('retries a cancelled/failed run', async () => {
-    const start = await request(ctx.app).post(`/api/tickets/${ticketId}/run`);
+    const ticket = await request(ctx.app)
+      .post(`/api/projects/${projectId}/tickets`)
+      .send({ title: 'Retry test ticket', swimlane: 'backlog' });
+    const retryTicketId = ticket.body.data.id;
+
+    const start = await request(ctx.app).post(`/api/tickets/${retryTicketId}/run`);
     expect(start.status).toBe(201);
     const runId = start.body.data.id;
 
@@ -221,20 +246,172 @@ describe('run lifecycle (integration)', () => {
     expect(retry.body.data.status).not.toBe('cancelled');
   });
 
-  it('multiple runs per ticket', async () => {
-    await request(ctx.app).post(`/api/tickets/${ticketId}/run`);
-    await request(ctx.app).post(`/api/tickets/${ticketId}/run`);
+  it('retry resets ALL nodes to pending (full re-execution against fresh worktree)', async () => {
+    const configYaml = `project:
+  name: retry-reset-test
+  defaultBranch: main
 
-    const list = await request(ctx.app).get(`/api/tickets/${ticketId}/runs`);
+board:
+  swimlanes: [backlog, in_progress, done]
+
+workflow:
+  name: default
+  nodes:
+    - id: step-one
+      type: shell
+      script: 'echo "ok"'
+    - id: step-two
+      type: shell
+      script: 'exit 1'
+      dependsOn: [step-one]
+`;
+    const rootPath = await seedProjectRepo({}, configYaml);
+    await initGitRepo(rootPath);
+    const project = await request(ctx.app)
+      .post('/api/projects')
+      .send({ name: 'Retry Reset Project', sourceKind: 'local', rootPath, config: configYaml });
+    const resetProjectId = project.body.data.id;
+
+    const ticket = await request(ctx.app)
+      .post(`/api/projects/${resetProjectId}/tickets`)
+      .send({ title: 'Retry reset ticket', swimlane: 'backlog' });
+    const resetTicketId = ticket.body.data.id;
+
+    const start = await request(ctx.app).post(`/api/tickets/${resetTicketId}/run`);
+    expect(start.status).toBe(201);
+    const runId = start.body.data.id;
+    await settle(1000);
+
+    // Verify step-one completed and step-two failed before retry
+    const beforeDetail = await request(ctx.app).get(`/api/runs/${runId}`);
+    const beforeNodes = beforeDetail.body.data.nodes as { nodeKey: string; status: string }[];
+    const stepOneBefore = beforeNodes.find((n) => n.nodeKey === 'step-one');
+    const stepTwoBefore = beforeNodes.find((n) => n.nodeKey === 'step-two');
+    expect(stepOneBefore?.status).toBe('completed');
+    expect(stepTwoBefore?.status).toBe('failed');
+
+    // Retry the failed run
+    const retry = await request(ctx.app).post(`/api/runs/${runId}/retry`);
+    expect(retry.status).toBe(201);
+
+    // Wait for re-execution
+    await settle(1000);
+
+    // After retry, step-two will fail again but step-one must have been re-executed
+    const afterDetail = await request(ctx.app).get(`/api/runs/${runId}`);
+    const afterNodes = afterDetail.body.data.nodes as { nodeKey: string; status: string; error: string | null }[];
+    const stepOneAfter = afterNodes.find((n) => n.nodeKey === 'step-one');
+    const stepTwoAfter = afterNodes.find((n) => n.nodeKey === 'step-two');
+
+    // Both nodes were reset to pending and re-executed.
+    // step-one (echo "ok") succeeds again; step-two (exit 1) fails again.
+    expect(stepOneAfter?.status).toBe('completed');
+    expect(stepTwoAfter?.status).toBe('failed');
+
+    // Verify the log event mentions full re-run semantics
+    const events = await request(ctx.app).get(`/api/runs/${runId}/events`);
+    const logEvents = events.body.data.filter(
+      (e: { type: string; payload?: { message?: string } }) =>
+        e.type === 'log' && e.payload?.message?.includes('recreated from the base branch'),
+    );
+    expect(logEvents.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('multiple runs per ticket', async () => {
+    const ticket = await request(ctx.app)
+      .post(`/api/projects/${projectId}/tickets`)
+      .send({ title: 'Multi-run ticket', swimlane: 'backlog' });
+    const multiTicketId = ticket.body.data.id;
+
+    await request(ctx.app).post(`/api/tickets/${multiTicketId}/run`);
+    // Cancel the first run so it's not active when starting the second.
+    // The active-run guard blocks starting a second run while one is in-flight.
+    const runs = await request(ctx.app).get(`/api/tickets/${multiTicketId}/runs`);
+    const firstRunId = runs.body.data[0]?.id;
+    if (firstRunId) {
+      await request(ctx.app).post(`/api/runs/${firstRunId}/cancel`);
+      await settle(200);
+    }
+    await request(ctx.app).post(`/api/tickets/${multiTicketId}/run`);
+
+    const list = await request(ctx.app).get(`/api/tickets/${multiTicketId}/runs`);
     expect(list.body.data.length).toBeGreaterThanOrEqual(2);
   });
 
   it('run events include run.created type', async () => {
-    const start = await request(ctx.app).post(`/api/tickets/${ticketId}/run`);
+    const ticket = await request(ctx.app)
+      .post(`/api/projects/${projectId}/tickets`)
+      .send({ title: 'RunCreated test ticket', swimlane: 'backlog' });
+    const createdTicketId = ticket.body.data.id;
+
+    const start = await request(ctx.app).post(`/api/tickets/${createdTicketId}/run`);
     const runId = start.body.data.id;
     await settle(500);
 
     const events = await request(ctx.app).get(`/api/runs/${runId}/events`);
     expect(events.body.data.some((e: { type: string }) => e.type === 'run.created')).toBe(true);
+  });
+
+  it('filters run events by nodeKey (friendly name)', async () => {
+    const configYaml = `project:
+  name: nodekey-filter
+  defaultBranch: main
+
+board:
+  swimlanes: [backlog, in_progress, done]
+
+workflow:
+  name: default
+  nodes:
+    - id: step-one
+      type: shell
+      script: 'echo "ok"'
+      column: in_progress
+    - id: step-two
+      type: shell
+      script: 'echo "ok"'
+      dependsOn: [step-one]
+      column: done
+`;
+    const rootPath = await seedProjectRepo({}, configYaml);
+    await initGitRepo(rootPath);
+    const project = await request(ctx.app)
+      .post('/api/projects')
+      .send({ name: 'NodeKey Filter Project', sourceKind: 'local', rootPath, config: configYaml });
+    const filterProjectId = project.body.data.id;
+
+    const ticket = await request(ctx.app)
+      .post(`/api/projects/${filterProjectId}/tickets`)
+      .send({ title: 'Filter test ticket', swimlane: 'backlog' });
+    const filterTicketId = ticket.body.data.id;
+
+    const start = await request(ctx.app).post(`/api/tickets/${filterTicketId}/run`);
+    const runId = start.body.data.id;
+    await settle(1000);
+
+    const detail = await request(ctx.app).get(`/api/runs/${runId}`);
+    const nodes = detail.body.data.nodes as { id: string; nodeKey: string }[];
+    const stepOneNode = nodes.find((n: { nodeKey: string }) => n.nodeKey === 'step-one');
+    expect(stepOneNode).toBeDefined();
+
+    // Filter by nodeKey (friendly name)
+    const byKey = await request(ctx.app).get(
+      `/api/runs/${runId}/events?nodeId=step-one`,
+    );
+    expect(byKey.status).toBe(200);
+    expect(Array.isArray(byKey.body.data)).toBe(true);
+    if (byKey.body.data.length > 0 && stepOneNode) {
+      expect(
+        byKey.body.data.every((e: { nodeId: string }) => e.nodeId === stepOneNode.id),
+      ).toBe(true);
+    }
+
+    // Unknown key returns empty list, not 500
+    const unknown = await request(ctx.app).get(
+      `/api/runs/${runId}/events?nodeId=no-such-node`,
+    );
+    expect(unknown.status).toBe(200);
+    expect(Array.isArray(unknown.body.data)).toBe(true);
+    expect(unknown.body.data.length).toBe(0);
   });
 });

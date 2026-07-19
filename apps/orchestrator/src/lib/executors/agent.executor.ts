@@ -1,8 +1,9 @@
 import type { NodeExecutor, NodeExecutionContext, NodeOutcome } from '@orion/workflow-engine';
 import type { HarnessRegistry, HarnessUsage } from '@orion/harness-core';
-import type { TicketRepository } from '@orion/db';
+import type { ProviderRepository, TicketRepository } from '@orion/db';
 import { ConfigError, installSkillsIntoWorktree, renderCommand, renderTemplate } from '@orion/config';
 import type { McpServerMap } from '@orion/models';
+import { decrypt } from '../crypto.js';
 import type { OrionEnv } from '../env.js';
 
 const DEFAULT_PROMPT =
@@ -18,6 +19,7 @@ export class AgentNodeExecutor implements NodeExecutor {
   constructor(
     private readonly harnesses: HarnessRegistry,
     private readonly tickets: TicketRepository,
+    private readonly providers: ProviderRepository,
     private readonly env: OrionEnv,
   ) {}
 
@@ -59,11 +61,21 @@ export class AgentNodeExecutor implements NodeExecutor {
       if (instructions.includes('\n')) {
         prompt = renderTemplate(instructions, variables, ctx.nodeOutputs, scope);
       } else {
+        const looksLikeFilePath = instructions.endsWith('.md') ||
+          instructions.startsWith('instructions/') ||
+          instructions.startsWith('./') ||
+          instructions.startsWith('../');
         try {
           prompt = await renderCommand(ctx.workspace.configRoot, instructions, variables, undefined, ctx.nodeOutputs, scope);
         } catch (err: unknown) {
           const code = (err as { code?: string })?.code;
           if (code === 'ENOENT') {
+            if (looksLikeFilePath) {
+              return {
+                status: 'failed',
+                error: `instructions file "${instructions}" not found under .orion/ — create it or switch the node to inline instructions`,
+              };
+            }
             prompt = renderTemplate(instructions, variables, ctx.nodeOutputs, scope);
           } else {
             throw err;
@@ -101,12 +113,25 @@ export class AgentNodeExecutor implements NodeExecutor {
     }
 
     let harness;
+    let resolvedProvider = provider;
+
     if (this.harnesses.has(provider)) {
       harness = this.harnesses.get(provider);
     } else {
-      const keys = this.harnesses.keys();
-      if (keys.length === 0) throw new Error('No harness providers registered');
-      harness = this.harnesses.get(keys[0]);
+      // The node's `provider` may be a human-readable key (e.g. "deepseek")
+      // that maps to a DB provider record specifying the actual harness.
+      const dbProvider = await this.resolveDbProvider(provider);
+      if (dbProvider?.harness) {
+        resolvedProvider = dbProvider.harness;
+        if (this.harnesses.has(dbProvider.harness)) {
+          harness = this.harnesses.get(dbProvider.harness);
+        }
+      }
+      if (!harness) {
+        const keys = this.harnesses.keys();
+        if (keys.length === 0) throw new Error('No harness providers registered');
+        harness = this.harnesses.get(keys[0]);
+      }
     }
 
     // Auto-inject the codebase MCP (SSE) so running agents can search the repo.
@@ -141,11 +166,13 @@ export class AgentNodeExecutor implements NodeExecutor {
     let threadId = startThreadId;
     let usage: HarnessUsage | undefined;
 
+    const resolvedApiKey = await this.resolveApiKey(resolvedProvider);
+    const resolvedBaseUrl = nodeConfig.baseUrl ?? await this.resolveBaseUrlFromProvider(provider) ?? this.env.codexBaseUrl;
     const stream = harness.runStreamed(prompt, {
       workingDirectory: ctx.workspace.rootPath,
       model: nodeConfig.model,
-      baseUrl: nodeConfig.baseUrl ?? this.resolveBaseUrl(nodeConfig),
-      apiKey: this.env.codexApiKey,
+      baseUrl: resolvedBaseUrl,
+      apiKey: resolvedApiKey,
       threadId: startThreadId,
       mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
       config: nodeConfig.config,
@@ -169,13 +196,58 @@ export class AgentNodeExecutor implements NodeExecutor {
       await ctx.emit('agent.usage', { agent: nodeConfig.id, usage });
     }
 
+    // Emit the agent's final output as a comment on the ticket.
+    if (finalResponse) {
+      await ctx.emit('ticket.comment', {
+        body: finalResponse,
+        agent: nodeConfig.id,
+        model: nodeConfig.model,
+      });
+    }
+
     const telemetry = { agentId: nodeConfig.id, model: nodeConfig.model };
 
     return { status: 'completed', output: { finalResponse }, threadId, usage, telemetry };
   }
 
-  private resolveBaseUrl(nodeConfig: { baseUrl?: string }): string | undefined {
-    return nodeConfig.baseUrl ?? this.env.codexBaseUrl;
+  /**
+   * Look up a DB provider record by its `key` (not harness). Returns the
+   * provider if found, or undefined.
+   */
+  private async resolveDbProvider(providerKey: string) {
+    const allProviders = await this.providers.list().catch(() => []);
+    return allProviders.find((p) => p.key === providerKey);
+  }
+
+  /**
+   * Resolve the base URL from the configured DB provider, falling back to env.
+   */
+  private async resolveBaseUrlFromProvider(providerKey: string): Promise<string | undefined> {
+    const dbProvider = await this.resolveDbProvider(providerKey);
+    if (dbProvider?.baseUrl) return dbProvider.baseUrl;
+    if (providerKey === 'codex') return this.env.codexBaseUrl;
+    if (providerKey === 'claude') return this.env.claudeBaseUrl;
+    return undefined;
+  }
+
+  /**
+   * Look up the API key from the configured provider entry in the database.
+   * Falls back to the environment variable key for the given harness.
+   */
+  private async resolveApiKey(harnessKey: string): Promise<string | undefined> {
+    const allProviders = await this.providers.list().catch(() => []);
+    const matching = allProviders.find((p) => p.harness === harnessKey);
+    if (matching) {
+      const stored = await this.providers.getApiKey(matching.id).catch(() => null);
+      if (stored) {
+        return this.env.providerEncryptionSalt
+          ? decrypt(stored, this.env.providerEncryptionSalt)
+          : stored;
+      }
+    }
+    if (harnessKey === 'codex') return this.env.codexApiKey;
+    if (harnessKey === 'claude') return this.env.claudeApiKey;
+    return undefined;
   }
 
   /**

@@ -116,6 +116,11 @@ export interface ProjectConfigResponse {
   issueTypes?: IssueTypeConfig[];
 }
 
+export interface MoveTicketResult {
+  ticket: Ticket;
+  trigger: import('@orion/models').MoveTriggerResult;
+}
+
 interface RawConfigResponse {
   content: string | null;
   configPath: string;
@@ -146,6 +151,17 @@ export interface WorkflowTemplateDetail {
   suggestedSwimlanes: string[];
 }
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public data?: unknown,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     ...init,
@@ -153,7 +169,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   const body = (await response.json()) as ApiResponse<T>;
   if (!response.ok || !body.success) {
-    throw new Error(body.error ?? `Request failed: ${response.status}`);
+    throw new ApiError(
+      body.error ?? `Request failed: ${response.status}`,
+      response.status,
+      body.data,
+    );
   }
   return body.data;
 }
@@ -250,10 +270,10 @@ export const api = {
     }),
   removeTicketRelation: (relationId: string) =>
     request<{ deleted: boolean }>(`/ticket-relations/${relationId}`, { method: 'DELETE' }),
-  moveTicket: (ticketId: string, swimlane: string, order?: number, workflowName?: string) =>
-    request<Ticket>(`/tickets/${ticketId}/move`, {
+  moveTicket: (ticketId: string, swimlane: string, order?: number, force?: string) =>
+    request<MoveTicketResult>(`/tickets/${ticketId}/move`, {
       method: 'POST',
-      body: JSON.stringify({ swimlane, order, workflowName }),
+      body: JSON.stringify({ swimlane, order, force }),
     }),
   setTicketAgent: (ticketId: string, agentId: string | null) =>
     request<Ticket>(`/tickets/${ticketId}/agent`, {
@@ -343,6 +363,8 @@ export const api = {
     request<{ deleted: boolean }>(`/projects/${projectId}/board-connection`, { method: 'DELETE' }),
   syncBoardConnection: (projectId: string) =>
     request<SyncSummary>(`/projects/${projectId}/board-connection/sync`, { method: 'POST' }),
+  getSyncHistory: (projectId: string) =>
+    request<SyncHistoryEntry[]>(`/projects/${projectId}/board-connection/sync-history`),
   listBoardContainers: (
     projectId: string,
     opts: { provider?: string; apiKey?: string; config?: Record<string, string> },
@@ -566,7 +588,7 @@ export interface BoardConnectionResponse {
   updateExisting?: boolean;
   syncIntervalMs?: number;
   hasApiKey?: boolean;
-  lastSyncedAt?: string;
+  lastSync?: LastSyncInfo | null;
   id?: string;
   projectId?: string;
   apiKey?: string;
@@ -605,6 +627,30 @@ export interface RunAnalytics {
 export interface SyncSummary {
   imported: number;
   updated: number;
+  epicsLinked: number;
+}
+
+export interface SyncHistoryEntry {
+  id: string;
+  startedAt: string;
+  finishedAt: string;
+  status: 'completed' | 'failed';
+  imported: number;
+  updated: number;
+  epicsLinked: number;
+  error?: string;
+  durationMs: number;
+  trigger: 'manual' | 'auto';
+}
+
+export interface LastSyncInfo {
+  at: string;
+  status: 'completed' | 'failed';
+  imported: number;
+  updated: number;
+  epicsLinked: number;
+  error?: string;
+  durationMs: number;
 }
 
 export interface RemoteContainer {

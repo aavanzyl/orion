@@ -18,6 +18,12 @@ import type {
 } from '@orion/scm-core';
 import { git, gitRoot } from './git.js';
 
+async function ensureGitIdentityArgs(cwd: string): Promise<string[]> {
+  const email = await git(cwd, ['config', 'user.email']).catch(() => '');
+  if (email) return [];
+  return ['-c', 'user.name=Orion', '-c', 'user.email=orion@localhost'];
+}
+
 export interface GitHubScmOptions {
   /** GitHub token used for pull-request creation via the REST API. */
   token?: string;
@@ -108,7 +114,8 @@ export class GitHubScmProvider implements ScmProvider {
       .then(() => true)
       .catch(() => false);
     if (!hasHead) {
-      await git(repoPath, ['commit', '--allow-empty', '-m', 'Initial commit']);
+      const identity = await ensureGitIdentityArgs(repoPath);
+      await git(repoPath, [...identity, 'commit', '--allow-empty', '-m', 'Initial commit']);
     }
 
     await git(repoPath, ['worktree', 'add', '-b', options.branch, worktreePath, options.base]);
@@ -138,7 +145,8 @@ export class GitHubScmProvider implements ScmProvider {
 
   async commitAll(worktreePath: string, message: string): Promise<void> {
     await git(worktreePath, ['add', '-A']);
-    await git(worktreePath, ['commit', '-m', message]);
+    const identity = await ensureGitIdentityArgs(worktreePath);
+    await git(worktreePath, [...identity, 'commit', '-m', message]);
   }
 
   async push(worktreePath: string, branch: string): Promise<void> {

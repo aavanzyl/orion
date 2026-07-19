@@ -75,8 +75,6 @@ export interface IssueTypeConfig {
 export interface BoardConfig {
   /** Ordered swimlane keys that make up the Kanban board. */
   swimlanes: string[];
-  /** Swimlane that auto-triggers a workflow run when a ticket is moved into it and has no prior runs. */
-  triggerSwimlane?: string;
 }
 
 /**
@@ -242,7 +240,12 @@ export interface WorkflowNodeConfig {
   token?: string;
   /** Ids of nodes that must complete before this node becomes ready. */
   dependsOn?: string[];
-  /** Board swimlane the ticket moves to while this node is active. */
+  /**
+   * Board swimlane the ticket moves to while this node is active. On a
+   * starting node (zero dependencies) it also acts as the workflow's trigger:
+   * moving a ticket into this swimlane auto-starts the workflow unless the
+   * ticket already has an active run (started, queued, running, or waiting).
+   */
   swimlane?: string;
   /**
    * Extra attempts after the first failure before the run fails (default 0).
@@ -265,8 +268,19 @@ export interface WorkflowNodeConfig {
    * error and output are stored on the target node's `input` as
    * `{ onFailureFrom, error, output }` — accessible in agent templates via
    * `{{ input.error }}`, `{{ input.onFailureFrom }}`, etc.
+   *
+   * If the target names a board swimlane (not a workflow node), the ticket is
+   * moved there and the current node + run are marked `failed`. Moving the
+   * ticket back to the failed node's swimlane will retry the run from that node
+   * while preserving completed work.
    */
   onFailureTransitionTo?: string;
+  /**
+   * Maximum number of times this node may be reset via onFailureTransitionTo
+   * within a single run before the engine treats it as a hard failure
+   * (default 3). Only meaningful alongside onFailureTransitionTo.
+   */
+  onFailureTransitionLimit?: number;
   /**
    * When set, re-run this node's executor iteratively until a stop condition is
    * met. Only valid on `agent` nodes.

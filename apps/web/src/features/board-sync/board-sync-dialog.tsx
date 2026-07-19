@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { LinkIcon } from 'lucide-react';
+import { ChevronDownIcon, ChevronRightIcon, LinkIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Project } from '@orion/models';
 import { Button } from '@/components/ui/button';
@@ -23,10 +23,17 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
   api,
   type BoardSyncDirection,
+  type LastSyncInfo,
   type RemoteContainer,
   type RemoteState,
+  type SyncHistoryEntry,
 } from '@/lib/api';
 
 export interface BoardSyncDialogProps {
@@ -94,6 +101,27 @@ const DIRECTIONS: { value: BoardSyncDirection; label: string }[] = [
   { value: 'push', label: 'Push only (Orion → remote)' },
 ];
 
+function timeAgo(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const seconds = Math.floor((now - then) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s`;
+}
+
 export function BoardSyncDialog({
   open,
   onOpenChange,
@@ -120,6 +148,10 @@ export function BoardSyncDialog({
   const [enabled, setEnabled] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [lastSync, setLastSync] = useState<LastSyncInfo | null>(null);
+  const [syncHistory, setSyncHistory] = useState<SyncHistoryEntry[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const meta = PROVIDERS[provider];
   /** A fresh secret+config is required only when there's no stored key. */
@@ -181,6 +213,7 @@ export function BoardSyncDialog({
           setIntervalMinutes(conn.syncIntervalMs ? String(Math.round(conn.syncIntervalMs / 60000)) : '');
           setApiKey('');
           setHasStoredKey(Boolean(conn.hasApiKey));
+          setLastSync(conn.lastSync ?? null);
           if (conn.hasApiKey) {
             const fetched = await api
               .listBoardContainers(editProject.id, { provider: prov, config: conn.config })
@@ -193,6 +226,12 @@ export function BoardSyncDialog({
         })
         .catch((e) => toast.error((e as Error).message))
         .finally(() => setFetching(false));
+
+      setLoadingHistory(true);
+      api.getSyncHistory(editProject.id)
+        .then(setSyncHistory)
+        .catch(() => setSyncHistory([]))
+        .finally(() => setLoadingHistory(false));
     } else {
       const first = availableProjects[0]?.id ?? '';
       setProjectId(first);
@@ -209,6 +248,8 @@ export function BoardSyncDialog({
       setIntervalMinutes('');
       setEnabled(true);
       setSwimlanes([]);
+      setLastSync(null);
+      setSyncHistory([]);
       if (first) loadSwimlanes(first, false);
     }
   }, [open, editProject, availableProjects, loadSwimlanes, fetchStates]);
@@ -289,6 +330,98 @@ export function BoardSyncDialog({
             remote updates pull back on a configurable cadence.
           </DialogDescription>
         </DialogHeader>
+
+        {isEdit && (
+          <div className="flex flex-col gap-3 rounded-md border bg-muted/30 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Last sync</span>
+              {lastSync ? (
+                <div className="flex items-center gap-2 text-xs">
+                  <Badge variant={lastSync.status === 'completed' ? 'default' : 'destructive'}>
+                    {lastSync.status}
+                  </Badge>
+                  <span className="text-muted-foreground">{timeAgo(lastSync.at)}</span>
+                </div>
+              ) : (
+                <span className="text-xs text-muted-foreground">Never synced</span>
+              )}
+            </div>
+            {lastSync && (
+              <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  <span>{lastSync.imported} imported</span>
+                  <span>{lastSync.updated} updated</span>
+                  <span>{lastSync.epicsLinked} epics linked</span>
+                  <span>{formatDuration(lastSync.durationMs)}</span>
+                </div>
+                {lastSync.status === 'failed' && lastSync.error && (
+                  <span className="text-destructive">{lastSync.error}</span>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setHistoryOpen((v) => !v)}
+            >
+              {historyOpen ? (
+                <ChevronDownIcon data-icon="inline-start" />
+              ) : (
+                <ChevronRightIcon data-icon="inline-start" />
+              )}
+              Sync history
+            </button>
+
+            {historyOpen && (
+              <div className="max-h-48 overflow-y-auto rounded-md border bg-background">
+                {loadingHistory ? (
+                  <p className="p-3 text-xs text-muted-foreground">Loading...</p>
+                ) : syncHistory.length === 0 ? (
+                  <p className="p-3 text-xs text-muted-foreground">No sync history yet.</p>
+                ) : (
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b text-muted-foreground">
+                        <th className="px-2 py-1.5 text-left font-medium">Time</th>
+                        <th className="px-2 py-1.5 text-left font-medium">Trigger</th>
+                        <th className="px-2 py-1.5 text-left font-medium">Status</th>
+                        <th className="px-2 py-1.5 text-left font-medium">Results</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {syncHistory.map((entry) => (
+                        <tr key={entry.id}>
+                          <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">
+                            {new Date(entry.startedAt).toLocaleString()}
+                          </td>
+                          <td className="px-2 py-1.5 capitalize">{entry.trigger}</td>
+                          <td className="px-2 py-1.5">
+                            {entry.status === 'completed' ? (
+                              <Badge variant="default" className="text-[10px]">done</Badge>
+                            ) : (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Badge variant="destructive" className="text-[10px] cursor-default">failed</Badge>
+                                </TooltipTrigger>
+                                {entry.error && (
+                                  <TooltipContent>{entry.error}</TooltipContent>
+                                )}
+                              </Tooltip>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5 text-muted-foreground">
+                            {entry.imported} imp · {entry.updated} upd · {entry.epicsLinked} epics · {formatDuration(entry.durationMs)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">

@@ -5,6 +5,7 @@ import { createContainer } from './lib/container.js';
 import { createApiRouter } from './lib/http/api.js';
 import { mountMcpRoutes } from './lib/mcp/mcp-routes.js';
 import { RunService } from './lib/services/run.service.js';
+import { TriggerService } from './lib/services/trigger.service.js';
 import { ChatService } from './lib/services/chat.service.js';
 import { ScheduleService } from './lib/services/schedule.service.js';
 import { BoardSyncScheduler } from './lib/services/board-sync-scheduler.service.js';
@@ -19,9 +20,14 @@ async function main(): Promise<void> {
   });
 
   const runs = new RunService(container);
+  const triggerService = new TriggerService(container, runs);
   const chat = new ChatService(container);
   const schedules = new ScheduleService(container);
   const boardSync = new BoardSyncScheduler(container);
+
+  container.boardSync.setOnTicketEnteredSwimlane((ticketId, swimlane) =>
+    triggerService.onTicketEnteredSwimlane(ticketId, swimlane, { source: 'sync' }),
+  );
 
   // Surface any runs orphaned by a previous process before accepting traffic.
   await runs.recoverInterruptedRuns().catch((err: unknown) => {
@@ -54,7 +60,7 @@ async function main(): Promise<void> {
     res.json({ status: 'ok' });
   });
 
-  app.use('/api', createApiRouter(container, runs, chat, schedules));
+  app.use('/api', createApiRouter(container, runs, chat, schedules, triggerService));
 
   // Mount the codebase + tickets MCP servers (SSE transport) for external agents.
   mountMcpRoutes(app, container);

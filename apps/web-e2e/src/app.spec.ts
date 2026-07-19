@@ -14,13 +14,13 @@ test('renders the app shell with all sidebar nav items', async ({ page }) => {
   for (const label of [
     'Projects',
     'Board',
-    'Codebase',
     'Chat',
     'Dashboard',
     'Analytics',
     'Evaluations',
     'Workflows',
     'MCP',
+    'Skills',
     'Schedule',
     'Settings',
   ]) {
@@ -32,7 +32,6 @@ const ROUTES: Array<{ path: string; heading: string }> = [
   { path: '/', heading: 'Board' },
   { path: '/dashboard', heading: 'Dashboard' },
   { path: '/analytics', heading: 'Analytics' },
-  { path: '/evaluations', heading: 'Evaluations' },
   { path: '/chat', heading: 'Chat' },
   { path: '/projects', heading: 'Projects' },
   { path: '/workflows', heading: 'Workflow templates' },

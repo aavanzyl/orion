@@ -162,6 +162,69 @@ describe('ClaudeHarness', () => {
     });
   });
 
+  it('yields a single message event when the result equals the last accumulated text', async () => {
+    queued = [
+      {
+        type: 'assistant',
+        session_id: 'sess-1',
+        message: { content: [{ type: 'text', text: 'ORION-E2E-OK' }] },
+      },
+      {
+        type: 'result',
+        subtype: 'success',
+        session_id: 'sess-1',
+        result: 'ORION-E2E-OK',
+        is_error: false,
+        usage: {},
+      },
+    ];
+
+    const harness = new ClaudeHarness();
+    const events = [];
+    for await (const event of harness.runStreamed('hi', { workingDirectory: '/tmp' })) {
+      events.push(event);
+    }
+
+    const messages = events.filter((e) => e.type === 'message');
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual({ type: 'message', text: 'ORION-E2E-OK' });
+
+    const completed = events.at(-1);
+    expect(completed).toMatchObject({
+      type: 'completed',
+      result: { finalResponse: 'ORION-E2E-OK' },
+    });
+  });
+
+  it('yields a second message event when the result differs from the last accumulated text', async () => {
+    queued = [
+      {
+        type: 'assistant',
+        session_id: 'sess-1',
+        message: { content: [{ type: 'text', text: 'partial' }] },
+      },
+      {
+        type: 'result',
+        subtype: 'success',
+        session_id: 'sess-1',
+        result: 'final',
+        is_error: false,
+        usage: {},
+      },
+    ];
+
+    const harness = new ClaudeHarness();
+    const events = [];
+    for await (const event of harness.runStreamed('hi', { workingDirectory: '/tmp' })) {
+      events.push(event);
+    }
+
+    const messages = events.filter((e) => e.type === 'message');
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toEqual({ type: 'message', text: 'partial' });
+    expect(messages[1]).toEqual({ type: 'message', text: 'final' });
+  });
+
   it('throws a descriptive error on a failed result', async () => {
     queued = [
       {

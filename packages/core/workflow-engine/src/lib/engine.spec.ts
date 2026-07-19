@@ -227,6 +227,43 @@ describe('WorkflowEngine', () => {
     expect(run.status).toBe('failed');
   });
 
+  it('onFailureTransitionTo→swimlane parks the ticket, fails the node and run', async () => {
+    const cfg: ProjectConfig = {
+      project: { name: 'p', defaultBranch: 'main' },
+      board: { swimlanes: ['todo', 'doing', 'done', 'blocked'] },
+      workflow: {
+        name: 'default',
+        nodes: [
+          { id: 'implement', type: 'shell', script: 'x', swimlane: 'doing', onFailureTransitionTo: 'blocked' },
+        ],
+      },
+    };
+    const failing: NodeExecutor = {
+      type: 'shell',
+      execute: async () => ({ status: 'failed', error: 'build failed' }),
+    };
+    const moved: { ticketId: string; swimlane: string }[] = [];
+    const engine = new WorkflowEngine({
+      store,
+      emit: async () => undefined,
+      moveTicket: async (ticketId, swimlane) => {
+        moved.push({ ticketId, swimlane });
+      },
+      executors: [failing],
+    });
+
+    await engine.initializeNodes('run1', cfg);
+    const run = await engine.advance({ ...store.run }, cfg, workspace);
+
+    expect(run.status).toBe('failed');
+    expect(store.nodes[0].status).toBe('failed');
+    expect(store.nodes[0].error).toBe('build failed');
+    expect(moved).toEqual([
+      { ticketId: 't1', swimlane: 'doing' },
+      { ticketId: 't1', swimlane: 'blocked' },
+    ]);
+  });
+
   it('runs independent ready nodes in parallel (DAG fan-out)', async () => {
     const cfg = config([
       { id: 'a', type: 'shell', script: 'x', swimlane: 'doing' },
@@ -573,4 +610,155 @@ describe('WorkflowEngine', () => {
     expect(store.nodes.find((n) => n.nodeKey === 'ship')?.status).toBe('completed');
   });
 
+  it('marks running nodes cancelled when the run abort signal fires', async () => {
+    const cfg = config([
+      { id: 'slow', type: 'shell', script: 'x', swimlane: 'doing' },
+    ]);
+    let executorResolve: (() => void) | undefined;
+    const aborted: boolean[] = [];
+    const slow: NodeExecutor = {
+      type: 'shell',
+      execute: (ctx) =>
+        new Promise((resolve) => {
+          ctx.signal?.addEventListener('abort', () => {
+            aborted.push(true);
+          });
+          executorResolve = () => resolve({ status: 'completed' });
+        }),
+    };
+    const engine = new WorkflowEngine({
+      store,
+      emit: async () => undefined,
+      moveTicket: async () => undefined,
+      executors: [slow],
+    });
+
+    const controller = new AbortController();
+
+    await engine.initializeNodes('run1', cfg);
+    const advancePromise = engine.advance({ ...store.run }, cfg, workspace, controller.signal);
+
+    // Wait a tick for the executor to be invoked, then cancel.
+    await new Promise((r) => setTimeout(r, 20));
+    controller.abort();
+
+    if (executorResolve) executorResolve();
+    await advancePromise;
+
+    expect(aborted.length).toBe(1);
+    expect(store.nodes[0].status).toBe('cancelled');
+  });
+
+  it('terminates after onFailureTransitionTo limit is reached (default 3)', async () => {
+    const cfg = config([
+      { id: 'flaky', type: 'shell', script: 'exit 1', swimlane: 'doing', onFailureTransitionTo: 'fixer' },
+      { id: 'fixer', type: 'shell', script: 'true', dependsOn: ['flaky'], swimlane: 'done' },
+    ]);
+    let flakyCalls = 0;
+    const maxSafeIterations = 100;
+    const flakyExecutor: NodeExecutor = {
+      type: 'shell',
+      execute: async (ctx) => {
+        flakyCalls += 1;
+        if (flakyCalls > maxSafeIterations) {
+          throw new Error('SAFETY: infinite loop guard triggered');
+        }
+        if (ctx.node.nodeKey === 'flaky') return { status: 'failed', error: 'always fails' };
+        return { status: 'completed', output: { ok: true } };
+      },
+    };
+    const events: string[] = [];
+    const engine = new WorkflowEngine({
+      store,
+      emit: async (e) => {
+        if (e.type === 'log') events.push((e.payload as { message: string }).message);
+      },
+      moveTicket: async () => undefined,
+      executors: [flakyExecutor],
+    });
+
+    await engine.initializeNodes('run1', cfg);
+    const run = await engine.advance({ ...store.run }, cfg, workspace);
+
+    expect(run.status).toBe('failed');
+    expect(flakyCalls).toBe(4);
+    const flaky = store.nodes.find((n) => n.nodeKey === 'flaky');
+    expect(flaky?.status).toBe('failed');
+    expect(flaky?.error).toContain('onFailureTransitionTo limit (3) reached');
+    expect(events.some((m) => m.includes('onFailureTransitionTo limit (3) reached'))).toBe(true);
+  });
+
+  it('recovers within cap when the onFailureTransitionTo target fixes the condition', async () => {
+    const cfg = config([
+      { id: 'flaky', type: 'shell', script: 'x', swimlane: 'doing', onFailureTransitionTo: 'fixer' },
+      { id: 'fixer', type: 'shell', script: 'x', dependsOn: ['flaky'], swimlane: 'done' },
+    ]);
+    let flakyCalls = 0;
+    const executor: NodeExecutor = {
+      type: 'shell',
+      execute: async (ctx) => {
+        if (ctx.node.nodeKey === 'flaky') {
+          flakyCalls += 1;
+          if (flakyCalls === 1) return { status: 'failed', error: 'first fail' };
+          return { status: 'completed', output: { recovered: true } };
+        }
+        return { status: 'completed', output: { fixed: true } };
+      },
+    };
+    const engine = new WorkflowEngine({
+      store,
+      emit: async () => undefined,
+      moveTicket: async () => undefined,
+      executors: [executor],
+    });
+
+    await engine.initializeNodes('run1', cfg);
+    const run = await engine.advance({ ...store.run }, cfg, workspace);
+
+    expect(run.status).toBe('completed');
+    expect(flakyCalls).toBe(2);
+    const flaky = store.nodes.find((n) => n.nodeKey === 'flaky');
+    expect(flaky?.status).toBe('completed');
+    const fixer = store.nodes.find((n) => n.nodeKey === 'fixer');
+    expect(fixer?.status).toBe('completed');
+  });
+
+  it('honors a custom onFailureTransitionLimit set on the node config', async () => {
+    const cfg = config([
+      { id: 'flaky', type: 'shell', script: 'exit 1', swimlane: 'doing', onFailureTransitionTo: 'fixer', onFailureTransitionLimit: 1 },
+      { id: 'fixer', type: 'shell', script: 'true', dependsOn: ['flaky'], swimlane: 'done' },
+    ]);
+    let flakyCalls = 0;
+    const maxSafeIterations = 100;
+    const flakyExecutor: NodeExecutor = {
+      type: 'shell',
+      execute: async (ctx) => {
+        flakyCalls += 1;
+        if (flakyCalls > maxSafeIterations) {
+          throw new Error('SAFETY: infinite loop guard triggered');
+        }
+        if (ctx.node.nodeKey === 'flaky') return { status: 'failed', error: 'always fails' };
+        return { status: 'completed', output: { ok: true } };
+      },
+    };
+    const events: string[] = [];
+    const engine = new WorkflowEngine({
+      store,
+      emit: async (e) => {
+        if (e.type === 'log') events.push((e.payload as { message: string }).message);
+      },
+      moveTicket: async () => undefined,
+      executors: [flakyExecutor],
+    });
+
+    await engine.initializeNodes('run1', cfg);
+    const run = await engine.advance({ ...store.run }, cfg, workspace);
+
+    expect(run.status).toBe('failed');
+    expect(flakyCalls).toBe(2);
+    const flaky = store.nodes.find((n) => n.nodeKey === 'flaky');
+    expect(flaky?.status).toBe('failed');
+    expect(flaky?.error).toContain('onFailureTransitionTo limit (1) reached');
+    expect(events.some((m) => m.includes('onFailureTransitionTo limit (1) reached'))).toBe(true);
+  });
 });

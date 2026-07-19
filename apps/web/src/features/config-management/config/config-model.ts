@@ -35,7 +35,6 @@ export interface ConfigFormModel {
   /** Preserved project-wide MCP servers so round-tripping is not lossy. */
   mcpServers?: McpServerMap;
   swimlanes: string[];
-  triggerSwimlane?: string;
   workflowName: string;
   /** Workflow token/cost budget. */
   budget?: BudgetConfig;
@@ -209,7 +208,6 @@ export function parseConfigToModel(yaml: string): ConfigFormModel {
       ? (raw.issueTypes as IssueTypeConfig[])
       : DEFAULT_MODEL_ISSUE_TYPES(str(workflow.name) || 'default'),
     swimlanes: swimlanes.map((c) => str(c)).filter(Boolean),
-    triggerSwimlane: typeof board.triggerSwimlane === 'string' ? board.triggerSwimlane : undefined,
     workflowName: str(workflow.name) || 'default',
     budget: budgetConfig(workflow.budget),
     nodes: nodes.map((n) => {
@@ -250,7 +248,6 @@ function modelToConfig(model: ConfigFormModel): ProjectConfig {
     },
     board: {
       swimlanes: model.swimlanes.map((c) => c.trim()).filter(Boolean),
-      ...(model.triggerSwimlane ? { triggerSwimlane: model.triggerSwimlane } : {}),
     },
     workflow: {
       name: model.workflowName.trim() || 'default',
@@ -340,7 +337,50 @@ export function applyWorkflowTemplate(
   }
   root.board = { ...board, swimlanes };
 
+  if (Array.isArray(root.issueTypes)) {
+    const newWfName =
+      typeof (root.workflow as Record<string, unknown>)?.name === 'string'
+        ? ((root.workflow as Record<string, unknown>).name as string)
+        : 'default';
+    const wfs =
+      root.workflows && typeof root.workflows === 'object'
+        ? (root.workflows as Record<string, unknown>)
+        : undefined;
+    root.issueTypes = remapIssueTypeWorkflows(
+      root.issueTypes as IssueTypeConfig[],
+      newWfName,
+      wfs,
+    );
+  }
+
   return stringify(root, { indent: 2, lineWidth: 0 });
+}
+
+/**
+ * When a template replaces the main workflow, issue-type workflow references
+ * that no longer resolve (not the new main workflow name, not a key in
+ * `workflows`) are remapped to the new workflow name so the form does not
+ * show blank comboboxes and the server sees consistent references.
+ */
+export function remapIssueTypeWorkflows(
+  issueTypes: IssueTypeConfig[] | undefined,
+  newWorkflowName: string,
+  workflows?: Record<string, unknown>,
+): IssueTypeConfig[] | undefined {
+  if (!issueTypes || issueTypes.length === 0) return issueTypes;
+  const validNames = new Set<string>([newWorkflowName]);
+  if (workflows) {
+    for (const key of Object.keys(workflows)) validNames.add(key);
+  }
+  let changed = false;
+  const remapped = issueTypes.map((it) => {
+    if (it.workflow && !validNames.has(it.workflow)) {
+      changed = true;
+      return { ...it, workflow: newWorkflowName };
+    }
+    return it;
+  });
+  return changed ? remapped : issueTypes;
 }
 
 /**
@@ -374,6 +414,18 @@ export function validateModel(model: ConfigFormModel): string[] {
     for (const dep of node.dependsOn) {
       if (!nodeIdSet.has(dep)) {
         issues.push(`Node "${id}" depends on unknown node "${dep}".`);
+      }
+    }
+  }
+
+  if (model.issueTypes && model.issueTypes.length > 0) {
+    const wfNames = new Set<string>([model.workflowName || 'default']);
+    if (model.workflows) {
+      for (const key of Object.keys(model.workflows)) wfNames.add(key);
+    }
+    for (const it of model.issueTypes) {
+      if (it.workflow && !wfNames.has(it.workflow)) {
+        issues.push(`Issue type "${it.name || '(unnamed)'}" references unknown workflow "${it.workflow}".`);
       }
     }
   }
