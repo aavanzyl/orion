@@ -1,6 +1,6 @@
 # Backend image: builds the orchestrator and provides the migration tooling.
 # The same image is reused by the `migrate` and `orchestrator` compose services.
-FROM node:22-slim
+FROM node:26-slim
 
 WORKDIR /app
 
