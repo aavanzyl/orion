@@ -91,17 +91,19 @@ export function toProvider(row: ProviderRow): Provider {
   };
 }
 
-export function toProject(row: ProjectRow): Project {
+export function toProject(row: ProjectRow, paths?: string[]): Project {
   return {
     id: row.id,
     name: row.name,
     sourceKind: row.sourceKind as ProjectSourceKind,
     repoUrl: row.repoUrl,
     rootPath: opt(row.rootPath),
+    paths,
     scmProvider: row.scmProvider,
     boardProvider: row.boardProvider,
     defaultBranch: row.defaultBranch,
     configPath: row.configPath,
+    configYaml: opt(row.configYaml),
     ticketCounter: row.counter,
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),

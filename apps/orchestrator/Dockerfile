@@ -1,6 +1,10 @@
-FROM node:22-slim AS build
+FROM node:22-slim
 
 WORKDIR /app
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 ENV NX_DAEMON=false \
     CI=true
@@ -33,11 +37,17 @@ RUN npm install --no-audit --no-fund
 
 COPY . .
 
-RUN VITE_API_URL=/api npx nx build @orion/web
+RUN npx nx build @orion/orchestrator
 
-FROM nginx:1.27-alpine
+RUN groupadd -r orion && useradd -r -g orion -m -d /data -s /bin/bash orion \
+  && chown -R orion:orion /data
 
-COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/apps/web/dist /usr/share/nginx/html
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=3333
 
-EXPOSE 80
+EXPOSE 3333
+
+USER orion
+
+CMD ["node", "apps/orchestrator/dist/main.mjs"]

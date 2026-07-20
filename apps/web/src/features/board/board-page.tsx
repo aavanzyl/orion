@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
+import { SparklesIcon } from 'lucide-react';
 import {
   DndContext,
   DragOverlay,
@@ -10,7 +11,7 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import { toast } from 'sonner';
-import type { CreateTicketInput, Label, Ticket } from '@orion/models';
+import type { AgentTicketPreviewResponse, CreateTicketInput, Label, Ticket } from '@orion/models';
 import { ALL_DEFAULT_TICKET_TYPES } from '@orion/models';
 import {
   Select,
@@ -36,6 +37,7 @@ import { TicketCardView } from './ticket-card';
 import { BoardFilters, EMPTY_FILTERS, isFilterActive, type BoardFilterState } from './board-filters';
 import { NewTicketSheet } from './new-ticket-sheet';
 import { TicketSheet } from './ticket-sheet';
+import { CreateTicketAiModal } from './create-ticket-ai-modal';
 import { useBoardStream } from '@/lib/use-board-stream';
 
 export function BoardPage() {
@@ -49,6 +51,9 @@ export function BoardPage() {
   const [draggingTicket, setDraggingTicket] = useState<Ticket | null>(null);
   const [filters, setFilters] = useState<BoardFilterState>(EMPTY_FILTERS);
   const [conflict, setConflict] = useState<{ ticketId: string; swimlane: string; activeRunId: string } | null>(null);
+
+  const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [aiPrefill, setAiPrefill] = useState<AgentTicketPreviewResponse | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -176,6 +181,26 @@ export function BoardPage() {
     }
   };
 
+  const createFromAi = async (preview: AgentTicketPreviewResponse, pid: string) => {
+    const byName = new Map(labels.map((l) => [l.name.toLowerCase(), l.id]));
+    const resolvedLabels = preview.labels
+      .map((n) => byName.get(n.toLowerCase()))
+      .filter((id): id is string => id !== undefined);
+    await api.createTicket(pid, {
+      title: preview.title,
+      description: preview.description,
+      type: preview.type,
+      priority: preview.priority as import('@orion/models').TicketPriority,
+      labelIds: resolvedLabels.length > 0 ? resolvedLabels : [],
+      swimlane: board?.swimlanes[0]?.key,
+    });
+    refetchBoard();
+  };
+
+  const handleOpenInForm = (preview: AgentTicketPreviewResponse) => {
+    setAiPrefill(preview);
+  };
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4">
@@ -196,16 +221,27 @@ export function BoardPage() {
         </div>
         <div className="flex items-center gap-2">
           {board && (
-            <NewTicketSheet
-              swimlanes={board.swimlanes}
-              labels={labels}
-              tickets={allTickets}
-              epicTickets={epicTickets}
-              projectId={projectId}
-              ticketTypes={availableTypes}
-              onCreateLabel={createLabel}
-              onCreate={createTicket}
-            />
+            <>
+              <NewTicketSheet
+                swimlanes={board.swimlanes}
+                labels={labels}
+                tickets={allTickets}
+                epicTickets={epicTickets}
+                projectId={projectId}
+                ticketTypes={availableTypes}
+                prefill={aiPrefill}
+                onPrefillConsumed={() => setAiPrefill(null)}
+                onCreateLabel={createLabel}
+                onCreate={createTicket}
+              />
+              <Button
+                onClick={() => setAiModalOpen(true)}
+                className="relative overflow-hidden bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white transition-all duration-300 hover:from-violet-700 hover:to-fuchsia-700 hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] animate-pulse-glow"
+              >
+                <SparklesIcon data-icon="inline-start" />
+                Create with AI
+              </Button>
+            </>
           )}
         </div>
       </header>
@@ -301,6 +337,14 @@ export function BoardPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CreateTicketAiModal
+        open={aiModalOpen}
+        onOpenChange={setAiModalOpen}
+        projectId={projectId}
+        onCreate={createFromAi}
+        onOpenInForm={handleOpenInForm}
+      />
 
     </div>
   );

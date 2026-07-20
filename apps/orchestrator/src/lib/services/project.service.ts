@@ -4,6 +4,7 @@ import {
   listCommandFiles,
   listSkillCatalog,
   loadProjectConfig,
+  loadProjectConfigFromYaml,
   readCommandText,
   readProjectConfigText,
   resolveIssueTypes,
@@ -17,6 +18,7 @@ import {
   syncSkill,
   createSkill,
   updateSkillContent,
+  validateProjectConfigYaml,
 } from '@orion/config';
 import type {
   Board,
@@ -56,15 +58,16 @@ export class ProjectService {
   }
 
   async create(input: CreateProjectInput & { configYaml?: string }): Promise<Project> {
-    const project = await this.c.projects.create(input);
     const yaml = input.configYaml ?? this.generateDefaultConfigYaml(input);
+    const project = await this.c.projects.create({ ...input, configYaml: yaml });
+
     if (yaml) {
       try {
         const configRoot = await this.workspaces.resolveConfigRoot(project);
         await saveProjectConfigText(configRoot, yaml, project.configPath);
       } catch {
         // Config root may not be resolvable yet (e.g. remote repo not cloned).
-        // The user can still save config later via the raw config endpoint.
+        // The config is stored in the DB and can be written to disk later.
       }
     }
     return project;
@@ -98,20 +101,35 @@ export class ProjectService {
 
   /** Load and validate the project's Orion configuration. */
   async loadConfig(project: Project): Promise<ProjectConfig> {
+    if (project.configYaml) {
+      return loadProjectConfigFromYaml(project.configYaml);
+    }
     const configRoot = await this.workspaces.resolveConfigRoot(project);
     return loadProjectConfig(configRoot, project.configPath);
   }
 
   /** Read the project's raw config YAML, or `null` if it does not exist yet. */
   async readConfigText(project: Project): Promise<string | null> {
+    if (project.configYaml) {
+      return project.configYaml;
+    }
     const configRoot = await this.workspaces.resolveConfigRoot(project);
     return readProjectConfigText(configRoot, project.configPath);
   }
 
   /** Validate and persist raw config YAML to the project's config file. */
   async saveConfigText(project: Project, yaml: string): Promise<ProjectConfig> {
-    const configRoot = await this.workspaces.resolveConfigRoot(project);
-    return saveProjectConfigText(configRoot, yaml, project.configPath);
+    const config = validateProjectConfigYaml(yaml);
+    // Always store in the DB so multi-folder workspaces don't conflict.
+    await this.c.projects.update(project.id, { configYaml: yaml });
+    // Also write to disk for backward compatibility.
+    try {
+      const configRoot = await this.workspaces.resolveConfigRoot(project);
+      await saveProjectConfigText(configRoot, yaml, project.configPath);
+    } catch {
+      // Config root not resolvable — DB is the source of truth.
+    }
+    return config;
   }
 
   /** Build the Kanban board from the configured columns and stored tickets. */

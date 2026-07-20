@@ -41,9 +41,18 @@ export const projects = pgTable('projects', {
   boardProvider: text('board_provider').notNull().default('native'),
   defaultBranch: text('default_branch').notNull().default('main'),
   configPath: text('config_path').notNull().default('.orion/config.yaml'),
+  configYaml: text('config_yaml'),
   counter: integer('counter').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const projectPaths = pgTable('project_paths', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  path: text('path').notNull(),
 });
 
 export const epics = pgTable('epics', {

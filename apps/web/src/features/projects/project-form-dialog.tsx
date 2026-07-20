@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { PathPicker } from './path-picker';
+import { MultiPathPicker } from './multi-path-picker';
 
 const SOURCE_LABELS: Record<ProjectSourceKind, string> = {
   remote: 'Remote repository (clone a git URL)',
@@ -44,6 +45,7 @@ export function ProjectFormDialog({ open, onOpenChange, project, onSaved }: Proj
   const [sourceKind, setSourceKind] = useState<ProjectSourceKind>('remote');
   const [repoUrl, setRepoUrl] = useState('');
   const [rootPath, setRootPath] = useState('');
+  const [paths, setPaths] = useState<string[]>([]);
   const [defaultBranch, setDefaultBranch] = useState('main');
   const [configPath, setConfigPath] = useState(DEFAULT_CONFIG_PATH);
   const [submitting, setSubmitting] = useState(false);
@@ -54,23 +56,34 @@ export function ProjectFormDialog({ open, onOpenChange, project, onSaved }: Proj
     setSourceKind(project?.sourceKind ?? 'remote');
     setRepoUrl(project?.repoUrl ?? '');
     setRootPath(project?.rootPath ?? '');
+    setPaths(project?.paths ?? []);
     setDefaultBranch(project?.defaultBranch ?? 'main');
     setConfigPath(project?.configPath ?? DEFAULT_CONFIG_PATH);
   }, [open, project]);
 
   const isLocal = sourceKind !== 'remote';
-  const valid = name.trim() && (isLocal ? rootPath.trim() : repoUrl.trim());
+  const valid =
+    name.trim() &&
+    (isLocal
+      ? sourceKind === 'workspace'
+        ? paths.filter((p) => p.trim()).length > 0
+        : rootPath.trim()
+      : repoUrl.trim());
 
   const submit = async () => {
     if (!valid) return;
     setSubmitting(true);
     try {
       const cleanRootPath = rootPath.trim().replace(/(.)\/+$/, '$1');
+      const cleanPaths = paths
+        .map((p) => p.trim().replace(/(.)\/+$/, '$1'))
+        .filter((p) => p.length > 0);
       const payload = {
         name: name.trim(),
         sourceKind,
         repoUrl: isLocal ? '' : repoUrl.trim(),
-        rootPath: isLocal ? cleanRootPath : undefined,
+        rootPath: isLocal && sourceKind !== 'workspace' ? cleanRootPath : undefined,
+        paths: sourceKind === 'workspace' ? cleanPaths : undefined,
         defaultBranch: defaultBranch.trim() || 'main',
         configPath: configPath.trim() || DEFAULT_CONFIG_PATH,
       };
@@ -124,20 +137,32 @@ export function ProjectFormDialog({ open, onOpenChange, project, onSaved }: Proj
           </div>
 
           {isLocal ? (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="project-path">
-                {sourceKind === 'workspace' ? 'Workspace folder path' : 'Repository path'}
-              </Label>
-              <PathPicker
-                id="project-path"
-                value={rootPath}
-                onChange={setRootPath}
-                placeholder="Start typing a path, e.g. /Users/you/Development"
-              />
-              <p className="text-xs text-muted-foreground">
-                Browse folders on the server. Type to filter; click a folder to open it.
-              </p>
-            </div>
+            sourceKind === 'workspace' ? (
+              <div className="flex flex-col gap-2">
+                <Label>Workspace folders</Label>
+                <MultiPathPicker
+                  paths={paths}
+                  onChange={setPaths}
+                  placeholder="Start typing a path, e.g. /Users/you/Development"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Add one or more folders. Each becomes a repo in your workspace.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="project-path">Repository path</Label>
+                <PathPicker
+                  id="project-path"
+                  value={rootPath}
+                  onChange={setRootPath}
+                  placeholder="Start typing a path, e.g. /Users/you/Development"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Browse folders on the server. Type to filter; click a folder to open it.
+                </p>
+              </div>
+            )
           ) : (
             <div className="flex flex-col gap-2">
               <Label htmlFor="project-repo">Repository URL</Label>

@@ -1,4 +1,4 @@
-import { readdir, stat } from 'node:fs/promises';
+import { mkdir, readdir, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { Project } from '@orion/models';
 import type { RepoRef, ScmProvider, WorktreeHandle } from '@orion/scm-core';
@@ -38,23 +38,38 @@ export class WorkspaceService {
     return this.c.scm.get(project.scmProvider);
   }
 
+  /** Whether this project stores its config YAML in the database. */
+  private usesDbConfig(project: Project): boolean {
+    return Boolean(project.configYaml);
+  }
+
+  /** Absolute path to the managed DB-based config directory for a project. */
+  private managedConfigDir(project: Project): string {
+    return join(this.c.env.workspaceDir, 'projects', project.id, '.orion');
+  }
+
   /** Discover the member repositories that make up a project. */
   async members(project: Project): Promise<Member[]> {
     if (project.sourceKind === 'remote') {
       return [{ name: sanitize(project.name), ref: { url: project.repoUrl } }];
     }
-    if (!project.rootPath) {
-      throw new Error(`Project "${project.name}" has no rootPath`);
+    if (!project.rootPath && (!project.paths || project.paths.length === 0)) {
+      throw new Error(`Project "${project.name}" has no rootPath or paths`);
     }
     if (project.sourceKind === 'local') {
-      return [{ name: sanitize(basename(project.rootPath)), ref: { path: project.rootPath } }];
+      const p = project.rootPath!;
+      return [{ name: sanitize(basename(p)), ref: { path: p } }];
     }
-    // workspace: every immediate subdirectory that is a git repo.
-    const entries = await readdir(project.rootPath, { withFileTypes: true });
+    // workspace: use explicit paths if provided, otherwise scan rootPath.
+    if (project.paths && project.paths.length > 0) {
+      return project.paths.map((p) => ({ name: sanitize(basename(p)), ref: { path: p } }));
+    }
+    // Legacy: scan rootPath for immediate git subdirectories.
+    const entries = await readdir(project.rootPath!, { withFileTypes: true });
     const members: Member[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const path = join(project.rootPath, entry.name);
+      const path = join(project.rootPath!, entry.name);
       if (await isGitRepo(path)) {
         members.push({ name: sanitize(entry.name), ref: { path } });
       }
@@ -73,6 +88,11 @@ export class WorkspaceService {
         { workspaceDir: this.c.env.workspaceDir },
       );
     }
+    if (this.usesDbConfig(project)) {
+      const dir = this.managedConfigDir(project);
+      await mkdir(dir, { recursive: true });
+      return dir;
+    }
     if (!project.rootPath) {
       throw new Error(`Project "${project.name}" has no rootPath`);
     }
@@ -84,8 +104,6 @@ export class WorkspaceService {
     const scm = this.scm(project);
     const members = await this.members(project);
     const multi = members.length > 1;
-    // Worktrees always live under the managed workspace volume so the source
-    // repositories (which may be the user's own local checkouts) stay untouched.
     const runDir = join(this.c.env.workspaceDir, 'runs', runId);
 
     const handles: WorktreeHandle[] = [];
@@ -113,8 +131,16 @@ export class WorkspaceService {
     }
 
     const rootPath = multi ? runDir : repos[0].path;
-    const configRoot =
-      project.sourceKind === 'workspace' ? (project.rootPath as string) : repos[0].path;
+    let configRoot: string;
+    if (project.sourceKind === 'remote') {
+      configRoot = repos[0].path;
+    } else if (this.usesDbConfig(project)) {
+      configRoot = this.managedConfigDir(project);
+    } else if (project.sourceKind === 'workspace') {
+      configRoot = project.rootPath as string;
+    } else {
+      configRoot = repos[0].path;
+    }
 
     return {
       workspace: { rootPath, configRoot, repos },

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PlusIcon, SearchIcon, TicketIcon, TrashIcon } from 'lucide-react';
+import { PlusIcon, SearchIcon, SparklesIcon, TicketIcon, TrashIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import type { Label as LabelModel, Ticket, TicketPriority, TicketType } from '@orion/models';
+import type { AgentTicketPreviewResponse, Label as LabelModel, Ticket, TicketPriority, TicketType } from '@orion/models';
 import { ALL_DEFAULT_TICKET_TYPES } from '@orion/models';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { api } from '@/lib/api';
+import { CreateTicketAiModal } from '@/features/board/create-ticket-ai-modal';
 import { useProjects } from '@/features/projects/hooks';
 import { IssueDetailSheet } from './issue-detail-sheet';
 
@@ -81,6 +82,8 @@ export function IssuesPage() {
   const [newTicketCreating, setNewTicketCreating] = useState(false);
 
   const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
+
+  const [aiModalOpen, setAiModalOpen] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -206,6 +209,16 @@ export function IssuesPage() {
     }
   };
 
+  const createFromAi = async (preview: AgentTicketPreviewResponse, pid: string) => {
+    await api.createTicket(pid, {
+      title: preview.title,
+      description: preview.description,
+      type: preview.type,
+      priority: preview.priority as TicketPriority,
+    });
+    load();
+  };
+
   const confirmDelete = async () => {
     if (!deletingTicketId) return;
     try {
@@ -240,10 +253,20 @@ export function IssuesPage() {
             View and search all tickets across projects.
           </p>
         </div>
-        <Button onClick={() => setNewTicketOpen(true)}>
-          <PlusIcon data-icon="inline-start" />
-          New ticket
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => setNewTicketOpen(true)}>
+            <PlusIcon data-icon="inline-start" />
+            New ticket
+          </Button>
+          <Button
+            onClick={() => setAiModalOpen(true)}
+            disabled={projects.length === 0}
+            className="relative overflow-hidden bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white transition-all duration-300 hover:from-violet-700 hover:to-fuchsia-700 hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] animate-pulse-glow"
+          >
+            <SparklesIcon data-icon="inline-start" />
+            Create with AI
+          </Button>
+        </div>
       </header>
 
       <div className="flex items-center gap-3 border-b bg-card px-6 py-3">
@@ -480,6 +503,14 @@ export function IssuesPage() {
         ticket={selectedTicket}
         onClose={() => setSelectedTicket(null)}
         onChanged={handleChanged}
+      />
+
+      <CreateTicketAiModal
+        open={aiModalOpen}
+        onOpenChange={setAiModalOpen}
+        projectId={projects[0]?.id ?? null}
+        projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+        onCreate={createFromAi}
       />
     </div>
   );

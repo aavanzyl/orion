@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { api, type WorkflowTemplateDetail } from '@/lib/api';
 import { PathPicker } from './path-picker';
+import { MultiPathPicker } from './multi-path-picker';
 
 const SOURCE_LABELS: Record<ProjectSourceKind, string> = {
   remote: 'Remote repository (clone a git URL)',
@@ -50,6 +51,7 @@ export function ProjectWizard({ open, onOpenChange, onSaved }: ProjectWizardProp
   const [sourceKind, setSourceKind] = useState<ProjectSourceKind>('remote');
   const [repoUrl, setRepoUrl] = useState('');
   const [rootPath, setRootPath] = useState('');
+  const [paths, setPaths] = useState<string[]>([]);
   const [defaultBranch, setDefaultBranch] = useState('main');
 
   const [selectedTemplate, setSelectedTemplate] = useState('default');
@@ -72,6 +74,7 @@ export function ProjectWizard({ open, onOpenChange, onSaved }: ProjectWizardProp
       setSourceKind('remote');
       setRepoUrl('');
       setRootPath('');
+      setPaths([]);
       setDefaultBranch('main');
       setSelectedTemplate('default');
       setProviders([]);
@@ -158,7 +161,11 @@ export function ProjectWizard({ open, onOpenChange, onSaved }: ProjectWizardProp
   }, [templateDetail, provider, model, name, defaultBranch]);
 
   const validStep1 =
-    name.trim() && (isLocal ? rootPath.trim() : repoUrl.trim());
+    name.trim() && (isLocal
+      ? (sourceKind === 'workspace'
+          ? paths.filter((p) => p.trim()).length > 0
+          : rootPath.trim())
+      : repoUrl.trim());
 
   const stepBack = () => setStep((prev) => Math.max(0, prev - 1));
   const stepNext = () => {
@@ -170,15 +177,19 @@ export function ProjectWizard({ open, onOpenChange, onSaved }: ProjectWizardProp
     setSubmitting(true);
     try {
       const cleanRootPath = rootPath.trim().replace(/(.)\/+$/, '$1');
+      const cleanPaths = paths
+        .map((p) => p.trim().replace(/(.)\/+$/, '$1'))
+        .filter((p) => p.length > 0);
       await api.createProject({
         name: name.trim(),
         sourceKind,
         repoUrl: isLocal ? '' : repoUrl.trim(),
-        rootPath: isLocal ? cleanRootPath : undefined,
+        rootPath: isLocal && sourceKind !== 'workspace' ? cleanRootPath : undefined,
+        paths: sourceKind === 'workspace' ? cleanPaths : undefined,
         defaultBranch: defaultBranch.trim() || 'main',
         configPath: '.orion/config.yaml',
-        config: generatedYaml,
-      } as Parameters<typeof api.createProject>[0] & { config: string });
+        configYaml: generatedYaml,
+      } as Parameters<typeof api.createProject>[0]);
       toast.success('Project created');
       onOpenChange(false);
       onSaved();
@@ -284,22 +295,32 @@ export function ProjectWizard({ open, onOpenChange, onSaved }: ProjectWizardProp
             </div>
 
             {isLocal ? (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="wiz-path">
-                  {sourceKind === 'workspace'
-                    ? 'Workspace folder path'
-                    : 'Repository path'}
-                </Label>
-                <PathPicker
-                  id="wiz-path"
-                  value={rootPath}
-                  onChange={setRootPath}
-                  placeholder="Start typing a path, e.g. /Users/you/Development"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Browse folders on the server.
-                </p>
-              </div>
+              sourceKind === 'workspace' ? (
+                <div className="flex flex-col gap-2">
+                  <Label>Workspace folders</Label>
+                  <MultiPathPicker
+                    paths={paths}
+                    onChange={setPaths}
+                    placeholder="Start typing a path, e.g. /Users/you/Development"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Add one or more folders. Each becomes a repo in your workspace.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="wiz-path">Repository path</Label>
+                  <PathPicker
+                    id="wiz-path"
+                    value={rootPath}
+                    onChange={setRootPath}
+                    placeholder="Start typing a path, e.g. /Users/you/Development"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Browse folders on the server.
+                  </p>
+                </div>
+              )
             ) : (
               <div className="flex flex-col gap-2">
                 <Label htmlFor="wiz-repo">Repository URL</Label>

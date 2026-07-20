@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PlusIcon, TrashIcon, XIcon, PlayIcon, HistoryIcon, SquarePenIcon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from 'lucide-react';
+import { PlusIcon, SparklesIcon, TrashIcon, XIcon, PlayIcon, HistoryIcon, SquarePenIcon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import type {
   BoardSwimlane,
@@ -43,6 +43,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog';
 import { RunLogViewer } from '@/components/run-log-viewer';
 import { api } from '@/lib/api';
 import { useTicketDetail } from './hooks';
+import { UpdateTicketAiModal } from './update-ticket-ai-modal';
 import { PrioritySelect, PRIORITY_META, PriorityIcon } from './priority';
 import { LabelPicker, LabelBadge } from './label-picker';
 import { RELATION_KINDS, RelationKindSelect, TicketSelect } from './ticket-picker';
@@ -88,6 +89,8 @@ export function TicketSheet({
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [runsLoading, setRunsLoading] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+
+  const [updateAiModalOpen, setUpdateAiModalOpen] = useState(false);
 
   const current = detail ?? ticket;
 
@@ -278,6 +281,19 @@ export function TicketSheet({
                 disabled={savingTitle}
                 className="flex-1 text-base font-semibold"
               />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setUpdateAiModalOpen(true)}
+                    className="size-8 shrink-0 text-violet-500 hover:text-violet-700 hover:bg-violet-50 animate-pulse-glow"
+                  >
+                    <SparklesIcon className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Ask the agent to update this ticket</TooltipContent>
+              </Tooltip>
             </div>
           ) : (
             <div className="flex items-center gap-2">
@@ -287,6 +303,19 @@ export function TicketSheet({
                 </Badge>
               )}
               <h3 className="flex-1 text-base font-semibold">{current?.title}</h3>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setUpdateAiModalOpen(true)}
+                    className="size-8 shrink-0 text-violet-500 hover:text-violet-700 hover:bg-violet-50 animate-pulse-glow"
+                  >
+                    <SparklesIcon className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Ask the agent to update this ticket</TooltipContent>
+              </Tooltip>
             </div>
           )}
         </SheetHeader>
@@ -302,7 +331,7 @@ export function TicketSheet({
                       value={detail?.type ?? 'feature'}
                       onValueChange={(v) => patch({ type: v as TicketType })}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className="w-full bg-white dark:bg-zinc-800">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -317,7 +346,7 @@ export function TicketSheet({
                   <div className="flex flex-col gap-1.5">
                     <Label className="text-xs text-muted-foreground">Swimlane</Label>
                     <Select value={current?.swimlane} onValueChange={moveToSwimlane}>
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className="w-full bg-white dark:bg-zinc-800">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -353,6 +382,7 @@ export function TicketSheet({
                         const val = e.target.value;
                         void patch({ startDate: val || null });
                       }}
+                      className="bg-white dark:bg-zinc-800"
                     />
                   </div>
                   <div className="flex flex-1 flex-col gap-1.5">
@@ -364,6 +394,7 @@ export function TicketSheet({
                         const val = e.target.value;
                         void patch({ dueDate: val || null });
                       }}
+                      className="bg-white dark:bg-zinc-800"
                     />
                   </div>
                 </div>
@@ -375,7 +406,7 @@ export function TicketSheet({
                     onChange={setDescription}
                     rows={10}
                     placeholder="Add a description… Markdown supported."
-                    className="min-h-[200px]"
+                    className="min-h-[200px] bg-white dark:bg-zinc-800"
                   />
                 </div>
 
@@ -793,6 +824,23 @@ export function TicketSheet({
       confirmLabel="Delete"
       onConfirm={confirmDeleteTicket}
     />
+
+    {ticket && (
+      <UpdateTicketAiModal
+        open={updateAiModalOpen}
+        onOpenChange={setUpdateAiModalOpen}
+        ticketId={ticket.id}
+        ticketTitle={current?.title ?? ''}
+        ticketDescription={current?.description ?? ''}
+        ticketType={current?.type ?? 'feature'}
+        ticketPriority={current?.priority ?? 0}
+        onApplied={() => {
+          refetch();
+          onChanged();
+          setViewMode('view');
+        }}
+      />
+    )}
   </>
   );
 }

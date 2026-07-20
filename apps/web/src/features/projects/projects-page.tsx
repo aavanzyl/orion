@@ -96,8 +96,10 @@ export function ProjectsPage() {
                   </TableCell>
                   <TableCell className="max-w-48 truncate text-muted-foreground">
                     {project.sourceKind === 'remote'
-                      ? project.repoUrl || '—'
-                      : project.rootPath || '—'}
+                      ? project.repoUrl || '\u2014'
+                      : project.sourceKind === 'workspace' && project.paths && project.paths.length > 0
+                        ? `${project.paths.length} folder${project.paths.length > 1 ? 's' : ''}`
+                        : project.rootPath || '\u2014'}
                   </TableCell>
                   <TableCell>{project.defaultBranch}</TableCell>
                   <TableCell className="font-mono text-xs">{project.configPath}</TableCell>

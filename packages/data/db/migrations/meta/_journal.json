@@ -204,6 +204,13 @@
       "when": 1783361400000,
       "tag": "0031_enriched_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1783361500000,
+      "tag": "0032_multi_folder_workspace",
+      "breakpoints": true
     }
   ]
 }

@@ -15,15 +15,19 @@ export interface Project {
   sourceKind: ProjectSourceKind;
   /** Git remote URL (used when `sourceKind` is `remote`). */
   repoUrl: string;
-  /** Absolute local path (used when `sourceKind` is `local` or `workspace`). */
+  /** Absolute local path (used when `sourceKind` is `local`). */
   rootPath?: string;
+  /** Absolute local paths for each folder in a multi-folder workspace. */
+  paths?: string[];
   /** SCM adapter key, e.g. `github`. */
   scmProvider: string;
   /** Board adapter key, e.g. `native`. */
   boardProvider: string;
   defaultBranch: string;
-  /** Path to the config file within the repo/workspace root. */
+  /** Path to the config file within the repo/workspace root (file-based config). */
   configPath: string;
+  /** Raw YAML config stored in the database (DB-based config). */
+  configYaml?: string | null;
   /** Auto-incrementing counter for JIRA-style ticket keys (e.g. ORION-42). */
   ticketCounter?: number;
   createdAt: string;
@@ -35,10 +39,14 @@ export interface CreateProjectInput {
   sourceKind?: ProjectSourceKind;
   repoUrl?: string;
   rootPath?: string;
+  /** Folder paths for a multi-folder workspace. */
+  paths?: string[];
   scmProvider?: string;
   boardProvider?: string;
   defaultBranch?: string;
   configPath?: string;
+  /** Raw YAML config to store in the DB (DB-based config). */
+  configYaml?: string;
 }
 
 /** Mutable fields of a project. All optional — only provided fields are changed. */
@@ -47,8 +55,12 @@ export interface UpdateProjectInput {
   sourceKind?: ProjectSourceKind;
   repoUrl?: string;
   rootPath?: string;
+  /** Folder paths for a multi-folder workspace. */
+  paths?: string[];
   scmProvider?: string;
   boardProvider?: string;
   defaultBranch?: string;
   configPath?: string;
+  /** Raw YAML config to store in the DB (DB-based config). */
+  configYaml?: string;
 }

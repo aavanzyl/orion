@@ -1,4 +1,6 @@
 import type {
+  AgentTicketPreviewResponse,
+  AgentTicketUpdateResponse,
   ApiResponse,
   AppBranding,
   AppPreferences,
@@ -327,6 +329,16 @@ export const api = {
     request<WorkflowRouteResult>(`/projects/${projectId}/route`, {
       method: 'POST',
       body: JSON.stringify({ message }),
+    }),
+  previewTicket: (projectId: string, prompt: string) =>
+    request<AgentTicketPreviewResponse>(`/projects/${projectId}/tickets/agent-preview`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    }),
+  previewTicketUpdate: (ticketId: string, prompt: string) =>
+    request<AgentTicketUpdateResponse>(`/tickets/${ticketId}/agent-preview`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
     }),
   listSchedules: (projectId: string) => request<Schedule[]>(`/projects/${projectId}/schedules`),
   listAllSchedules: () => request<Schedule[]>('/schedules'),

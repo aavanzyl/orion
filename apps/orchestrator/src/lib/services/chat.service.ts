@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { listWorkflowTemplates, loadProjectConfig } from '@orion/config';
 import type {
   AgentDefaults,
+  AgentTicketPreviewResponse,
+  AgentTicketUpdateResponse,
   ChatEvent,
   ChatMessage,
   ChatUsage,
@@ -210,6 +212,58 @@ export class ChatService {
     }
 
     return fallbackRoute(message, projectWorkflow, catalog);
+  }
+
+  /**
+   * Generate a ticket draft from a natural-language prompt. The agent fills in
+   * title, description, type, priority and suggested labels — the caller can
+   * then present the draft for user review before persisting.
+   */
+  async previewTicket(projectId: string, prompt: string): Promise<AgentTicketPreviewResponse> {
+    const agent = await this.resolveChatAgent(projectId);
+    const board = this.c.boards.get('native');
+    const [labels, allTickets] = await Promise.all([
+      board.listLabels(projectId),
+      this.c.tickets.listByProject(projectId),
+    ]);
+    const labelsCsv = labels.map((l) => l.name).join(', ');
+    const existingTitles = allTickets.map((t) => t.title).join('\n- ');
+    const harness = this.c.harnesses.get(agent.harness);
+    const result = await harness.run(
+      buildTicketPreviewPrompt(prompt, labelsCsv, existingTitles),
+      {
+        workingDirectory: agent.workingDirectory ?? process.cwd(),
+        model: agent.model,
+        baseUrl: agent.baseUrl,
+        apiKey: agent.apiKey,
+        config: agent.config,
+      },
+    );
+    return parseTicketPreviewJson(result.finalResponse, prompt);
+  }
+
+  /**
+   * Generate update suggestions for an existing ticket from a natural-language
+   * instruction. Returns only the fields that the agent believes should change.
+   */
+  async previewTicketUpdate(ticketId: string, prompt: string): Promise<AgentTicketUpdateResponse> {
+    const board = this.c.boards.get('native');
+    const detail = await board.getTicketDetail(ticketId);
+    if (!detail) throw new Error(`Ticket ${ticketId} not found`);
+    const agent = await this.resolveChatAgent(detail.projectId);
+    const labels = await board.listLabels(detail.projectId);
+    const harness = this.c.harnesses.get(agent.harness);
+    const result = await harness.run(
+      buildTicketUpdatePrompt(detail, labels.map((l) => ({ id: l.id, name: l.name })), prompt),
+      {
+        workingDirectory: agent.workingDirectory ?? process.cwd(),
+        model: agent.model,
+        baseUrl: agent.baseUrl,
+        apiKey: agent.apiKey,
+        config: agent.config,
+      },
+    );
+    return parseTicketUpdateJson(result.finalResponse, prompt);
   }
 
   /**
@@ -536,4 +590,103 @@ function normalizeChatError(error: string): string {
     return `${error}. The request timed out. Try again or check your network connection.`;
   }
   return error;
+}
+
+function buildTicketPreviewPrompt(prompt: string, labelsCsv: string, existingTitles: string): string {
+  return [
+    'You are an assistant that drafts tickets for a software project board. Given a natural-language request, produce a structured ticket draft.',
+    '',
+    'Project context:',
+    `Available labels: ${labelsCsv || '(none)'}`,
+    `Existing ticket titles:\n- ${existingTitles || '(none)'}`,
+    '',
+    `User request: ${prompt}`,
+    '',
+    'Reply with STRICT JSON only, no prose, matching exactly:',
+    '{ "title": string, "description": string, "type": "feature" | "bug" | "issue" | "hotfix", "priority": 0 | 1 | 2 | 3 | 4, "labels": string[], "reasoning": string }',
+    'Priority: 0=no priority, 1=urgent, 2=high, 3=medium, 4=low.',
+    'Choose labels from the available list. Do NOT invent new labels.',
+    'Write the description in markdown with clear acceptance criteria.',
+  ].join('\n');
+}
+
+function parseTicketPreviewJson(text: string, fallbackTitle: string): AgentTicketPreviewResponse {
+  const json = extractFirstJson(text);
+  if (json) {
+    const obj = json as Record<string, unknown>;
+    return {
+      title: typeof obj.title === 'string' && obj.title ? obj.title : fallbackTitle.slice(0, 80),
+      description: typeof obj.description === 'string' ? obj.description : '',
+      type: typeof obj.type === 'string' ? obj.type : 'feature',
+      priority: typeof obj.priority === 'number' && obj.priority >= 0 && obj.priority <= 4 ? obj.priority : 0,
+      labels: Array.isArray(obj.labels) ? obj.labels.filter((l: unknown): l is string => typeof l === 'string') : [],
+      reasoning: typeof obj.reasoning === 'string' ? obj.reasoning : '',
+    };
+  }
+  return {
+    title: fallbackTitle.slice(0, 80),
+    description: '',
+    type: 'feature',
+    priority: 0,
+    labels: [],
+    reasoning: '',
+  };
+}
+
+function buildTicketUpdatePrompt(
+  ticket: { title: string; description: string; type: string; priority: number },
+  labels: { id: string; name: string }[],
+  prompt: string,
+): string {
+  const labelList = labels.map((l) => `${l.name} (id: ${l.id})`).join(', ');
+  return [
+    'You are an assistant that updates software project tickets. Given a ticket and a natural-language instruction, return the fields that should change.',
+    '',
+    `Current ticket:`,
+    `Title: ${ticket.title}`,
+    `Type: ${ticket.type}`,
+    `Priority: ${ticket.priority} (0=none, 1=urgent, 2=high, 3=medium, 4=low)`,
+    `Description: ${ticket.description.slice(0, 500)}`,
+    `Available labels: ${labelList || '(none)'}`,
+    '',
+    `Update instruction: ${prompt}`,
+    '',
+    'Reply with STRICT JSON only, no prose, matching exactly:',
+    '{ "title": string | null, "description": string | null, "type": string | null, "priority": number | null, "labelIds": string[] | null, "reasoning": string }',
+    'Only include fields that should change. For unchanged fields, use null. Use the exact label ids from the available list.',
+  ].join('\n');
+}
+
+function parseTicketUpdateJson(text: string, fallbackReason: string): AgentTicketUpdateResponse {
+  const json = extractFirstJson(text);
+  if (json) {
+    const obj = json as Record<string, unknown>;
+    return {
+      title: typeof obj.title === 'string' && obj.title ? obj.title : undefined,
+      description: typeof obj.description === 'string' && obj.description ? obj.description : undefined,
+      type: typeof obj.type === 'string' && obj.type ? obj.type : undefined,
+      priority: typeof obj.priority === 'number' && obj.priority >= 0 && obj.priority <= 4 ? obj.priority : undefined,
+      labelIds: Array.isArray(obj.labelIds) ? obj.labelIds.filter((l: unknown): l is string => typeof l === 'string') : undefined,
+      reasoning: typeof obj.reasoning === 'string' && obj.reasoning ? obj.reasoning : fallbackReason,
+    };
+  }
+  return {
+    title: undefined,
+    description: undefined,
+    type: undefined,
+    priority: undefined,
+    labelIds: undefined,
+    reasoning: fallbackReason,
+  };
+}
+
+function extractFirstJson(text: string): Record<string, unknown> | null {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 }

@@ -143,3 +143,16 @@
     @apply bg-background text-foreground antialiased;
   }
 }
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(139, 92, 246, 0.45);
+  }
+}
+
+@utility animate-pulse-glow {
+  animation: pulse-glow 2.5s ease-in-out infinite;
+}

@@ -20,7 +20,7 @@ services:
   orchestrator:
     build:
       context: .
-      dockerfile: Dockerfile.orchestrator
+      dockerfile: apps/orchestrator/Dockerfile
     image: orion-backend
     container_name: orion-orchestrator
     restart: unless-stopped

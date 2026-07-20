@@ -630,13 +630,14 @@ export function createApiRouter(
   router.post(
     '/projects',
     asyncHandler(async (req, res) => {
-      const { name, sourceKind = 'remote', repoUrl, rootPath, config } = req.body ?? {};
+      const { name, sourceKind = 'remote', repoUrl, rootPath, paths, config } = req.body ?? {};
       if (!name) return fail(res, 'name is required');
       if (sourceKind === 'remote' && !repoUrl) {
         return fail(res, 'repoUrl is required for remote projects');
       }
-      if (sourceKind !== 'remote' && !rootPath) {
-        return fail(res, 'rootPath is required for local/workspace projects');
+      const hasLocalPath = rootPath || (Array.isArray(paths) && paths.length > 0);
+      if (sourceKind !== 'remote' && !hasLocalPath) {
+        return fail(res, 'rootPath or paths is required for local/workspace projects');
       }
       // Local and workspace sources are handled by the git-based SCM adapter.
       const scmProvider = req.body.scmProvider ?? 'github';
@@ -966,6 +967,15 @@ export function createApiRouter(
     }),
   );
 
+  router.post(
+    '/projects/:id/tickets/agent-preview',
+    asyncHandler(async (req, res) => {
+      const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+      if (!prompt) return fail(res, 'prompt is required');
+      ok(res, await chat.previewTicket(req.params.id, prompt));
+    }),
+  );
+
   router.get(
     '/projects/:id/labels',
     asyncHandler(async (req, res) => {
@@ -1073,6 +1083,15 @@ export function createApiRouter(
       const detail = await board.getTicketDetail(req.params.id);
       if (!detail) return fail(res, 'Ticket not found', 404);
       ok(res, detail);
+    }),
+  );
+
+  router.post(
+    '/tickets/:id/agent-preview',
+    asyncHandler(async (req, res) => {
+      const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+      if (!prompt) return fail(res, 'prompt is required');
+      ok(res, await chat.previewTicketUpdate(req.params.id, prompt));
     }),
   );
 

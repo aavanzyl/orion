@@ -34,3 +34,12 @@ export function saveProjectConfig(
 ): Promise<ProjectConfig> {
   return saveProjectConfigText(repoDir, serializeProjectConfig(config), configPath);
 }
+
+/**
+ * Validate a raw YAML string as a ProjectConfig without persisting it to disk.
+ * Returns the parsed config on success; throws `ConfigError` on failure.
+ * Useful when config is stored in the database.
+ */
+export function validateProjectConfigYaml(yaml: string): ProjectConfig {
+  return parseProjectConfig(yaml);
+}

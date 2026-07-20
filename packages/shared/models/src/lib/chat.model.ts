@@ -88,3 +88,29 @@ export interface AddChatMessageInput {
   content: string;
   usage?: ChatUsage;
 }
+
+export interface AgentTicketPreviewRequest {
+  prompt: string;
+}
+
+export interface AgentTicketPreviewResponse {
+  title: string;
+  description: string;
+  type: string;
+  priority: number;
+  labels: string[];
+  reasoning: string;
+}
+
+export interface AgentTicketUpdateRequest {
+  prompt: string;
+}
+
+export interface AgentTicketUpdateResponse {
+  title?: string;
+  description?: string;
+  type?: string;
+  priority?: number;
+  labelIds?: string[];
+  reasoning: string;
+}

@@ -119,3 +119,11 @@ export async function readProjectConfigText(
     return null;
   }
 }
+
+/**
+ * Load project config from a raw YAML string (e.g. stored in the database).
+ * Throws `ConfigError` if the YAML is invalid.
+ */
+export function loadProjectConfigFromYaml(yaml: string): ProjectConfig {
+  return parseProjectConfig(yaml);
+}

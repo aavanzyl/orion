@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { PlusIcon, XIcon } from 'lucide-react';
 import type {
+  AgentTicketPreviewResponse,
   BoardSwimlane,
   CreateTicketInput,
   Label as LabelModel,
@@ -46,6 +47,9 @@ interface NewTicketSheetProps {
   epicTickets: Ticket[];
   projectId: string | null;
   ticketTypes?: { value: string; label: string }[];
+  prefill?: AgentTicketPreviewResponse | null;
+  onPrefillConsumed?: () => void;
+  triggerLabel?: string;
   onCreateLabel: (name: string, color: string) => Promise<void>;
   onCreate: (input: CreateInput) => Promise<void>;
 }
@@ -55,8 +59,11 @@ export function NewTicketSheet({
   labels,
   tickets,
   epicTickets,
-  projectId: _projectId,
+  projectId,
   ticketTypes,
+  prefill,
+  onPrefillConsumed,
+  triggerLabel = 'New ticket',
   onCreateLabel,
   onCreate,
 }: NewTicketSheetProps) {
@@ -79,6 +86,22 @@ export function NewTicketSheet({
   useEffect(() => {
     if (open) setSwimlane((prev) => prev ?? swimlanes[0]?.key);
   }, [open, swimlanes]);
+
+  useEffect(() => {
+    if (!open || !prefill) return;
+    setTitle(prefill.title);
+    setDescription(prefill.description);
+    setTicketType(prefill.type as TicketType);
+    setPriority(prefill.priority as TicketPriority);
+    if (prefill.labels.length > 0) {
+      const byName = new Map(labels.map((l) => [l.name.toLowerCase(), l.id]));
+      const ids = prefill.labels
+        .map((n) => byName.get(n.toLowerCase()))
+        .filter((id): id is string => id !== undefined);
+      if (ids.length > 0) setLabelIds(ids);
+    }
+    onPrefillConsumed?.();
+  }, [open, prefill]);
 
   const reset = () => {
     setTitle('');
@@ -129,14 +152,14 @@ export function NewTicketSheet({
     }
   };
 
-  const ticketTitle = (id: string) => tickets.find((t) => t.id === id)?.title ?? id;
+  const ticketTitleStr = (id: string) => tickets.find((t) => t.id === id)?.title ?? id;
 
   return (
     <Sheet open={open} onOpenChange={(o) => (o ? setOpen(true) : (setOpen(false), reset()))}>
       <SheetTrigger asChild>
         <Button>
           <PlusIcon data-icon="inline-start" />
-          New ticket
+          {triggerLabel}
         </Button>
       </SheetTrigger>
       <SheetContent className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
@@ -154,6 +177,7 @@ export function NewTicketSheet({
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Fix flaky login test"
+                className="bg-white dark:bg-zinc-800"
               />
             </div>
 
@@ -161,7 +185,7 @@ export function NewTicketSheet({
               <div className="flex flex-col gap-1.5">
                 <Label className="text-xs text-muted-foreground">Type</Label>
                 <Select value={ticketType} onValueChange={(v) => setTicketType(v as TicketType)}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full bg-white dark:bg-zinc-800">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -176,7 +200,7 @@ export function NewTicketSheet({
               <div className="flex flex-col gap-1.5">
                 <Label className="text-xs text-muted-foreground">Swimlane</Label>
                 <Select value={swimlane} onValueChange={setSwimlane}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full bg-white dark:bg-zinc-800">
                     <SelectValue placeholder="Select a swimlane" />
                   </SelectTrigger>
                   <SelectContent>
@@ -202,6 +226,7 @@ export function NewTicketSheet({
                   type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
+                  className="bg-white dark:bg-zinc-800"
                 />
               </div>
               <div className="flex flex-1 flex-col gap-1.5">
@@ -211,6 +236,7 @@ export function NewTicketSheet({
                   type="date"
                   value={dueDate}
                   onChange={(e) => setDueDate(e.target.value)}
+                  className="bg-white dark:bg-zinc-800"
                 />
               </div>
             </div>
@@ -223,6 +249,7 @@ export function NewTicketSheet({
                 onChange={setDescription}
                 rows={36}
                 placeholder="Context, acceptance criteria, links… Markdown supported."
+                className="bg-white dark:bg-zinc-800"
               />
             </div>
 
@@ -285,7 +312,7 @@ export function NewTicketSheet({
                         <span className="text-muted-foreground">
                           {RELATION_KINDS.find((k) => k.value === rel.kind)?.label}:{' '}
                         </span>
-                        {ticketTitle(rel.ticketId)}
+                        {ticketTitleStr(rel.ticketId)}
                       </span>
                       <button
                         type="button"
@@ -324,7 +351,7 @@ export function NewTicketSheet({
 
         <SheetFooter className="flex items-center justify-between border-t">
           <Button variant="ghost" onClick={() => { reset(); setOpen(false); }}>Cancel</Button>
-          <Button onClick={submit} disabled={submitting}>
+          <Button onClick={submit} disabled={submitting || !title.trim()}>
             Create
           </Button>
         </SheetFooter>
