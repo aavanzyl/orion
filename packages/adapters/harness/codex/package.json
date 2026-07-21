@@ -18,6 +18,6 @@
   },
   "dependencies": {
     "@orion/harness-core": "*",
-    "@openai/codex-sdk": "^0.142.5"
+    "@openai/codex-sdk": "^0.144.1"
   }
 }
