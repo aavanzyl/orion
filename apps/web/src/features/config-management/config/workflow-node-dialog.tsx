@@ -117,7 +117,7 @@ export function WorkflowNodeDialog({
   // Until the user overrides the instructions path, keep it defaulted to
   // `instructions/<id>.md` so every agent gets a sensible, editable file.
   useEffect(() => {
-    if (!open || data.type !== 'agent' || instructionsTouched) return;
+    if (!open || !id.trim() || data.type !== 'agent' || instructionsTouched) return;
     setData((d) => ({ ...d, instructions: defaultInstructionsPath(id) }));
   }, [open, data.type, id, instructionsTouched]);
 
@@ -274,6 +274,7 @@ export function WorkflowNodeDialog({
                   }}
                   commandFiles={commandFiles}
                   onEditFile={onEditFile}
+                  nodeId={id}
                 />
 
                 {skillCatalog.length > 0 && (

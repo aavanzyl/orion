@@ -1,4 +1,7 @@
 import type {
+  AgentInstructionsPreviewResponse,
+  AgentSchedulePreviewResponse,
+  AgentSkillPreviewResponse,
   AgentTicketPreviewResponse,
   AgentTicketUpdateResponse,
   ApiResponse,
@@ -301,6 +304,13 @@ export const api = {
     const query = qs.toString();
     return request<RunEvent[]>(`/tickets/${ticketId}/logs${query ? `?${query}` : ''}`);
   },
+  listTicketComments: (ticketId: string) =>
+    request<import('@orion/models').TicketComment[]>(`/tickets/${ticketId}/comments`),
+  createTicketComment: (ticketId: string, body: string) =>
+    request<import('@orion/models').TicketComment>(`/tickets/${ticketId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    }),
   approveRun: (runId: string, nodeKey: string) =>
     request<WorkflowRun>(`/runs/${runId}/approve`, {
       method: 'POST',
@@ -337,6 +347,21 @@ export const api = {
     }),
   previewTicketUpdate: (ticketId: string, prompt: string) =>
     request<AgentTicketUpdateResponse>(`/tickets/${ticketId}/agent-preview`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    }),
+  previewSkill: (prompt: string) =>
+    request<AgentSkillPreviewResponse>('/skills/agent-preview', {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    }),
+  previewSchedule: (projectId: string, prompt: string) =>
+    request<AgentSchedulePreviewResponse>(`/projects/${projectId}/schedules/agent-preview`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    }),
+  previewInstructions: (prompt: string) =>
+    request<AgentInstructionsPreviewResponse>('/instructions/agent-preview', {
       method: 'POST',
       body: JSON.stringify({ prompt }),
     }),

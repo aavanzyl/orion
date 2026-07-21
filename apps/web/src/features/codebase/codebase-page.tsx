@@ -5,15 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { api } from '@/lib/api';
-import { useProjects } from '@/features/projects/hooks';
+import { useProjectContext } from '@/lib/use-project-context';
 
 const STATUS_VARIANT: Record<string, 'default' | 'destructive' | 'outline' | 'secondary' | 'success' | 'warning' | 'info'> = {
   idle: 'outline',
@@ -25,8 +18,7 @@ const STATUS_VARIANT: Record<string, 'default' | 'destructive' | 'outline' | 'se
 const POLL_INTERVAL_MS = 3000;
 
 export function CodebasePage() {
-  const { projects } = useProjects();
-  const [projectId, setProjectId] = useState<string>('');
+  const { projectId } = useProjectContext();
   const [index, setIndex] = useState<CodeIndex | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
 
@@ -36,12 +28,6 @@ export function CodebasePage() {
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    if (!projectId && projects.length > 0) {
-      setProjectId(projects[0].id);
-    }
-  }, [projects, projectId]);
 
   const fetchStatus = useCallback(async () => {
     if (!projectId) return;
@@ -102,23 +88,13 @@ export function CodebasePage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-4 border-b px-6 py-4">
+      <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4 shrink-0">
         <div>
           <h1 className="text-lg font-semibold">Codebase</h1>
           <p className="text-sm text-muted-foreground">
             Index a project's repository and search it semantically.
           </p>
         </div>
-        <Select value={projectId} onValueChange={setProjectId}>
-          <SelectTrigger className="w-56">
-            <SelectValue placeholder="Select a project" />
-          </SelectTrigger>
-          <SelectContent>
-            {projects.map((p) => (
-              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </header>
 
       <div className="flex items-center justify-between gap-4 border-b px-6 py-3">
@@ -198,7 +174,7 @@ export function CodebasePage() {
         ) : results.length > 0 ? (
           <div className="flex flex-col gap-3">
             {results.map((r, i) => (
-              <div key={`${r.filePath}-${r.startLine}-${i}`} className="rounded-md border">
+              <div key={`${r.filePath}-${r.startLine}-${i}`} className="rounded-md border bg-card">
                 <div className="flex items-center justify-between border-b bg-muted/50 px-3 py-2">
                   <span className="font-mono text-xs">
                     {r.filePath}:{r.startLine}-{r.endLine}

@@ -3,7 +3,7 @@ import { McpSection } from '@/features/settings/mcp-section';
 export function McpPage() {
   return (
     <div className="flex h-full flex-col">
-      <header className="border-b bg-card px-6 py-4">
+      <header className="border-b bg-card px-6 py-4 shrink-0">
         <h1 className="text-lg font-semibold">MCP</h1>
         <p className="text-sm text-muted-foreground">
           Manage the MCP servers available to agents. MCP servers are shared

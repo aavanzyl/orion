@@ -214,6 +214,7 @@ export function NodePropertiesPanel({
                 onChange={(v) => onChange({ instructions: v || undefined })}
                 commandFiles={commandFiles}
                 onEditFile={(path) => setEditFile(path)}
+                nodeId={data.nodeId}
               />
 
               {skillCatalog.length > 0 && (

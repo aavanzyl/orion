@@ -3,13 +3,6 @@ import { Link } from 'react-router-dom';
 import { CalendarIcon, ChevronRightIcon, PencilIcon, PlusIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Epic, Ticket } from '@orion/models';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { api } from '@/lib/api';
-import { useProjects } from '@/features/projects/hooks';
+import { useProjectContext } from '@/lib/use-project-context';
 import { cn } from '@/lib/utils';
 import { EpicPicker } from './epic-picker';
 
@@ -30,7 +23,7 @@ type ZoomLevel = 'month' | 'quarter' | 'year';
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
-const DAY_WIDTH: Record<ZoomLevel, number> = { month: 6, quarter: 1.5, year: 0.4 };
+const DAY_WIDTH: Record<ZoomLevel, number> = { month: 9, quarter: 6, year: 4 };
 const MONTH_HEADER_HEIGHT = 50;
 const TICKET_ROW_HEIGHT = 44;
 const LABEL_WIDTH = 260;
@@ -144,8 +137,7 @@ function EmptyState() {
 }
 
 export function TimelinePage() {
-  const { projects, loading: projectsLoading } = useProjects();
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const { projectId } = useProjectContext();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [epics, setEpics] = useState<Epic[]>([]);
   const [loading, setLoading] = useState(false);
@@ -165,12 +157,6 @@ export function TimelinePage() {
   const [editEpicColor, setEditEpicColor] = useState('#7c3aed');
 
   const [colorPickerOpen, setColorPickerOpen] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!projectId && projects.length > 0) {
-      setProjectId(projects[0].id);
-    }
-  }, [projects, projectId]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -318,18 +304,6 @@ export function TimelinePage() {
       <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-semibold">Timeline</h1>
-          <Select value={projectId ?? undefined} onValueChange={setProjectId}>
-            <SelectTrigger className="w-64">
-              <SelectValue placeholder={projectsLoading ? 'Loading…' : 'Select a project'} />
-            </SelectTrigger>
-            <SelectContent>
-              {projects.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
         <div className="flex items-center gap-1.5">
           {projectId && (

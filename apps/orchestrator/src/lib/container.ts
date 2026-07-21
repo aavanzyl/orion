@@ -1,4 +1,4 @@
-import { BoardConnectionRepository, ChatRepository, createDb, type DbHandle, EpicRepository, EvaluationRepository, EventRepository, LabelRepository, McpServerRepository, ProjectRepository, ProviderRepository, RagRepository, RunRepository, TicketRepository, ScheduleRepository, SettingsRepository } from '@orion/db';
+import { BoardConnectionRepository, ChatRepository, CommentRepository, createDb, type DbHandle, EpicRepository, EvaluationRepository, EventRepository, LabelRepository, McpServerRepository, ProjectRepository, ProviderRepository, RagRepository, RunRepository, TicketRepository, ScheduleRepository, SettingsRepository } from '@orion/db';
 import { HarnessRegistry } from '@orion/harness-core';
 import { CodexHarness } from '@orion/harness-codex';
 import { ClaudeHarness } from '@orion/harness-claude';
@@ -42,6 +42,7 @@ export interface Container {
   graphService: GraphService;
   mcpServers: McpServerRepository;
   settings: SettingsRepository;
+  comments: CommentRepository;
   oauthStates: Map<string, { mcpServerId: string; expiresAt: number }>;
 }
 
@@ -64,6 +65,7 @@ export function createContainer(env: OrionEnv): Container {
   const rag = new RagRepository(db);
   const mcpServers = new McpServerRepository(db);
   const settings = new SettingsRepository(db);
+  const comments = new CommentRepository(db);
 
   const harnesses = new HarnessRegistry()
     .register(new CodexHarness({ apiKey: env.codexApiKey, baseUrl: env.codexBaseUrl }))
@@ -120,6 +122,7 @@ export function createContainer(env: OrionEnv): Container {
     graphService: undefined as unknown as GraphService,
     mcpServers,
     settings,
+    comments,
     oauthStates: new Map(),
   };
 

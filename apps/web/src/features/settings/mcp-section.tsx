@@ -575,7 +575,7 @@ export function McpSection({ projectId, global = true }: McpSectionProps) {
         </Button>
       </div>
 
-      <div className="rounded-md border">
+      <div className="rounded-md border bg-card">
         <Table>
           <TableHeader>
             <TableRow>

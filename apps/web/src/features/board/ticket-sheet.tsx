@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PlusIcon, SparklesIcon, TrashIcon, XIcon, PlayIcon, HistoryIcon, SquarePenIcon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from 'lucide-react';
+import { CheckCircle2Icon, HistoryIcon, LinkIcon, PlayIcon, PlusIcon, RefreshCwIcon, SparklesIcon, SquarePenIcon, TrashIcon, XCircleIcon, XIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import type {
   BoardSwimlane,
   Label as LabelModel,
+  RunEvent,
   Ticket,
+  TicketComment,
   TicketPriority,
   TicketRelationKind,
   TicketType,
@@ -20,10 +22,17 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
@@ -42,6 +51,7 @@ import { Markdown } from '@/components/markdown';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { RunLogViewer } from '@/components/run-log-viewer';
 import { api } from '@/lib/api';
+import { copyToClipboard } from '@/lib/utils';
 import { useTicketDetail } from './hooks';
 import { UpdateTicketAiModal } from './update-ticket-ai-modal';
 import { PrioritySelect, PRIORITY_META, PriorityIcon } from './priority';
@@ -89,8 +99,14 @@ export function TicketSheet({
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [runsLoading, setRunsLoading] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [logs, setLogs] = useState<RunEvent[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
 
   const [updateAiModalOpen, setUpdateAiModalOpen] = useState(false);
+
+  const [comments, setComments] = useState<TicketComment[]>([]);
+  const [commentText, setCommentText] = useState('');
+  const [submittingComment, setSubmittingComment] = useState(false);
 
   const current = detail ?? ticket;
 
@@ -111,6 +127,22 @@ export function TicketSheet({
       .then(setRuns)
       .catch(() => setRuns([]))
       .finally(() => setRunsLoading(false));
+  }, [ticket?.id]);
+
+  useEffect(() => {
+    if (!ticket) return;
+    api.listTicketComments(ticket.id)
+      .then(setComments)
+      .catch(() => setComments([]));
+  }, [ticket?.id]);
+
+  useEffect(() => {
+    if (!ticket) return;
+    setLogsLoading(true);
+    api.listTicketLogs(ticket.id, { limit: 50 })
+      .then(setLogs)
+      .catch(() => setLogs([]))
+      .finally(() => setLogsLoading(false));
   }, [ticket?.id]);
 
   const otherTickets = useMemo(
@@ -241,6 +273,31 @@ export function TicketSheet({
     }
   };
 
+  const submitComment = async () => {
+    if (!ticket || !commentText.trim()) return;
+    setSubmittingComment(true);
+    try {
+      const comment = await api.createTicketComment(ticket.id, commentText.trim());
+      setComments((prev) => [...prev, comment]);
+      setCommentText('');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSubmittingComment(false);
+    }
+  };
+
+  const copyIssueLink = () => {
+    if (!ticket) return;
+    const url = `${window.location.origin}/issues/${ticket.id}`;
+    console.log(url);
+    copyToClipboard(url).then(() => {
+      toast.success('Link copied');
+    }).catch(() => {
+      toast.error('Failed to copy link');
+    });
+  };
+
   const typeLabel = (ticketTypes ?? ALL_DEFAULT_TICKET_TYPES).find((t) => t.value === detail?.type)?.label ?? detail?.type;
   const swimlaneLabel = swimlanes.find((s) => s.key === current?.swimlane)?.title ?? current?.swimlane;
 
@@ -315,6 +372,19 @@ export function TicketSheet({
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Ask the agent to update this ticket</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={copyIssueLink}
+                    className="size-8 shrink-0"
+                  >
+                    <LinkIcon className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Copy link</TooltipContent>
               </Tooltip>
             </div>
           )}
@@ -542,81 +612,172 @@ export function TicketSheet({
               </>
             ) : (
               <>
-                <div className="grid grid-cols-2 gap-3">
-                  <Badge variant="outline" className="w-fit text-sm font-normal">
-                    {typeLabel}
-                  </Badge>
-                  <Badge variant="outline" className="w-fit text-sm font-normal">
-                    {swimlaneLabel}
-                  </Badge>
-                  <div className="flex items-center gap-1.5">
-                    <PriorityIcon priority={(current?.priority ?? 0) as TicketPriority} />
-                    <span className="text-sm">
-                      {PRIORITY_META[(current?.priority ?? 0) as TicketPriority]?.label}
-                    </span>
-                  </div>
-                </div>
+                <Tabs defaultValue="issue">
+                  <TabsList className="w-full">
+                    <TabsTrigger value="issue" className="flex-1">Issue</TabsTrigger>
+                    <TabsTrigger value="comments" className="flex-1">Comments</TabsTrigger>
+                    <TabsTrigger value="runs" className="flex-1">Runs</TabsTrigger>
+                    <TabsTrigger value="history" className="flex-1">History</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="issue" className="flex flex-col gap-4 mt-2">
+                    <Card>
+                      <CardContent className="flex flex-col gap-3">
+                        {detail?.parentId ? null : current?.type !== 'epic' && detail?.epicId ? (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-muted-foreground">Epic</span>
+                            <span className="text-sm">Part of an epic</span>
+                          </div>
+                        ) : null}
 
-                <div className="flex gap-3 text-sm text-muted-foreground">
-                  <p>{formatDate(detail?.startDate) ? `Start: ${formatDate(detail?.startDate)}` : 'No start date'}</p>
-                  <p>{formatDate(detail?.dueDate) ? `Due: ${formatDate(detail?.dueDate)}` : 'No due date'}</p>
-                </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-muted-foreground">Type</span>
+                            <Badge variant="outline" className="w-fit text-sm font-normal">
+                              {typeLabel}
+                            </Badge>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-muted-foreground">Priority</span>
+                            <div className="flex items-center gap-1.5">
+                              <PriorityIcon priority={(current?.priority ?? 0) as TicketPriority} />
+                              <span className="text-sm">
+                                {PRIORITY_META[(current?.priority ?? 0) as TicketPriority]?.label}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
 
-                {detail?.description ? (
-                  <Markdown content={detail.description} />
-                ) : (
-                  <p className="text-sm text-muted-foreground">No description.</p>
-                )}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-muted-foreground">Start date</span>
+                            <span className="text-sm">
+                              {formatDate(detail?.startDate) || <span className="text-muted-foreground">&mdash;</span>}
+                            </span>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-muted-foreground">Due date</span>
+                            <span className="text-sm">
+                              {formatDate(detail?.dueDate) || <span className="text-muted-foreground">&mdash;</span>}
+                            </span>
+                          </div>
+                        </div>
 
-                {detail?.parentId ? null : detail?.labels?.length ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {detail.labels.map((label) => (
-                      <LabelBadge key={label.id} label={label} />
-                    ))}
-                  </div>
-                ) : null}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-muted-foreground">Labels</span>
+                            {detail?.parentId ? (
+                              <span className="text-sm text-muted-foreground">&mdash;</span>
+                            ) : detail?.labels?.length ? (
+                              <div className="flex flex-wrap gap-1.5">
+                                {detail.labels.map((label) => (
+                                  <LabelBadge key={label.id} label={label} />
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">&mdash;</span>
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-muted-foreground">Swimlane</span>
+                            <Badge variant="outline" className="w-fit text-sm font-normal">
+                              {swimlaneLabel}
+                            </Badge>
+                          </div>
+                        </div>
 
-                <p className="text-sm">{detail?.parent ? `Parent: ${detail.parent.title}` : 'No parent'}</p>
+                        {detail?.parent ? (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-muted-foreground">Parent</span>
+                            <span className="text-sm">{detail.parent.title}</span>
+                          </div>
+                        ) : null}
 
-                {detail?.parentId ? null : current?.type !== 'epic' ? (
-                  <p className="text-sm">{detail?.epicId ? 'Part of an epic' : 'No epic'}</p>
-                ) : null}
+                        {detail && detail.relations.length > 0 ? (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-muted-foreground">Relations</span>
+                            <div className="flex flex-col gap-1">
+                              {detail.relations.map((rel) => (
+                                <div
+                                  key={rel.relationId}
+                                  className="rounded-md border px-2 py-1 text-sm"
+                                >
+                                  <span className="text-muted-foreground">
+                                    {RELATION_KINDS.find((k) => k.value === rel.kind)?.label}:{' '}
+                                  </span>
+                                  {rel.ticket.title}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
 
-                <Separator />
+                        {detail && detail.children.length > 0 ? (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-muted-foreground">Sub-issues</span>
+                            <div className="flex flex-col gap-1">
+                              {detail.children.map((child) => (
+                                <div key={child.id} className="rounded-md border px-2 py-1 text-sm">
+                                  {child.title}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </CardContent>
+                    </Card>
 
-                {detail && detail.relations.length > 0 ? (
-                  <div className="flex flex-col gap-1">
-                    {detail.relations.map((rel) => (
-                      <div
-                        key={rel.relationId}
-                        className="rounded-md border px-2 py-1 text-sm"
-                      >
-                        <span className="text-muted-foreground">
-                          {RELATION_KINDS.find((k) => k.value === rel.kind)?.label}:{' '}
-                        </span>
-                        {rel.ticket.title}
+                    <Card>
+                      <CardContent>
+                        {detail?.description ? (
+                          <Markdown content={detail.description} />
+                        ) : (
+                          <p className="text-sm text-muted-foreground">No description.</p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+                  <TabsContent value="comments" className="flex flex-col gap-2 mt-2">
+                    <div className="flex flex-col gap-2">
+                      {comments.length > 0 && (
+                        <div className="flex flex-col gap-2">
+                          {comments.map((c) => (
+                            <div key={c.id} className="rounded-md border px-3 py-2 text-sm">
+                              <Markdown content={c.body} />
+                              <p className="text-[10px] text-muted-foreground mt-1">
+                                {new Date(c.createdAt).toLocaleString()}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <Input
+                          value={commentText}
+                          onChange={(e) => setCommentText(e.target.value)}
+                          placeholder="Add a comment..."
+                          className="h-8 text-sm"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              void submitComment();
+                            }
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={submitComment}
+                          disabled={!commentText.trim() || submittingComment}
+                        >
+                          Post
+                        </Button>
                       </div>
-                    ))}
-                  </div>
-                ) : null}
-
-                <Separator />
-
-                {detail && detail.children.length > 0 ? (
-                  <div className="flex flex-col gap-1">
-                    {detail.children.map((child) => (
-                      <div key={child.id} className="rounded-md border px-2 py-1 text-sm">
-                        {child.title}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-
-                <Separator />
-
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-muted-foreground">Workflow Runs</span>
+                    </div>
+                  </TabsContent>
+                  <TabsContent value="runs" className="flex flex-col gap-2 mt-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-muted-foreground">Workflow Runs</span>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -774,7 +935,32 @@ export function TicketSheet({
                       })}
                     </div>
                   )}
-                </div>
+                  </TabsContent>
+                  <TabsContent value="history" className="flex flex-col gap-2 mt-2 overflow-hidden min-w-0">
+                    {logsLoading ? (
+                      <p className="text-xs text-muted-foreground">Loading...</p>
+                    ) : logs.filter((e) => e.type !== 'log').length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No events recorded yet.</p>
+                    ) : (
+                      <div className="flex flex-col gap-1 min-w-0">
+                        {logs.filter((e) => e.type !== 'log').map((event) => (
+                          <div key={event.id} className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs min-w-0 max-w-[635px]">
+                            <HistoryIcon className="size-3 text-muted-foreground shrink-0" />
+                            <span className="text-muted-foreground font-medium shrink-0 whitespace-nowrap">{event.type}</span>
+                            <span className="text-muted-foreground/60 min-w-0 flex-1 truncate">
+                              {typeof event.payload === 'object' && event.payload !== null
+                                ? JSON.stringify(event.payload).slice(0, 120)
+                                : String(event.payload ?? '')}
+                            </span>
+                            <span className="text-muted-foreground/50 shrink-0">
+                              {new Date(event.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
               </>
             )}
           </div>

@@ -6,6 +6,14 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
   Tabs,
   TabsContent,
   TabsList,
@@ -32,7 +40,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { RunLogViewer } from '@/components/run-log-viewer';
 import { api, type RunListItem } from '@/lib/api';
-import { useProjects } from '@/features/projects/hooks';
+import { useProjectContext } from '@/lib/use-project-context';
 
   const STATUS_VARIANT: Record<string, 'default' | 'destructive' | 'outline' | 'secondary' | 'success' | 'warning' | 'info'> = {
   created: 'outline',
@@ -48,13 +56,12 @@ import { useProjects } from '@/features/projects/hooks';
 const POLL_INTERVAL_MS = 30000;
 
 export function DashboardPage() {
-  const { projects } = useProjects();
+  const { projectId: globalProjectId } = useProjectContext();
   const navigate = useNavigate();
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [filterProjectId, setFilterProjectId] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [searchApplied, setSearchApplied] = useState('');
@@ -66,7 +73,7 @@ export function DashboardPage() {
   const fetchRuns = useCallback(async () => {
     try {
       const params: { projectId?: string; status?: string; search?: string; limit?: number } = { limit: 50 };
-      if (filterProjectId && filterProjectId !== 'all') params.projectId = filterProjectId;
+      if (globalProjectId) params.projectId = globalProjectId;
       if (filterStatus && filterStatus !== 'all') params.status = filterStatus;
       if (searchApplied) params.search = searchApplied;
       const result = await api.listRuns(params);
@@ -77,7 +84,7 @@ export function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterProjectId, filterStatus, searchApplied]);
+  }, [filterStatus, searchApplied, globalProjectId]);
 
   useEffect(() => {
     setLoading(true);
@@ -165,7 +172,7 @@ export function DashboardPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-4 border-b px-6 py-4">
+      <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4 shrink-0">
         <div>
           <h1 className="text-lg font-semibold">Dashboard</h1>
           <p className="text-sm text-muted-foreground">Monitor all workflow runs across projects.</p>
@@ -216,17 +223,6 @@ export function DashboardPage() {
       </div>
 
       <div className="flex items-center gap-3 border-b px-6 py-3">
-        <Select value={filterProjectId} onValueChange={setFilterProjectId}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="All projects" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All projects</SelectItem>
-            {projects.map((p) => (
-              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
         <Select value={filterStatus} onValueChange={setFilterStatus}>
           <SelectTrigger className="w-40">
             <SelectValue placeholder="All statuses" />
@@ -271,45 +267,45 @@ export function DashboardPage() {
             <p className="text-muted-foreground">No runs found.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-md border">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50 text-left">
-                    <th className="px-4 py-3 font-medium">
+          <div className="rounded-md border bg-card">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>
                       <button onClick={() => toggleSort('ticket')} className="inline-flex items-center font-medium hover:text-foreground">Ticket <SortArrow field="ticket" /></button>
-                    </th>
-                    <th className="px-4 py-3 font-medium">
+                    </TableHead>
+                    <TableHead>
                       <button onClick={() => toggleSort('workflow')} className="inline-flex items-center font-medium hover:text-foreground">Workflow <SortArrow field="workflow" /></button>
-                    </th>
-                    <th className="px-4 py-3 font-medium">
+                    </TableHead>
+                    <TableHead>
                       <button onClick={() => toggleSort('status')} className="inline-flex items-center font-medium hover:text-foreground">Status <SortArrow field="status" /></button>
-                    </th>
-                    <th className="px-4 py-3 font-medium">
+                    </TableHead>
+                    <TableHead>
                       <button onClick={() => toggleSort('duration')} className="inline-flex items-center font-medium hover:text-foreground">Duration <SortArrow field="duration" /></button>
-                    </th>
-                    <th className="px-4 py-3 font-medium">
+                    </TableHead>
+                    <TableHead>
                       <button onClick={() => toggleSort('tokens')} className="inline-flex items-center font-medium hover:text-foreground">Tokens <SortArrow field="tokens" /></button>
-                    </th>
-                    <th className="px-4 py-3 font-medium">
+                    </TableHead>
+                    <TableHead>
                       <button onClick={() => toggleSort('cost')} className="inline-flex items-center font-medium hover:text-foreground">Cost <SortArrow field="cost" /></button>
-                    </th>
-                    <th className="px-4 py-3 font-medium">
+                    </TableHead>
+                    <TableHead>
                       <button onClick={() => toggleSort('created')} className="inline-flex items-center font-medium hover:text-foreground">Created <SortArrow field="created" /></button>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {sortedRuns.map((run) => {
                   const duration = run.updatedAt && run.createdAt
                     ? Math.round((new Date(run.updatedAt).getTime() - new Date(run.createdAt).getTime()) / 1000)
                     : null;
                   return (
-                    <tr
+                    <TableRow
                       key={run.id}
-                      className="cursor-pointer border-b hover:bg-muted/30"
+                      className="cursor-pointer hover:bg-muted/30"
                       onClick={() => openRun(run)}
                     >
-                      <td className="px-4 py-3">
+                      <TableCell>
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{run.ticketTitle ?? run.ticketId.slice(0, 8)}</span>
                           <Tooltip>
@@ -326,28 +322,28 @@ export function DashboardPage() {
                             <TooltipContent>View ticket on the board</TooltipContent>
                           </Tooltip>
                         </div>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{run.workflowName}</td>
-                      <td className="px-4 py-3">
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{run.workflowName}</TableCell>
+                      <TableCell>
                         <Badge variant={STATUS_VARIANT[run.status] ?? 'outline'}>{run.status}</Badge>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
                         {duration !== null ? `${duration}s` : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
                         {run.totalTokens ? run.totalTokens.toLocaleString() : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
                         {run.costUsd ? `$${run.costUsd.toFixed(4)}` : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
                         {new Date(run.createdAt).toLocaleString()}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </main>
@@ -404,27 +400,27 @@ export function DashboardPage() {
                     </TabsList>
                     <TabsContent value="nodes" className="mt-2">
                       {runDetail && runDetail.nodes.length > 0 && (
-                        <div className="overflow-hidden rounded-lg border border-border/50">
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="border-b bg-muted/50 text-left">
-                                <th className="px-3 py-2 font-medium">Node</th>
-                                <th className="px-3 py-2 font-medium">Type</th>
-                                <th className="px-3 py-2 font-medium">Status</th>
-                              </tr>
-                            </thead>
-                            <tbody>
+                        <div className="rounded-md border bg-card">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Node</TableHead>
+                                <TableHead>Type</TableHead>
+                                <TableHead>Status</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
                               {runDetail.nodes.map((n) => (
-                                <tr key={n.nodeKey} className="border-b last:border-0">
-                                  <td className="px-3 py-2">{n.nodeKey}</td>
-                                  <td className="px-3 py-2 text-muted-foreground">{n.type}</td>
-                                  <td className="px-3 py-2">
+                                <TableRow key={n.nodeKey}>
+                                  <TableCell>{n.nodeKey}</TableCell>
+                                  <TableCell className="text-muted-foreground">{n.type}</TableCell>
+                                  <TableCell>
                                     <Badge variant={n.status === 'failed' ? 'destructive' : n.status === 'completed' ? 'success' : 'outline'}>{n.status}</Badge>
-                                  </td>
-                                </tr>
+                                  </TableCell>
+                                </TableRow>
                               ))}
-                            </tbody>
-                          </table>
+                            </TableBody>
+                          </Table>
                         </div>
                       )}
                     </TabsContent>

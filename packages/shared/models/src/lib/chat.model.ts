@@ -114,3 +114,23 @@ export interface AgentTicketUpdateResponse {
   labelIds?: string[];
   reasoning: string;
 }
+
+export interface AgentSkillPreviewResponse {
+  name: string;
+  description: string;
+  content: string;
+  tags: string[];
+  reasoning: string;
+}
+
+export interface AgentSchedulePreviewResponse {
+  name: string;
+  cron: string;
+  instruction: string;
+  reasoning: string;
+}
+
+export interface AgentInstructionsPreviewResponse {
+  content: string;
+  reasoning: string;
+}

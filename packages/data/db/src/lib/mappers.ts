@@ -23,6 +23,7 @@ import type {
   RunNodeUsage,
   Schedule,
   Ticket,
+  TicketComment,
   TicketPriority,
   TicketRelation,
   TicketRelationType,
@@ -49,6 +50,7 @@ import type {
   runEvaluations,
   runEvents,
   runNodes,
+  ticketComments,
   ticketRelations,
   tickets,
   schedules,
@@ -73,6 +75,7 @@ type ScheduleRow = typeof schedules.$inferSelect;
 type CodeIndexRow = typeof codeIndexes.$inferSelect;
 type McpServerRow = typeof mcpServers.$inferSelect;
 type AppSettingsRow = typeof appSettings.$inferSelect;
+type TicketCommentRow = typeof ticketComments.$inferSelect;
 
 const iso = (d: Date): string => d.toISOString();
 const opt = <T>(v: T | null): T | undefined => (v === null ? undefined : v);
@@ -398,5 +401,14 @@ export function toAppSettings(row: AppSettingsRow): AppSettings {
   return {
     branding: (row.branding ?? {}) as unknown as AppSettings['branding'],
     preferences: (row.preferences ?? {}) as unknown as AppSettings['preferences'],
+  };
+}
+
+export function toTicketComment(row: TicketCommentRow): TicketComment {
+  return {
+    id: row.id,
+    ticketId: row.ticketId,
+    body: row.body,
+    createdAt: iso(row.createdAt),
   };
 }

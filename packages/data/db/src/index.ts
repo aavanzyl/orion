@@ -16,3 +16,4 @@ export * from './lib/repositories/board-connection.repository.js';
 export * from './lib/repositories/rag.repository.js';
 export * from './lib/repositories/mcp-server.repository.js';
 export * from './lib/repositories/settings.repository.js';
+export * from './lib/repositories/comment.repository.js';

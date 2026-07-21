@@ -205,3 +205,15 @@ export interface MoveTicketInput {
   swimlane: string;
   order?: number;
 }
+
+export interface TicketComment {
+  id: string;
+  ticketId: TicketId;
+  body: string;
+  createdAt: string;
+}
+
+export interface CreateTicketCommentInput {
+  ticketId: TicketId;
+  body: string;
+}

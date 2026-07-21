@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from 'next-themes';
+import { useNavigate } from 'react-router-dom';
 import {
   BookOpenIcon,
   BugIcon,
+  FileCodeIcon,
   GitCommitHorizontalIcon,
   ImageIcon,
   InfoIcon,
@@ -10,10 +12,11 @@ import {
   PlusIcon,
   ServerIcon,
   Trash2Icon,
+  WorkflowIcon,
   XIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { Provider, NotificationEventKey } from '@orion/models';
+import type { Project, Provider, NotificationEventKey } from '@orion/models';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -64,6 +67,10 @@ import { useProviders } from './hooks';
 import { ProviderFormDialog } from './provider-form-dialog';
 import { McpClientConnectCard } from './mcp-shared';
 import { BoardSyncSection } from '@/features/board-sync/board-sync-section';
+import { useProjects } from '@/features/projects/hooks';
+import { ProjectFormDialog } from '@/features/projects/project-form-dialog';
+import { ProjectWizard } from '@/features/projects/project-wizard';
+import { DeleteProjectDialog } from '@/features/projects/delete-project-dialog';
 
 const HARNESS_OPTIONS = ['codex', 'claude', 'opencode'];
 const REPO_URL = 'https://github.com/aavanzyl/orion';
@@ -118,6 +125,7 @@ function LogoUploadButton({ onUpload }: { onUpload: (dataUrl: string) => void })
 
 export function SettingsPage() {
   const { theme, setTheme } = useTheme();
+  const navigate = useNavigate();
   const [mounted, setMounted] = useState(false);
   const { providers, loading: providersLoading, error: providersError, refetch } = useProviders();
   const { branding, setBranding } = useBranding();
@@ -131,6 +139,11 @@ export function SettingsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<'name' | 'harness' | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const { projects, loading: projectsLoading, error: projectsError, refetch: refetchProjects } = useProjects();
+  const [projectFormOpen, setProjectFormOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null);
 
   useEffect(() => setMounted(true), []);
 
@@ -258,11 +271,12 @@ export function SettingsPage() {
         <Tabs defaultValue="general" className="mx-auto w-full max-w-4xl gap-6">
           <TabsList>
             <TabsTrigger value="general">General</TabsTrigger>
+            <TabsTrigger value="projects">Projects</TabsTrigger>
+            <TabsTrigger value="board-sync">Board Sync</TabsTrigger>
             <TabsTrigger value="providers">Providers</TabsTrigger>
+            <TabsTrigger value="mcp">MCP</TabsTrigger>
             <TabsTrigger value="agents">Agents</TabsTrigger>
             <TabsTrigger value="issueTypes">Issue Types</TabsTrigger>
-            <TabsTrigger value="mcp">MCP</TabsTrigger>
-            <TabsTrigger value="board-sync">Board Sync</TabsTrigger>
             <TabsTrigger value="notifications">Notifications</TabsTrigger>
             <TabsTrigger value="about">About</TabsTrigger>
           </TabsList>
@@ -896,6 +910,125 @@ export function SettingsPage() {
             </Card>
           </TabsContent>
 
+          <TabsContent value="projects">
+            <Card className="border-border/50 shadow-none">
+              <CardHeader className="flex flex-row items-center justify-between gap-4">
+                <div>
+                  <CardTitle>Projects</CardTitle>
+                  <CardDescription>
+                    Add, edit, and remove the repositories Orion manages.
+                  </CardDescription>
+                </div>
+                <Button onClick={() => { setEditingProject(null); setProjectFormOpen(true); }}>
+                  <PlusIcon data-icon="inline-start" />
+                  New project
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {projectsError ? (
+                  <p className="text-destructive">{projectsError}</p>
+                ) : projectsLoading ? (
+                  <div className="space-y-2">
+                    {[0, 1, 2].map((i) => (
+                      <Skeleton key={i} className="h-12 w-full" />
+                    ))}
+                  </div>
+                ) : projects.length === 0 ? (
+                  <div className="flex flex-col items-center gap-3 py-16 text-center">
+                    <p className="text-muted-foreground">No projects yet.</p>
+                    <Button onClick={() => { setEditingProject(null); setProjectFormOpen(true); }}>
+                      <PlusIcon data-icon="inline-start" />
+                      Add your first project
+                    </Button>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader className="bg-accent">
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Source</TableHead>
+                        <TableHead>URL / Path</TableHead>
+                        <TableHead>Branch</TableHead>
+                        <TableHead>Config</TableHead>
+                        <TableHead className="w-0" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {projects.map((project) => (
+                        <TableRow key={project.id}>
+                          <TableCell className="font-medium">{project.name}</TableCell>
+                          <TableCell>
+                            <Badge variant="secondary">
+                              {project.sourceKind === 'remote' ? 'Remote' : project.sourceKind === 'workspace' ? 'Workspace' : 'Local'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="max-w-48 truncate text-muted-foreground">
+                            {project.sourceKind === 'remote'
+                              ? project.repoUrl || '\u2014'
+                              : project.sourceKind === 'workspace' && project.paths && project.paths.length > 0
+                                ? `${project.paths.length} folder${project.paths.length > 1 ? 's' : ''}`
+                                : project.rootPath || '\u2014'}
+                          </TableCell>
+                          <TableCell>{project.defaultBranch}</TableCell>
+                          <TableCell className="font-mono text-xs">{project.configPath}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button variant="ghost" size="icon-sm" onClick={() => { setEditingProject(project); setProjectFormOpen(true); }}>
+                                    <PencilIcon />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">Edit project</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    onClick={() => navigate(`/projects/${project.id}/config`)}
+                                  >
+                                    <FileCodeIcon />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">Edit config</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    onClick={() => navigate(`/projects/${project.id}/builder`)}
+                                  >
+                                    <WorkflowIcon />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">Workflow builder</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    className="text-destructive hover:text-destructive"
+                                    onClick={() => setDeletingProject(project)}
+                                  >
+                                    <Trash2Icon />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">Delete project</TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           <TabsContent value="about">
             <Card className="border-border/50 shadow-none">
               <CardHeader>
@@ -967,6 +1100,30 @@ export function SettingsPage() {
         title="Delete provider"
         description={`Remove ${deletingProvider?.key}? This may break agents that depend on this provider.`}
         onConfirm={remove}
+      />
+
+      <ProjectWizard
+        open={projectFormOpen && !editingProject}
+        onOpenChange={(open) => {
+          if (!open) setProjectFormOpen(false);
+        }}
+        onSaved={refetchProjects}
+      />
+      <ProjectFormDialog
+        open={projectFormOpen && !!editingProject}
+        onOpenChange={(open) => {
+          if (!open) {
+            setProjectFormOpen(false);
+            setEditingProject(null);
+          }
+        }}
+        project={editingProject}
+        onSaved={refetchProjects}
+      />
+      <DeleteProjectDialog
+        project={deletingProject}
+        onOpenChange={(open) => !open && setDeletingProject(null)}
+        onDeleted={refetchProjects}
       />
     </div>
   );

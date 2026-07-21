@@ -6,13 +6,20 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { RunLogViewer } from '@/components/run-log-viewer';
 import { api } from '@/lib/api';
 
@@ -69,7 +76,7 @@ export function DebugPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-4 border-b px-6 py-4">
+      <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4 shrink-0">
         <div>
           <h1 className="text-lg font-semibold">Debug Logs</h1>
           <p className="text-sm text-muted-foreground">
@@ -174,21 +181,30 @@ export function DebugPage() {
                 ))}
               </div>
             ) : tickets.length > 0 ? (
-              <div className="flex flex-col gap-1 w-64">
+              <div className="flex flex-col gap-1 w-full max-w-2xl">
                 <p className="text-xs font-medium text-muted-foreground">Recent tickets</p>
-                <ScrollArea className="max-h-48 rounded-md border">
-                  {tickets.slice(0, 10).map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => setSelectedTicketId(t.id)}
-                      className="w-full px-3 py-2 text-left text-sm hover:bg-muted/30 border-b last:border-0"
-                    >
-                      <div className="truncate font-medium">{t.title}</div>
-                      <div className="text-xs text-muted-foreground">{t.id.slice(0, 8)}</div>
-                    </button>
-                  ))}
-                </ScrollArea>
+                <div className="rounded-md border bg-card">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Title</TableHead>
+                        <TableHead className="w-24">ID</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {tickets.slice(0, 10).map((t) => (
+                        <TableRow
+                          key={t.id}
+                          className="cursor-pointer hover:bg-muted/30"
+                          onClick={() => setSelectedTicketId(t.id)}
+                        >
+                          <TableCell className="font-medium">{t.title}</TableCell>
+                          <TableCell className="font-mono text-xs text-muted-foreground">{t.id.slice(0, 8)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
             ) : search ? (
               <p className="text-sm text-muted-foreground">No tickets found.</p>

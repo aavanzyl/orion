@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { listWorkflowTemplates, loadProjectConfig } from '@orion/config';
 import type {
   AgentDefaults,
+  AgentInstructionsPreviewResponse,
+  AgentSchedulePreviewResponse,
+  AgentSkillPreviewResponse,
   AgentTicketPreviewResponse,
   AgentTicketUpdateResponse,
   ChatEvent,
@@ -264,6 +267,80 @@ export class ChatService {
       },
     );
     return parseTicketUpdateJson(result.finalResponse, prompt);
+  }
+
+  async previewSkill(prompt: string): Promise<AgentSkillPreviewResponse> {
+    const agent = await this.resolveGlobalAgent();
+    const harness = this.c.harnesses.get(agent.harness);
+    const result = await harness.run(
+      buildSkillPreviewPrompt(prompt),
+      {
+        workingDirectory: process.cwd(),
+        model: agent.model,
+        baseUrl: agent.baseUrl,
+        apiKey: agent.apiKey,
+      },
+    );
+    return parseSkillPreviewJson(result.finalResponse, prompt);
+  }
+
+  async previewSchedule(projectId: string, prompt: string): Promise<AgentSchedulePreviewResponse> {
+    const agent = await this.resolveChatAgent(projectId);
+    const harness = this.c.harnesses.get(agent.harness);
+    const result = await harness.run(
+      buildSchedulePreviewPrompt(prompt),
+      {
+        workingDirectory: agent.workingDirectory ?? process.cwd(),
+        model: agent.model,
+        baseUrl: agent.baseUrl,
+        apiKey: agent.apiKey,
+      },
+    );
+    return parseSchedulePreviewJson(result.finalResponse, prompt);
+  }
+
+  async previewInstructions(prompt: string): Promise<AgentInstructionsPreviewResponse> {
+    const agent = await this.resolveGlobalAgent();
+    const harness = this.c.harnesses.get(agent.harness);
+    const result = await harness.run(
+      buildInstructionsPreviewPrompt(prompt),
+      {
+        workingDirectory: process.cwd(),
+        model: agent.model,
+        baseUrl: agent.baseUrl,
+        apiKey: agent.apiKey,
+      },
+    );
+    return parseInstructionsPreviewJson(result.finalResponse, prompt);
+  }
+
+  private async resolveGlobalAgent(): Promise<{ harness: string; model: string; baseUrl?: string; apiKey?: string }> {
+    const defaults = await this.loadAgentDefaults();
+    let harness = defaults.harness ?? 'codex';
+    let model = defaults.model ?? 'gpt-5-codex';
+    let baseUrl: string | undefined;
+    let apiKey: string | undefined;
+    if (defaults.providerId) {
+      const configured = await this.c.providers.get(defaults.providerId).catch(() => null);
+      if (configured) {
+        harness = configured.harness ?? harness;
+        baseUrl = configured.baseUrl;
+        model = configured.models[0] ?? model;
+        const stored = await this.c.providers.getApiKey(configured.id).catch(() => null);
+        if (stored) {
+          apiKey = this.c.env.providerEncryptionSalt
+            ? decrypt(stored, this.c.env.providerEncryptionSalt)
+            : stored;
+        }
+      }
+    }
+    const effectiveBaseUrl = baseUrl ?? this.c.env.codexBaseUrl;
+    return {
+      harness: this.selectHarness(harness, effectiveBaseUrl),
+      model,
+      baseUrl: effectiveBaseUrl,
+      apiKey: apiKey ?? this.c.env.codexApiKey,
+    };
   }
 
   /**
@@ -689,4 +766,105 @@ function extractFirstJson(text: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function buildSkillPreviewPrompt(prompt: string): string {
+  return [
+    'You are an assistant that creates agent "skills" — reusable markdown instruction files for coding agents.',
+    'A skill has a name, a short description, full markdown content (instructions, examples, context), and optional tags.',
+    '',
+    `User request: ${prompt}`,
+    '',
+    'Reply with STRICT JSON only, no prose, matching exactly:',
+    '{ "name": string, "description": string, "content": string, "tags": string[], "reasoning": string }',
+    'The name should be kebab-case (e.g. "code-review-checklist").',
+    'The content should be comprehensive markdown with clear sections (## Overview, ## Instructions, ## Examples).',
+    'Tags should be 2-5 lowercase keywords.',
+  ].join('\n');
+}
+
+function parseSkillPreviewJson(text: string, fallbackName: string): AgentSkillPreviewResponse {
+  const json = extractFirstJson(text);
+  if (json) {
+    const obj = json as Record<string, unknown>;
+    return {
+      name: typeof obj.name === 'string' && obj.name ? obj.name : fallbackName.slice(0, 40).replace(/\s+/g, '-').toLowerCase(),
+      description: typeof obj.description === 'string' ? obj.description : '',
+      content: typeof obj.content === 'string' ? obj.content : '',
+      tags: Array.isArray(obj.tags) ? obj.tags.filter((t: unknown): t is string => typeof t === 'string') : [],
+      reasoning: typeof obj.reasoning === 'string' ? obj.reasoning : '',
+    };
+  }
+  return { name: '', description: '', content: '', tags: [], reasoning: '' };
+}
+
+function buildSchedulePreviewPrompt(prompt: string): string {
+  return [
+    'You are an assistant that creates cron-based agent schedules.',
+    'A schedule has a name, a cron expression (standard 5-field), and an instruction for the agent.',
+    '',
+    `User request: ${prompt}`,
+    '',
+    'Reply with STRICT JSON only, no prose, matching exactly:',
+    '{ "name": string, "cron": string, "instruction": string, "reasoning": string }',
+    'The cron must be a valid 5-field cron expression (e.g. "0 9 * * 1-5" for weekdays at 9am).',
+    'The instruction should be a clear, actionable prompt for the agent to execute.',
+  ].join('\n');
+}
+
+function parseSchedulePreviewJson(text: string, fallbackReason: string): AgentSchedulePreviewResponse {
+  const json = extractFirstJson(text);
+  if (json) {
+    const obj = json as Record<string, unknown>;
+    return {
+      name: typeof obj.name === 'string' && obj.name ? obj.name : '',
+      cron: typeof obj.cron === 'string' && obj.cron ? obj.cron : '0 9 * * 1-5',
+      instruction: typeof obj.instruction === 'string' ? obj.instruction : '',
+      reasoning: typeof obj.reasoning === 'string' ? obj.reasoning : fallbackReason,
+    };
+  }
+  return { name: '', cron: '0 9 * * 1-5', instruction: '', reasoning: fallbackReason };
+}
+
+function buildInstructionsPreviewPrompt(prompt: string): string {
+  return [
+    'You are an assistant that writes agent instructions — markdown system prompts that tell a coding agent how to behave during a workflow run.',
+    '',
+    'The instructions support template variables that Orion substitutes at run time:',
+    '- $ARGUMENTS — ticket title + full description',
+    '- $TICKET_TITLE — ticket title only',
+    '- $REPOSITORY — project name',
+    '- $REPOSITORIES — all linked repos (comma-separated)',
+    '- $BRANCH — the active run branch',
+    '- $BASE_BRANCH — the project default branch (e.g. main)',
+    '- $WORKFLOW_ID — the unique run identifier',
+    '',
+    'Upstream node outputs can be referenced with {{ nodes.<id> }} (serializes as JSON) or {{ nodes.<id>.<field> }} to drill into a specific field.',
+    '',
+    'Guidelines for good instructions:',
+    '- Define a clear role (e.g. "You are a security reviewer…")',
+    '- Be explicit about scope — what to touch and what NOT to change',
+    '- Specify the expected output format (lists, tables, severity levels)',
+    '- State whether the agent is read-only or can modify code',
+    '- Use the available $VARIABLES and {{ nodes }} references where appropriate',
+    '- End with a clear instruction for what to do on failure',
+    '',
+    `User request: ${prompt}`,
+    '',
+    'Reply with STRICT JSON only, no prose, matching exactly:',
+    '{ "content": string, "reasoning": string }',
+    'The content field must be the full markdown instructions, using the available variables where appropriate. Do NOT wrap it in a code block — it IS the markdown.',
+  ].join('\n');
+}
+
+function parseInstructionsPreviewJson(text: string, fallbackReason: string): AgentInstructionsPreviewResponse {
+  const json = extractFirstJson(text);
+  if (json) {
+    const obj = json as Record<string, unknown>;
+    return {
+      content: typeof obj.content === 'string' ? obj.content : '',
+      reasoning: typeof obj.reasoning === 'string' ? obj.reasoning : fallbackReason,
+    };
+  }
+  return { content: '', reasoning: fallbackReason };
 }

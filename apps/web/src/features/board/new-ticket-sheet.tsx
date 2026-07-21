@@ -50,6 +50,9 @@ interface NewTicketSheetProps {
   prefill?: AgentTicketPreviewResponse | null;
   onPrefillConsumed?: () => void;
   triggerLabel?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  defaultSwimlane?: string;
   onCreateLabel: (name: string, color: string) => Promise<void>;
   onCreate: (input: CreateInput) => Promise<void>;
 }
@@ -64,13 +67,27 @@ export function NewTicketSheet({
   prefill,
   onPrefillConsumed,
   triggerLabel = 'New ticket',
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  defaultSwimlane,
   onCreateLabel,
   onCreate,
 }: NewTicketSheetProps) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+
+  const setOpen = (o: boolean) => {
+    if (isControlled) {
+      controlledOnOpenChange?.(o);
+    } else {
+      setInternalOpen(o);
+    }
+  };
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [swimlane, setSwimlane] = useState<string | undefined>(swimlanes[0]?.key);
+  const [swimlane, setSwimlane] = useState<string | undefined>(defaultSwimlane ?? swimlanes[0]?.key);
   const [priority, setPriority] = useState<TicketPriority>(0);
   const [labelIds, setLabelIds] = useState<string[]>([]);
   const [parentId, setParentId] = useState<string | undefined>();
@@ -84,8 +101,8 @@ export function NewTicketSheet({
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (open) setSwimlane((prev) => prev ?? swimlanes[0]?.key);
-  }, [open, swimlanes]);
+    if (open) setSwimlane(defaultSwimlane ?? swimlanes[0]?.key);
+  }, [open, swimlanes, defaultSwimlane]);
 
   useEffect(() => {
     if (!open || !prefill) return;
@@ -155,13 +172,15 @@ export function NewTicketSheet({
   const ticketTitleStr = (id: string) => tickets.find((t) => t.id === id)?.title ?? id;
 
   return (
-    <Sheet open={open} onOpenChange={(o) => (o ? setOpen(true) : (setOpen(false), reset()))}>
-      <SheetTrigger asChild>
-        <Button>
-          <PlusIcon data-icon="inline-start" />
-          {triggerLabel}
-        </Button>
-      </SheetTrigger>
+    <Sheet open={open} onOpenChange={(o) => { if (!o) { reset(); setOpen(false); } else setOpen(true); }}>
+      {!isControlled && (
+        <SheetTrigger asChild>
+          <Button>
+            <PlusIcon data-icon="inline-start" />
+            {triggerLabel}
+          </Button>
+        </SheetTrigger>
+      )}
       <SheetContent className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
         <SheetHeader className="border-b">
           <SheetTitle>Create ticket</SheetTitle>

@@ -309,20 +309,33 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
   const patchSelected = useCallback(
     (patch: Partial<BuilderNodeData>) => {
       if (!selectedId) return;
+      const oldNodeId = selectedNode?.data.nodeId;
+      const newNodeId = patch.nodeId;
       setNodes((nds) =>
         nds.map((n) => {
-          if (n.id !== selectedId) return n;
-          let position = n.position;
-          if ('swimlane' in patch) {
-            const laneKey = patch.swimlane || UNASSIGNED_LANE;
-            const lane = lanesRef.current.find((l) => l.key === laneKey);
-            if (lane) position = { x: n.position.x, y: laneContentTop(lane) };
+          if (n.id === selectedId) {
+            let position = n.position;
+            if ('swimlane' in patch) {
+              const laneKey = patch.swimlane || UNASSIGNED_LANE;
+              const lane = lanesRef.current.find((l) => l.key === laneKey);
+              if (lane) position = { x: n.position.x, y: laneContentTop(lane) };
+            }
+            return { ...n, position, data: { ...n.data, ...patch } };
           }
-          return { ...n, position, data: { ...n.data, ...patch } };
+          if (oldNodeId && newNodeId !== undefined && oldNodeId !== newNodeId) {
+            let updated = false;
+            const newData = { ...n.data };
+            if (newData.onFailureTransitionTo === oldNodeId) {
+              newData.onFailureTransitionTo = newNodeId;
+              updated = true;
+            }
+            if (updated) return { ...n, data: newData };
+          }
+          return n;
         }),
       );
     },
-    [selectedId, setNodes],
+    [selectedId, setNodes, selectedNode],
   );
 
   const deleteNode = useCallback(
@@ -659,13 +672,32 @@ function BuilderCanvas({ data, projectId }: { data: LoadedData; projectId: strin
                   <div key={`${lane}-${i}`} className="flex items-center gap-2">
                     <Input
                       value={lane}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const oldName = boardSwimlanes[i];
+                        const newName = e.target.value;
                         setBoardSwimlanes((prev) => {
                           const next = [...prev];
-                          next[i] = e.target.value;
+                          next[i] = newName;
                           return next;
-                        })
-                      }
+                        });
+                        if (oldName && oldName !== newName) {
+                          setNodes((nds) =>
+                            nds.map((n) => {
+                              let updated = false;
+                              const newData = { ...n.data };
+                              if (newData.swimlane === oldName) {
+                                newData.swimlane = newName || undefined;
+                                updated = true;
+                              }
+                              if (newData.onFailureTransitionTo === oldName) {
+                                newData.onFailureTransitionTo = newName;
+                                updated = true;
+                              }
+                              return updated ? { ...n, data: newData } : n;
+                            }),
+                          );
+                        }
+                      }}
                       className="h-8 text-sm"
                     />
                     <Button

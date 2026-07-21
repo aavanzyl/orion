@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PlusIcon, SearchIcon, SparklesIcon, TicketIcon, TrashIcon } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { HistoryIcon, PencilIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, TicketIcon, TrashIcon, WorkflowIcon, XIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AgentTicketPreviewResponse, Label as LabelModel, Ticket, TicketPriority, TicketType } from '@orion/models';
 import { ALL_DEFAULT_TICKET_TYPES } from '@orion/models';
@@ -30,11 +31,47 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { api } from '@/lib/api';
 import { CreateTicketAiModal } from '@/features/board/create-ticket-ai-modal';
 import { useProjects } from '@/features/projects/hooks';
+import { useProjectContext } from '@/lib/use-project-context';
+import { ACCENT_PRESETS, type AccentKey } from '@/lib/use-branding';
+import { BoardFilters, EMPTY_FILTERS, type BoardFilterState } from '@/features/board/board-filters';
 import { IssueDetailSheet } from './issue-detail-sheet';
+
+const BG_PRESETS = [
+  { label: 'Default', value: '', bg: undefined as string | undefined },
+  ...(Object.entries(ACCENT_PRESETS) as [AccentKey, { label: string; hue: number }][]).map(
+    ([key, { label, hue }]) => ({
+      label,
+      value: key,
+      bg: `oklch(0.95 0.025 ${hue})`,
+    }),
+  ),
+];
+
+const BG_STORAGE_KEY = 'orion-issues-background';
+
+function loadBg(): string {
+  try {
+    return localStorage.getItem(BG_STORAGE_KEY) ?? '';
+  } catch { return ''; }
+}
+
+function saveBg(value: string) {
+  try { localStorage.setItem(BG_STORAGE_KEY, value); } catch { /* ignore */ }
+}
 
 const PRIORITY_MAP: Record<TicketPriority, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' | 'info' }> = {
   0: { label: 'None', variant: 'outline' },
@@ -57,26 +94,25 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-type SortField = 'key' | 'title' | 'project' | 'swimlane' | 'priority' | 'type' | 'labels' | 'workflow' | 'createdAt' | 'updatedAt';
+type SortField = 'key' | 'title' | 'swimlane' | 'priority' | 'type' | 'labels' | 'createdAt' | 'updatedAt';
 type SortDir = 'asc' | 'desc';
 
 export function IssuesPage() {
-  const { projects, loading: projectsLoading, refetch: refetchProjects } = useProjects();
+  const { projects } = useProjects();
+  const { projectId: globalProjectId } = useProjectContext();
+  const navigate = useNavigate();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [labels, setLabels] = useState<LabelModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [search, setSearch] = useState('');
-  const [filterProject, setFilterProject] = useState<string>('all');
-  const [filterPriority, setFilterPriority] = useState<string>('all');
+  const [filters, setFilters] = useState<BoardFilterState>(EMPTY_FILTERS);
   const [sortField, setSortField] = useState<SortField>('updatedAt');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
   const [newTicketOpen, setNewTicketOpen] = useState(false);
-  const [newTicketProject, setNewTicketProject] = useState<string>('');
   const [newTicketTitle, setNewTicketTitle] = useState('');
   const [newTicketType, setNewTicketType] = useState<TicketType>('feature');
   const [newTicketCreating, setNewTicketCreating] = useState(false);
@@ -84,6 +120,9 @@ export function IssuesPage() {
   const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
 
   const [aiModalOpen, setAiModalOpen] = useState(false);
+
+  const [bg, setBg] = useState<string>(loadBg);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -107,8 +146,8 @@ export function IssuesPage() {
 
   const filtered = useMemo(() => {
     let result = tickets;
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
+    if (filters.search.trim()) {
+      const q = filters.search.trim().toLowerCase();
       result = result.filter(
         (t) =>
           t.title.toLowerCase().includes(q) ||
@@ -118,14 +157,17 @@ export function IssuesPage() {
           (projectMap.get(t.projectId)?.name ?? '').toLowerCase().includes(q),
       );
     }
-    if (filterProject !== 'all') {
-      result = result.filter((t) => t.projectId === filterProject);
+    if (globalProjectId) {
+      result = result.filter((t) => t.projectId === globalProjectId);
     }
-    if (filterPriority !== 'all') {
-      result = result.filter((t) => t.priority === Number(filterPriority));
+    if (filters.priority !== 'all') {
+      result = result.filter((t) => t.priority === filters.priority);
+    }
+    if (filters.labelIds.length > 0) {
+      result = result.filter((t) => filters.labelIds.every((id) => t.labelIds.includes(id)));
     }
     return result;
-  }, [tickets, search, filterProject, filterPriority, projectMap]);
+  }, [tickets, filters, globalProjectId, projectMap]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -137,12 +179,6 @@ export function IssuesPage() {
         case 'title':
           cmp = a.title.localeCompare(b.title);
           break;
-        case 'project': {
-          const pa = projectMap.get(a.projectId)?.name ?? a.projectId;
-          const pb = projectMap.get(b.projectId)?.name ?? b.projectId;
-          cmp = pa.localeCompare(pb);
-          break;
-        }
         case 'swimlane':
           cmp = a.swimlane.localeCompare(b.swimlane);
           break;
@@ -158,9 +194,6 @@ export function IssuesPage() {
           cmp = la - lb;
           break;
         }
-        case 'workflow':
-          cmp = (a.workflowName ?? '').localeCompare(b.workflowName ?? '');
-          break;
         case 'createdAt':
           cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
           break;
@@ -170,7 +203,7 @@ export function IssuesPage() {
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [filtered, sortField, sortDir, projectMap]);
+  }, [filtered, sortField, sortDir]);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -188,19 +221,17 @@ export function IssuesPage() {
 
   const handleChanged = () => {
     load();
-    refetchProjects();
   };
 
   const createTicket = async () => {
-    if (!newTicketProject || !newTicketTitle.trim()) return;
+    if (!globalProjectId || !newTicketTitle.trim()) return;
     setNewTicketCreating(true);
     try {
-      await api.createTicket(newTicketProject, { title: newTicketTitle.trim(), type: newTicketType });
+      await api.createTicket(globalProjectId, { title: newTicketTitle.trim(), type: newTicketType });
       toast.success('Ticket created');
       setNewTicketOpen(false);
       setNewTicketTitle('');
       setNewTicketType('feature');
-      setNewTicketProject('');
       load();
     } catch (e) {
       toast.error((e as Error).message);
@@ -230,7 +261,15 @@ export function IssuesPage() {
     }
   };
 
-  const isFiltering = search.trim() || filterProject !== 'all' || filterPriority !== 'all';
+  const handleBgChange = (value: string) => {
+    setBg(value);
+    saveBg(value);
+  };
+
+  const bgStyle: React.CSSProperties = bg
+    ? { backgroundColor: bg }
+    : {};
+
   const hasResults = sorted.length > 0;
 
   const SortHead = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
@@ -246,75 +285,81 @@ export function IssuesPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4">
-        <div>
+      <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4 shrink-0">
+        <div className="flex items-center gap-3">
           <h1 className="text-lg font-semibold">Issues</h1>
-          <p className="text-sm text-muted-foreground">
-            View and search all tickets across projects.
-          </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={() => setNewTicketOpen(true)}>
-            <PlusIcon data-icon="inline-start" />
-            New ticket
+          <BoardFilters filters={filters} labels={labels} onChange={setFilters} />
+
+          <Button onClick={() => setNewTicketOpen(true)} className="max-lg:size-9 max-lg:px-0">
+            <PlusIcon data-icon="inline-start" className="max-lg:mx-auto" />
+            <span className="hidden lg:inline">New ticket</span>
           </Button>
           <Button
             onClick={() => setAiModalOpen(true)}
             disabled={projects.length === 0}
-            className="relative overflow-hidden bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white transition-all duration-300 hover:from-violet-700 hover:to-fuchsia-700 hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] animate-pulse-glow"
+            className="relative overflow-hidden bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white transition-all duration-300 hover:from-violet-700 hover:to-fuchsia-700 hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] animate-pulse-glow max-lg:size-9 max-lg:px-0"
           >
-            <SparklesIcon data-icon="inline-start" />
-            Create with AI
+            <SparklesIcon data-icon="inline-start" className="max-lg:mx-auto" />
+            <span className="hidden lg:inline">Create with AI</span>
           </Button>
+
+          {globalProjectId && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" title="Issues settings">
+                  <SettingsIcon className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <span className="text-xs font-medium text-muted-foreground px-2 py-1">Background</span>
+                <div className="flex flex-wrap gap-1.5 px-2 pb-2">
+                  {BG_PRESETS.map((preset) => (
+                    <button
+                      key={preset.value}
+                      type="button"
+                      onClick={() => handleBgChange(preset.value)}
+                      title={preset.label}
+                      className="size-7 rounded-full border-2 transition-all hover:scale-110"
+                      style={{
+                        backgroundColor: preset.bg ?? 'var(--background)',
+                        borderColor: bg === preset.value ? 'var(--ring)' : 'var(--border)',
+                      }}
+                    />
+                  ))}
+                  {bg && (
+                    <button
+                      type="button"
+                      onClick={() => handleBgChange('')}
+                      className="size-7 rounded-full border-2 border-border flex items-center justify-center hover:bg-muted"
+                      title="Reset"
+                    >
+                      <XIcon className="size-3 text-muted-foreground" />
+                    </button>
+                  )}
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
+                    <HistoryIcon className="size-4" />
+                    Board activity
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => navigate(`/projects/${globalProjectId}/builder`)}>
+                    <WorkflowIcon className="size-4" />
+                    Edit workflow
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </header>
 
-      <div className="flex items-center gap-3 border-b bg-card px-6 py-3">
-        <div className="relative flex-1">
-          <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search tickets…"
-            className="h-9 max-w-sm pl-8"
-          />
-        </div>
-        <Select value={filterProject} onValueChange={setFilterProject}>
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="All projects" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All projects</SelectItem>
-            {projects.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={filterPriority} onValueChange={setFilterPriority}>
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="All priorities" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All priorities</SelectItem>
-            {([1, 2, 3, 4, 0] as TicketPriority[]).map((p) => (
-              <SelectItem key={p} value={String(p)}>
-                {PRIORITY_MAP[p].label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <span className="text-xs text-muted-foreground whitespace-nowrap">
-          {sorted.length} of {tickets.length}
-          {isFiltering && ' filtered'}
-        </span>
-      </div>
-
-      <main className="flex-1 overflow-auto p-6">
+      <main className="flex-1 overflow-auto p-6" style={bgStyle}>
         {error ? (
           <p className="text-destructive">{error}</p>
-        ) : loading || projectsLoading ? (
+        ) : loading ? (
           <div className="space-y-2">
             {[0, 1, 2, 3, 4].map((i) => (
               <Skeleton key={i} className="h-10 w-full" />
@@ -337,15 +382,13 @@ export function IssuesPage() {
                 <TableRow>
                   <SortHead field="key">Key</SortHead>
                   <SortHead field="title">Title</SortHead>
-                  <SortHead field="project">Project</SortHead>
                   <SortHead field="swimlane">Swimlane</SortHead>
                   <SortHead field="priority">Priority</SortHead>
                   <SortHead field="type">Type</SortHead>
                   <SortHead field="labels">Labels</SortHead>
-                  <SortHead field="workflow">Workflow</SortHead>
                   <SortHead field="createdAt">Created</SortHead>
                   <SortHead field="updatedAt">Updated</SortHead>
-                  <TableHead className="w-10" />
+                  <TableHead className="w-16" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -365,11 +408,6 @@ export function IssuesPage() {
                       </TableCell>
                       <TableCell className="font-medium max-w-80">
                         <span className="block truncate">{ticket.title}</span>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">
-                          {projectMap.get(ticket.projectId)?.name ?? ticket.projectId}
-                        </Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {titleize(ticket.swimlane)}
@@ -402,9 +440,6 @@ export function IssuesPage() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-muted-foreground text-sm">
-                        {ticket.workflowName ? titleize(ticket.workflowName) : '—'}
-                      </TableCell>
                       <TableCell className="text-muted-foreground whitespace-nowrap">
                         {formatDate(ticket.createdAt)}
                       </TableCell>
@@ -412,17 +447,26 @@ export function IssuesPage() {
                         {formatDate(ticket.updatedAt)}
                       </TableCell>
                       <TableCell>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeletingTicketId(ticket.id);
-                          }}
-                          className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                          aria-label="Delete ticket"
-                        >
-                          <TrashIcon className="size-3.5" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                            aria-label="Edit ticket"
+                          >
+                            <PencilIcon className="size-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeletingTicketId(ticket.id);
+                            }}
+                            className="rounded p-1 text-destructive hover:bg-destructive/10"
+                            aria-label="Delete ticket"
+                          >
+                            <TrashIcon className="size-3.5" />
+                          </button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -439,21 +483,6 @@ export function IssuesPage() {
             <DialogTitle>New ticket</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label>Project</Label>
-              <Select value={newTicketProject} onValueChange={setNewTicketProject}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a project" />
-                </SelectTrigger>
-                <SelectContent>
-                  {projects.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="new-ticket-title">Title</Label>
               <Input
@@ -483,7 +512,7 @@ export function IssuesPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={createTicket} disabled={!newTicketProject || !newTicketTitle.trim() || newTicketCreating}>
+            <Button onClick={createTicket} disabled={!globalProjectId || !newTicketTitle.trim() || newTicketCreating}>
               Create
             </Button>
           </DialogFooter>
@@ -512,6 +541,96 @@ export function IssuesPage() {
         projects={projects.map((p) => ({ id: p.id, name: p.name }))}
         onCreate={createFromAi}
       />
+
+      <IssuesActivitySheet
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        tickets={tickets}
+      />
     </div>
   );
 }
+
+function IssuesActivitySheet({
+  open,
+  onOpenChange,
+  tickets,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  tickets: Ticket[];
+}) {
+  const [events, setEvents] = useState<Array<{ type: string; ticketId?: string; payload?: unknown; createdAt: string; ticket?: Ticket }>>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    Promise.all(
+      tickets.slice(0, 50).map((t) =>
+        api.listTicketLogs(t.id, { limit: 20 }).then((logs) =>
+          logs.map((e) => ({ ...e, ticketId: t.id, ticket: t })),
+        ).catch(() => []),
+      ),
+    )
+      .then((results) => {
+        const all = results.flat().filter((e) =>
+          ['ticket.moved', 'ticket.updated', 'ticket.created', 'ticket.deleted', 'ticket.comment', 'run.created', 'run.status'].includes(e.type),
+        );
+        all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setEvents(all.slice(0, 100));
+      })
+      .catch(() => setEvents([]))
+      .finally(() => setLoading(false));
+  }, [open, tickets]);
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
+        <SheetHeader className="border-b px-4 py-3 shrink-0">
+          <SheetTitle className="flex items-center gap-2 text-base">
+            <HistoryIcon className="size-4" />
+            Board Activity
+          </SheetTitle>
+        </SheetHeader>
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="flex flex-col gap-1 p-4">
+            {loading ? (
+              <p className="text-sm text-muted-foreground">Loading...</p>
+            ) : events.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No recent activity.</p>
+            ) : (
+              events.map((event, i) => {
+                const eventLabel = EVENT_LABELS[event.type] ?? event.type;
+                const time = new Date(event.createdAt).toLocaleString();
+                return (
+                  <div key={i} className="flex items-start gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-muted/50">
+                    <span className="text-xs text-muted-foreground shrink-0 w-24 pt-0.5">
+                      {time.split(',')[0]}
+                    </span>
+                    <div className="min-w-0">
+                      <span className="font-medium">{eventLabel}</span>
+                      {event.ticket && (
+                        <span className="text-muted-foreground"> — {event.ticket.title}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </ScrollArea>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+const EVENT_LABELS: Record<string, string> = {
+  'ticket.created': 'Ticket created',
+  'ticket.updated': 'Ticket updated',
+  'ticket.moved': 'Ticket moved',
+  'ticket.deleted': 'Ticket deleted',
+  'ticket.comment': 'Comment added',
+  'run.created': 'Workflow started',
+  'run.status': 'Workflow updated',
+};

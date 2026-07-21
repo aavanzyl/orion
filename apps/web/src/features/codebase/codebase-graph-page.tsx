@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api';
-import { useProjects } from '@/features/projects/hooks';
+import { useProjectContext } from '@/lib/use-project-context';
 import { CallGraphNode } from './call-graph-node';
 
 const nodeTypes = { call: CallGraphNode };
@@ -246,34 +246,17 @@ function GraphCanvas({ projectId }: { projectId: string }) {
 }
 
 export function CodebaseGraphPage() {
-  const { projects } = useProjects();
-  const [projectId, setProjectId] = useState<string>('');
-
-  useEffect(() => {
-    if (!projectId && projects.length > 0) {
-      setProjectId(projects[0].id);
-    }
-  }, [projects, projectId]);
+  const { projectId } = useProjectContext();
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4">
+      <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4 shrink-0">
         <div>
           <h1 className="text-lg font-semibold">Codebase Graph</h1>
           <p className="text-sm text-muted-foreground">
             Function-level call graph — endpoints, functions, database &amp; external calls.
           </p>
         </div>
-        <Select value={projectId} onValueChange={setProjectId}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Project" />
-          </SelectTrigger>
-          <SelectContent>
-            {projects.map((p) => (
-              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </header>
       <main className="min-h-0 flex-1 relative">
         {projectId ? (

@@ -466,6 +466,24 @@ export function createApiRouter(
     }),
   );
 
+  router.post(
+    '/skills/agent-preview',
+    asyncHandler(async (req, res) => {
+      const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+      if (!prompt) return fail(res, 'prompt is required');
+      ok(res, await chat.previewSkill(prompt));
+    }),
+  );
+
+  router.post(
+    '/instructions/agent-preview',
+    asyncHandler(async (req, res) => {
+      const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+      if (!prompt) return fail(res, 'prompt is required');
+      ok(res, await chat.previewInstructions(prompt));
+    }),
+  );
+
   router.put(
     '/skills/:name/content',
     asyncHandler(async (req, res) => {
@@ -1259,6 +1277,23 @@ export function createApiRouter(
     }),
   );
 
+  router.get(
+    '/tickets/:id/comments',
+    asyncHandler(async (req, res) => {
+      ok(res, await c.comments.listByTicket(req.params.id));
+    }),
+  );
+
+  router.post(
+    '/tickets/:id/comments',
+    asyncHandler(async (req, res) => {
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+      if (!body) return fail(res, 'body is required');
+      const comment = await c.comments.create(req.params.id, body);
+      ok(res, comment, 201);
+    }),
+  );
+
   router.post(
     '/runs/:id/approve',
     asyncHandler(async (req, res) => {
@@ -1521,6 +1556,15 @@ export function createApiRouter(
       } catch (err) {
         return fail(res, err instanceof Error ? err.message : String(err), 422);
       }
+    }),
+  );
+
+  router.post(
+    '/projects/:id/schedules/agent-preview',
+    asyncHandler(async (req, res) => {
+      const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+      if (!prompt) return fail(res, 'prompt is required');
+      ok(res, await chat.previewSchedule(req.params.id, prompt));
     }),
   );
 

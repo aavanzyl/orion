@@ -10,6 +10,9 @@ import {
   WrenchIcon,
   TerminalIcon,
   ChevronRightIcon,
+  InfoIcon,
+  GlobeIcon,
+  PlugIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { WorkflowRouteResult } from '@orion/models';
@@ -18,23 +21,19 @@ import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { Markdown } from '@/components/markdown';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import type { McpServer } from '@orion/models';
+import type { SkillCatalogEntry } from '@orion/models';
 import { useNotifications } from '@/lib/use-notifications';
+import { useProjectContext } from '@/lib/use-project-context';
 import { api } from '@/lib/api';
-import { useProjects } from '@/features/projects/hooks';
 import { useProjectConfig } from '@/features/board/hooks';
 import { usePreferences } from '@/lib/use-preferences';
 import { useProviders } from '@/features/settings/hooks';
-import { useAllConversations } from './hooks';
+import { useConversations } from './hooks';
 import { useChatStream, type ChatStreamItem } from './use-chat-stream';
 
 function itemIcon(type: string) {
@@ -84,10 +83,8 @@ function ActivityItem({ item }: { item: ChatStreamItem }) {
 
 
 export function ChatPage() {
-  const { projects, loading: projectsLoading } = useProjects();
-  const [projectId, setProjectId] = useState<string | null>(null);
-  const projectIds = useMemo(() => projects.map((p) => p.id), [projects]);
-  const { conversations, refetch, setConversations } = useAllConversations(projectIds);
+  const { projectId } = useProjectContext();
+  const { conversations, refetch, setConversations } = useConversations(projectId);
   const { config } = useProjectConfig(projectId);
   const { preferences } = usePreferences();
   const { notify } = useNotifications();
@@ -99,52 +96,34 @@ export function ChatPage() {
   const [sending, setSending] = useState(false);
   const [route, setRoute] = useState<WorkflowRouteResult | null>(null);
   const [starting, setStarting] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
+  const [skills, setSkills] = useState<SkillCatalogEntry[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!projectId && projects.length > 0) setProjectId(projects[0].id);
-  }, [projects, projectId]);
+  const sortedConversations = useMemo(
+    () => [...conversations].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    [conversations],
+  );
 
-  /** Conversations grouped under their project, ordered by the project list. */
-  const groups = useMemo(() => {
-    const grouped = new Map<string, typeof conversations>();
-    for (const conversation of conversations) {
-      const list = grouped.get(conversation.projectId) ?? [];
-      list.push(conversation);
-      grouped.set(conversation.projectId, list);
-    }
-    for (const list of grouped.values()) {
-      list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    }
-    return projects
-      .filter((p) => grouped.has(p.id) || p.id === projectId)
-      .map((project) => ({
-        project,
-        conversations: grouped.get(project.id) ?? [],
-      }));
-  }, [projects, conversations, projectId]);
-
-  // Auto-select the most recent conversation of the active project.
   useEffect(() => {
     if (conversationId) return;
-    const group = groups.find((g) => g.project.id === projectId);
-    if (group && group.conversations.length > 0) {
-      setConversationId(group.conversations[0].id);
+    if (sortedConversations.length > 0) {
+      setConversationId(sortedConversations[0].id);
     }
-  }, [groups, projectId, conversationId]);
+  }, [sortedConversations, conversationId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });
   }, [messages, streamingText, items]);
 
-  const selectProject = (id: string) => {
-    setProjectId(id);
-    setConversationId(null);
-    setRoute(null);
-  };
+  useEffect(() => {
+    if (!infoOpen) return;
+    void api.listMcpServers().then(setMcpServers).catch(() => undefined);
+    void api.listGlobalSkills().then((res) => setSkills(res.skills)).catch(() => undefined);
+  }, [infoOpen]);
 
   const selectConversation = (conversation: (typeof conversations)[number]) => {
-    setProjectId(conversation.projectId);
     setConversationId(conversation.id);
     setRoute(null);
   };
@@ -266,7 +245,7 @@ export function ChatPage() {
   return (
     <>
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-4 border-b px-6 py-4">
+      <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4 shrink-0">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-semibold">Chat</h1>
           {activeAgent && (
@@ -276,28 +255,19 @@ export function ChatPage() {
             </Badge>
           )}
         </div>
+        <Button variant="ghost" size="icon" title="Chat capabilities" onClick={() => setInfoOpen(true)}>
+          <InfoIcon className="size-4" />
+        </Button>
       </header>
 
       {!projectId ? (
         <div className="flex flex-1 items-center justify-center text-muted-foreground">
-          {projectsLoading ? 'Loading…' : 'Create a project to start chatting.'}
+          {'Create a project to start chatting.'}
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">
           <aside className="flex min-h-0 w-64 shrink-0 flex-col border-r bg-muted/20">
             <div className="flex flex-col gap-2 p-3">
-              <Select value={projectId ?? undefined} onValueChange={selectProject}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder={projectsLoading ? 'Loading…' : 'Select a project'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {projects.map((project) => (
-                    <SelectItem key={project.id} value={project.id}>
-                      {project.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
               <Button size="sm" className="w-full shadow-sm" onClick={newConversation}>
                 <PlusIcon data-icon="inline-start" />
                 New conversation
@@ -305,47 +275,34 @@ export function ChatPage() {
             </div>
             <ScrollArea className="flex-1">
               <div className="flex flex-col gap-2 px-3 pb-3">
-                {groups.length === 0 ? (
+                {sortedConversations.length === 0 ? (
                   <p className="px-2 py-2 text-xs text-muted-foreground">No conversations yet.</p>
                 ) : (
-                  groups.map((group) => (
-                    <div key={group.project.id} className="flex flex-col gap-0.5">
-                      <p className="truncate px-2 pt-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        {group.project.name}
-                      </p>
-                      {group.conversations.length === 0 ? (
-                        <p className="px-2 py-1 text-xs text-muted-foreground/70">
-                          No conversations yet.
-                        </p>
-                      ) : (
-                        group.conversations.map((conversation) => (
-                          <div key={conversation.id} className="group/conv relative overflow-hidden">
-                            <button
-                              type="button"
-                              onClick={() => selectConversation(conversation)}
-                              className={cn(
-                                'max-w-[235px] w-full truncate rounded-md py-2 pl-3 pr-9 text-left text-sm font-medium transition-all',
-                                conversation.id === conversationId
-                                  ? 'bg-accent text-accent-foreground shadow-sm'
-                                  : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                              )}
-                            >
-                              {conversation.title}
-                            </button>
-                            <button
-                              type="button"
-                              aria-label="Delete conversation"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeletingConversationId(conversation.id);
-                              }}
-                              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground opacity-60 transition-opacity hover:bg-primary/10 hover:text-primary hover:opacity-100 focus-visible:opacity-100"
-                            >
-                              <Trash2Icon className="size-3.5" />
-                            </button>
-                          </div>
-                        ))
-                      )}
+                  sortedConversations.map((conversation) => (
+                    <div key={conversation.id} className="group/conv relative overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => selectConversation(conversation)}
+                        className={cn(
+                          'max-w-[235px] w-full truncate rounded-md py-2 pl-3 pr-9 text-left text-sm font-medium transition-all',
+                          conversation.id === conversationId
+                            ? 'bg-accent text-accent-foreground shadow-sm'
+                            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                        )}
+                      >
+                        {conversation.title}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Delete conversation"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeletingConversationId(conversation.id);
+                        }}
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground opacity-60 transition-opacity hover:bg-primary/10 hover:text-primary hover:opacity-100 focus-visible:opacity-100"
+                      >
+                        <Trash2Icon className="size-3.5" />
+                      </button>
                     </div>
                   ))
                 )}
@@ -357,11 +314,29 @@ export function ChatPage() {
             <ScrollArea className="min-h-0 flex-1">
               <div className="mx-auto flex max-w-3xl flex-col gap-4 p-6">
                 {messages.length === 0 && !streaming ? (
-                  <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
-                    <MessagesSquareIcon className="size-8" />
-                    <p className="text-sm">
-                      Ask the agent anything, or describe a task to get a workflow recommendation.
-                    </p>
+                  <div className="flex flex-col items-center gap-3 py-16 text-center">
+                    <MessagesSquareIcon className="size-8 text-muted-foreground" />
+                    <div className="max-w-md space-y-3">
+                      <p className="text-sm font-medium">What can the agent do?</p>
+                      <div className="grid grid-cols-2 gap-2 text-left">
+                        {[
+                          'Create, view, and manage issues',
+                          'Answer questions about your codebase',
+                          'Execute workflows and automation',
+                          'Suggest workflow recommendations',
+                          'Leverage connected MCP servers',
+                          'Use installed skills for specialized tasks',
+                        ].map((capability) => (
+                          <div key={capability} className="flex items-start gap-2 text-xs text-muted-foreground">
+                            <ChevronRightIcon className="mt-0.5 size-3 shrink-0 text-primary/60" />
+                            <span>{capability}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Click <InfoIcon className="inline size-3 align-middle" /> in the top right to see connected MCP servers and skills.
+                      </p>
+                    </div>
                   </div>
                 ) : (
                   messages.map((message) =>
@@ -476,6 +451,96 @@ export function ChatPage() {
       description="Are you sure you want to delete this conversation? This action cannot be undone."
       onConfirm={confirmDeleteConversation}
     />
+
+    <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Chat Capabilities</DialogTitle>
+          <DialogDescription>
+            Connected tools and configurations available to this chat session.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-5">
+          <div>
+            <h3 className="mb-2 text-sm font-medium">Agent</h3>
+            <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
+              <BrainIcon className="size-4 text-muted-foreground" />
+              <span className="text-sm">
+                {activeAgent ?? 'Default agent'}
+                {activeModel ? ` — ${activeModel}` : ''}
+              </span>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium">
+              <PlugIcon className="size-3.5" />
+              MCP Servers
+              {mcpServers.length > 0 && (
+                <Badge variant="secondary" className="text-[10px]">{mcpServers.length}</Badge>
+              )}
+            </h3>
+            {mcpServers.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No MCP servers configured.</p>
+            ) : (
+              <div className="max-h-44 space-y-1.5 overflow-auto">
+                {mcpServers.map((server) => (
+                  <div key={server.id} className="flex items-start gap-2 rounded-md border bg-muted/30 px-3 py-2">
+                    <GlobeIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{server.name}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {server.config.url ? 'HTTP' : server.config.command ? 'stdio' : 'Unknown'}
+                        {server.authType !== 'none' ? ` · ${server.authType}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium">
+              <WrenchIcon className="size-3.5" />
+              Skills
+              {skills.length > 0 && (
+                <Badge variant="secondary" className="text-[10px]">{skills.length}</Badge>
+              )}
+            </h3>
+            {skills.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No skills installed.</p>
+            ) : (
+              <div className="max-h-44 space-y-1.5 overflow-auto">
+                {skills.map((skill) => (
+                  <div key={skill.name} className="flex items-start gap-2 rounded-md border bg-muted/30 px-3 py-2">
+                    <WrenchIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium">{skill.name}</p>
+                        {skill.source === 'builtin' && (
+                          <Badge variant="outline" className="text-[9px]">built-in</Badge>
+                        )}
+                      </div>
+                      {skill.description && (
+                        <p className="text-[11px] text-muted-foreground line-clamp-2">{skill.description}</p>
+                      )}
+                      {skill.tags && skill.tags.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {skill.tags.map((tag) => (
+                            <Badge key={tag} variant="secondary" className="text-[9px]">{tag}</Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   </>
   );
 }

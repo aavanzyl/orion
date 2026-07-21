@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { ClockIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon } from 'lucide-react';
+import { ClockIcon, PencilIcon, PlayIcon, PlusIcon, SparklesIcon, Trash2Icon } from 'lucide-react';
 import { toast } from 'sonner';
-import type { Schedule } from '@orion/models';
+import type { AgentSchedulePreviewResponse, Schedule } from '@orion/models';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -20,6 +20,7 @@ import { useProjects } from '@/features/projects/hooks';
 import { useSchedules } from './hooks';
 import { ScheduleFormDialog } from './schedule-form-dialog';
 import { DeleteScheduleDialog } from './delete-schedule-dialog';
+import { CreateScheduleAiModal } from './create-schedule-ai-modal';
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -85,6 +86,8 @@ export function SchedulesPage() {
   const [deleteSchedule, setDeleteSchedule] = useState<Schedule | null>(null);
   const [firing, setFiring] = useState<string | null>(null);
 
+  const [aiModalOpen, setAiModalOpen] = useState(false);
+
   const projectNames = useMemo(
     () => new Map(projects.map((p) => [p.id, p.name])),
     [projects],
@@ -110,6 +113,15 @@ export function SchedulesPage() {
     } finally {
       setFiring(null);
     }
+  };
+
+  const createScheduleFromAi = async (preview: AgentSchedulePreviewResponse, pid: string) => {
+    await api.createSchedule(pid, {
+      name: preview.name,
+      cron: preview.cron,
+      instruction: preview.instruction,
+    });
+    refetch();
   };
 
   const stats = useMemo(() => {
@@ -140,9 +152,18 @@ export function SchedulesPage() {
               </span>
             </div>
           )}
-          <Button size="sm" onClick={() => { setEditSchedule(null); setFormOpen(true); }} disabled={projects.length === 0}>
-            <PlusIcon data-icon="inline-start" />
-            New schedule
+          <Button size="sm" onClick={() => { setEditSchedule(null); setFormOpen(true); }} disabled={projects.length === 0} className="max-lg:size-8 max-lg:px-0">
+            <PlusIcon data-icon="inline-start" className="max-lg:mx-auto" />
+            <span className="hidden lg:inline">New schedule</span>
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setAiModalOpen(true)}
+            disabled={projects.length === 0}
+            className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:from-violet-700 hover:to-fuchsia-700 shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-shadow hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] animate-pulse-glow max-lg:size-8 max-lg:px-0"
+          >
+            <SparklesIcon data-icon="inline-start" className="max-lg:mx-auto" />
+            <span className="hidden lg:inline">Create with AI</span>
           </Button>
         </div>
       </header>
@@ -316,6 +337,14 @@ export function SchedulesPage() {
         schedule={deleteSchedule}
         onOpenChange={(open) => !open && setDeleteSchedule(null)}
         onDeleted={refetch}
+      />
+
+      <CreateScheduleAiModal
+        open={aiModalOpen}
+        onOpenChange={setAiModalOpen}
+        projectId={projects[0]?.id ?? null}
+        projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+        onCreate={createScheduleFromAi}
       />
     </div>
   );

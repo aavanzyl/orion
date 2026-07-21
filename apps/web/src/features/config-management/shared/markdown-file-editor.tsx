@@ -15,13 +15,61 @@ import { api } from '@/lib/api';
 
 const TEMPLATE = `# Instructions
 
-Describe what the agent should do. You can use \`$VARIABLE\` tokens that Orion
-renders per run, e.g.:
+Define the agent's role, scope, constraints, and expected output format.
+Orion substitutes template variables at run time:
 
-- \`$ARGUMENTS\` — the ticket title + description
-- \`$TICKET_TITLE\` — the ticket title
-- \`$REPOSITORY\` / \`$REPOSITORIES\` — the repo(s)
-- \`$BRANCH\` / \`$BASE_BRANCH\` — the run branch and its base
+## Run variables
+
+- \`$ARGUMENTS\` — ticket title followed by the full description
+- \`$TICKET_TITLE\` — ticket title only
+- \`$REPOSITORY\` — the project name
+- \`$REPOSITORIES\` — all linked repositories (comma-separated)
+- \`$BRANCH\` — the active run branch
+- \`$BASE_BRANCH\` — the project's default branch (e.g. main)
+- \`$WORKFLOW_ID\` — the unique run identifier
+
+## Upstream node outputs
+
+Reference another node's result with \`{{ nodes.<id> }} \` (serializes as JSON)
+or drill into a field with \`{{ nodes.<id>.<field> }}\`:
+
+\`\`\`
+{{ nodes.plan }}
+{{ nodes.plan.finalResponse }}
+\`\`\`
+
+---
+
+## Guidance
+
+Be specific about:
+
+1. **Role** — who the agent is and what it should focus on.  Prefer concrete
+   roles ("You are a TypeScript refactoring specialist reviewing…") over vague
+   ones.
+2. **Scope** — which files, subsystems, or concerns the agent should touch
+   and, just as importantly, what it must NOT change.
+3. **Output format** — how the agent should report back.  Structured output
+   (lists, tables, severity levels) gets more consistent results than free-form
+   prose.
+4. **Constraints** — read-only vs. read-write, any hard limits (e.g. "do not
+   modify test fixtures"), or domain rules to follow.
+5. **On failure** — what to do when the agent cannot complete the task.  A
+   clear "say exactly X and stop" keeps the workflow predictable.
+
+### Example
+
+\`\`\`md
+You are a code reviewer focused on correctness.  Review ONLY the working
+changes on branch $BRANCH (base $BASE_BRANCH) of $REPOSITORY for the ticket
+"$TICKET_TITLE".  This is a READ-ONLY review — do NOT modify any code.
+
+Return findings grouped by severity (BLOCKER, MAJOR, MINOR, NIT), each with
+the file path and a suggested fix.  If no issues are found, say "No issues".
+
+Ticket details:
+$ARGUMENTS
+\`\`\`
 `;
 
 export interface MarkdownFileEditorProps {

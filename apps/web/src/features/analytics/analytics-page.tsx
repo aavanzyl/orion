@@ -13,6 +13,14 @@ import {
 } from 'recharts';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -20,7 +28,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { api, type RunAnalytics } from '@/lib/api';
-import { useProjects } from '@/features/projects/hooks';
+import { useProjectContext } from '@/lib/use-project-context';
 
 const DAY_RANGES = [
   { label: 'Last 7 days', value: '7' },
@@ -30,8 +38,7 @@ const DAY_RANGES = [
 ];
 
 export function AnalyticsPage() {
-  const { projects } = useProjects();
-  const [projectId, setProjectId] = useState<string>('all');
+  const { projectId: globalProjectId } = useProjectContext();
   const [days, setDays] = useState('30');
   const [analytics, setAnalytics] = useState<RunAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,7 +48,7 @@ export function AnalyticsPage() {
     setLoading(true);
     try {
       const params: { projectId?: string; days?: number } = {};
-      if (projectId && projectId !== 'all') params.projectId = projectId;
+      if (globalProjectId) params.projectId = globalProjectId;
       const d = parseInt(days, 10);
       if (d > 0) params.days = d;
       const result = await api.getAnalytics(params);
@@ -56,7 +63,7 @@ export function AnalyticsPage() {
 
   useEffect(() => {
     fetchAnalytics();
-  }, [projectId, days]);
+  }, [globalProjectId, days]);
 
   const chartData = useMemo(() => {
     if (!analytics?.runsByDay) return [];
@@ -69,7 +76,7 @@ export function AnalyticsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-4 border-b px-6 py-4">
+      <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4 shrink-0">
         <div>
           <h1 className="text-lg font-semibold">Analytics</h1>
           <p className="text-sm text-muted-foreground">
@@ -79,17 +86,6 @@ export function AnalyticsPage() {
       </header>
 
       <div className="flex items-center gap-3 border-b px-6 py-3">
-        <Select value={projectId} onValueChange={setProjectId}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="All projects" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All projects</SelectItem>
-            {projects.map((p) => (
-              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
         <Select value={days} onValueChange={setDays}>
           <SelectTrigger className="w-40">
             <SelectValue />
@@ -122,15 +118,15 @@ export function AnalyticsPage() {
         ) : (
           <div className="flex flex-col gap-6">
             <div className="grid grid-cols-3 gap-4">
-              <div className="rounded-lg border p-4">
+              <div className="rounded-lg border bg-card p-4">
                 <div className="text-xs text-muted-foreground">Success Rate</div>
                 <div className="text-2xl font-bold">{analytics.successRate}%</div>
               </div>
-              <div className="rounded-lg border p-4">
+              <div className="rounded-lg border bg-card p-4">
                 <div className="text-xs text-muted-foreground">Total Runs</div>
                 <div className="text-2xl font-bold">{analytics.totalRuns}</div>
               </div>
-              <div className="rounded-lg border p-4">
+              <div className="rounded-lg border bg-card p-4">
                 <div className="text-xs text-muted-foreground">Total Cost</div>
                 <div className="text-2xl font-bold">${analytics.totalCostUsd.toFixed(2)}</div>
                 <div className="text-xs text-muted-foreground">{analytics.totalTokens.toLocaleString()} tokens</div>
@@ -138,7 +134,7 @@ export function AnalyticsPage() {
             </div>
 
             {chartData.length > 0 && (
-              <div className="rounded-lg border p-4">
+              <div className="rounded-lg border bg-card p-4">
                 <h3 className="mb-4 text-sm font-medium">Runs per Day</h3>
                 <ResponsiveContainer width="100%" height={250}>
                   <BarChart data={chartData}>
@@ -153,7 +149,7 @@ export function AnalyticsPage() {
             )}
 
             {chartData.length > 0 && (
-              <div className="rounded-lg border p-4">
+              <div className="rounded-lg border bg-card p-4">
                 <h3 className="mb-4 text-sm font-medium">Cost over Time (USD)</h3>
                 <ResponsiveContainer width="100%" height={250}>
                   <LineChart data={chartData}>
@@ -169,54 +165,58 @@ export function AnalyticsPage() {
 
             <div className="grid grid-cols-2 gap-6">
               {analytics.byProject.length > 0 && (
-                <div className="rounded-lg border p-4">
+                <div className="rounded-lg border bg-card p-4">
                   <h3 className="mb-3 text-sm font-medium">By Project</h3>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b text-left text-muted-foreground">
-                        <th className="py-2 font-medium">Project</th>
-                        <th className="py-2 font-medium">Runs</th>
-                        <th className="py-2 font-medium">Success</th>
-                        <th className="py-2 font-medium">Cost</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {analytics.byProject.map((p) => (
-                        <tr key={p.projectId} className="border-b last:border-0">
-                          <td className="py-2">{p.name}</td>
-                          <td className="py-2">{p.runs}</td>
-                          <td className="py-2">{p.successRate}%</td>
-                          <td className="py-2">${p.costUsd.toFixed(2)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Project</TableHead>
+                          <TableHead>Runs</TableHead>
+                          <TableHead>Success</TableHead>
+                          <TableHead>Cost</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {analytics.byProject.map((p) => (
+                          <TableRow key={p.projectId}>
+                            <TableCell>{p.name}</TableCell>
+                            <TableCell>{p.runs}</TableCell>
+                            <TableCell>{p.successRate}%</TableCell>
+                            <TableCell>${p.costUsd.toFixed(2)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
               )}
 
               {analytics.byWorkflow.length > 0 && (
-                <div className="rounded-lg border p-4">
+                <div className="rounded-lg border bg-card p-4">
                   <h3 className="mb-3 text-sm font-medium">By Workflow</h3>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b text-left text-muted-foreground">
-                        <th className="py-2 font-medium">Workflow</th>
-                        <th className="py-2 font-medium">Runs</th>
-                        <th className="py-2 font-medium">Success</th>
-                        <th className="py-2 font-medium">Cost</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {analytics.byWorkflow.map((w) => (
-                        <tr key={w.workflow} className="border-b last:border-0">
-                          <td className="py-2">{w.workflow}</td>
-                          <td className="py-2">{w.runs}</td>
-                          <td className="py-2">{w.successRate}%</td>
-                          <td className="py-2">${w.costUsd.toFixed(2)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Workflow</TableHead>
+                          <TableHead>Runs</TableHead>
+                          <TableHead>Success</TableHead>
+                          <TableHead>Cost</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {analytics.byWorkflow.map((w) => (
+                          <TableRow key={w.workflow}>
+                            <TableCell>{w.workflow}</TableCell>
+                            <TableCell>{w.runs}</TableCell>
+                            <TableCell>{w.successRate}%</TableCell>
+                            <TableCell>${w.costUsd.toFixed(2)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
               )}
             </div>

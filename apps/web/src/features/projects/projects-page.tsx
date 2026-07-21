@@ -51,9 +51,9 @@ export function ProjectsPage() {
             Add, edit and remove the repositories Orion manages.
           </p>
         </div>
-        <Button onClick={openCreate}>
-          <PlusIcon data-icon="inline-start" />
-          New project
+        <Button onClick={openCreate} className="max-lg:size-9 max-lg:px-0">
+          <PlusIcon data-icon="inline-start" className="max-lg:mx-auto" />
+          <span className="hidden lg:inline">New project</span>
         </Button>
       </header>
 

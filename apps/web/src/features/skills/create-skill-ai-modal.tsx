@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Loader2Icon, SparklesIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import type { AgentTicketPreviewResponse } from '@orion/models';
+import type { AgentSkillPreviewResponse } from '@orion/models';
 import {
   Dialog,
   DialogContent,
@@ -14,23 +14,14 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Markdown } from '@/components/markdown';
 import { api } from '@/lib/api';
 
-interface CreateTicketAiModalProps {
+interface CreateSkillAiModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  projectId: string | null;
-  projects?: { id: string; name: string }[];
-  onCreate: (preview: AgentTicketPreviewResponse, projectId: string) => Promise<void>;
-  onOpenInForm?: (preview: AgentTicketPreviewResponse) => void;
+  onCreate: (preview: AgentSkillPreviewResponse) => Promise<void>;
+  onOpenInForm?: (preview: AgentSkillPreviewResponse) => void;
 }
 
 const dialogBg = 'bg-[#0d1014] dark:bg-[#e8e8e8] text-gray-100 dark:text-gray-900 border-gray-800 dark:border-gray-300';
@@ -45,30 +36,22 @@ const titleColor = 'text-violet-400 dark:text-violet-700';
 const iconColor = 'text-violet-500';
 const descColor = 'text-gray-400 dark:text-gray-600';
 const cardBg = 'bg-[#0d1014] dark:bg-white border-gray-700 dark:border-gray-300';
-const hintColor = 'text-gray-500 dark:text-gray-500';
-const badgeOutline = 'border-gray-600 dark:border-gray-300 text-gray-300 dark:text-gray-700';
 
-export function CreateTicketAiModal({
+export function CreateSkillAiModal({
   open,
   onOpenChange,
-  projectId,
-  projects,
   onCreate,
   onOpenInForm,
-}: CreateTicketAiModalProps) {
+}: CreateSkillAiModalProps) {
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
-  const [preview, setPreview] = useState<AgentTicketPreviewResponse | null>(null);
-  const [selectedProject, setSelectedProject] = useState(projectId ?? '');
+  const [preview, setPreview] = useState<AgentSkillPreviewResponse | null>(null);
   const [validated, setValidated] = useState(false);
-
-  const effectiveProjectId = projects ? selectedProject : projectId;
 
   const reset = () => {
     setPrompt('');
     setPreview(null);
     setValidated(false);
-    if (projects) setSelectedProject(projectId ?? '');
   };
 
   const handleOpenChange = (o: boolean) => {
@@ -76,20 +59,15 @@ export function CreateTicketAiModal({
     onOpenChange(o);
   };
 
-  const needsProject = projects && !selectedProject;
   const needsPrompt = !prompt.trim();
 
   const generate = async () => {
-    if (needsPrompt || needsProject || !effectiveProjectId) {
-      setValidated(true);
-      return;
-    }
+    if (needsPrompt) { setValidated(true); return; }
     setValidated(false);
-    const pid = effectiveProjectId;
     setLoading(true);
     setPreview(null);
     try {
-      const result = await api.previewTicket(pid, prompt.trim());
+      const result = await api.previewSkill(prompt.trim());
       setPreview(result);
     } catch (e) {
       toast.error((e as Error).message);
@@ -99,10 +77,10 @@ export function CreateTicketAiModal({
   };
 
   const handleCreate = async () => {
-    if (!preview || !effectiveProjectId) return;
+    if (!preview) return;
     try {
-      await onCreate(preview, effectiveProjectId);
-      toast.success('Ticket created');
+      await onCreate(preview);
+      toast.success('Skill created');
       reset();
       onOpenChange(false);
     } catch (e) {
@@ -117,58 +95,35 @@ export function CreateTicketAiModal({
     onOpenChange(false);
   };
 
-  const priorityLabel = (p: number): string =>
-    ['None', 'Urgent', 'High', 'Medium', 'Low'][p] ?? 'None';
-
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className={`sm:max-w-xl ${dialogBg}`}>
         <DialogHeader>
           <DialogTitle className={`flex items-center gap-2 ${titleColor}`}>
             <SparklesIcon className={`size-5 ${iconColor}`} />
-            Create ticket with AI
+            Create skill with AI
           </DialogTitle>
           <DialogDescription className={descColor}>
-            Describe the ticket in natural language. The agent will draft it for you.
+            Describe the skill you need. The agent will draft the SKILL.md for you.
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
-          {projects && projects.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              <Label className={`text-xs ${labelMuted}`}>Project</Label>
-              <Select value={selectedProject} onValueChange={(v) => { setSelectedProject(v); if (v) setValidated(false); }}>
-                <SelectTrigger className={`${inputBg} ${validated && needsProject ? 'ring-2 ring-red-500' : ''}`}>
-                  <SelectValue placeholder="Select a project" />
-                </SelectTrigger>
-                <SelectContent>
-                  {projects.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {validated && needsProject && (
-                <p className="text-xs text-red-400">Select a project first</p>
-              )}
-            </div>
-          )}
           {!preview && (
-            <div className={`rounded-lg border ${panelBorder} ${panelBg}`}>              <Textarea
+            <div className={`rounded-lg border ${panelBorder} ${panelBg}`}>
+              <Textarea
                 value={prompt}
                 onChange={(e) => { setPrompt(e.target.value); if (e.target.value.trim()) setValidated(false); }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    void generate();
-                  }
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void generate(); }
                 }}
-                placeholder="e.g. Add a dark mode toggle to settings that persists to localStorage and respects the system preference…"
+                placeholder="e.g. A skill that reviews pull requests for security vulnerabilities, checking for exposed secrets, unsafe dependencies, and injection risks…"
                 className={`min-h-[100px] resize-none rounded-lg ${inputBg} border-0 focus-visible:ring-0 ${validated && needsPrompt ? 'ring-2 ring-red-500' : ''}`}
                 disabled={loading}
                 autoFocus
               />
               {validated && needsPrompt && (
-                <p className="mt-1 text-xs text-red-400">Describe what you need the ticket to cover</p>
+                <p className="mt-1 px-1 text-xs text-red-400">Describe what the skill should do</p>
               )}
             </div>
           )}
@@ -176,44 +131,34 @@ export function CreateTicketAiModal({
           {preview && (
             <div className={`rounded-lg border ${panelBorder} ${panelBg} p-4`}>
               <div className="mb-3 flex items-center gap-2">
-                <Badge variant="secondary" className={draftBadge}>
-                  Draft
-                </Badge>
+                <Badge variant="secondary" className={draftBadge}>Draft</Badge>
                 <span className={`text-xs ${descColor}`}>{preview.reasoning}</span>
               </div>
 
               <div className="flex flex-col gap-3">
                 <div>
-                  <Label className={`text-[11px] ${labelMuted}`}>Title</Label>
-                  <p className="text-sm font-medium">{preview.title}</p>
+                  <Label className={`text-[11px] ${labelMuted}`}>Name</Label>
+                  <p className="text-sm font-mono">{preview.name}</p>
                 </div>
-
-                <div className="flex gap-4">
+                <div>
+                  <Label className={`text-[11px] ${labelMuted}`}>Description</Label>
+                  <p className="text-sm">{preview.description}</p>
+                </div>
+                {preview.tags.length > 0 && (
                   <div>
-                    <Label className={`text-[11px] ${labelMuted}`}>Type</Label>
-                    <Badge variant="outline" className={`mt-0.5 capitalize ${badgeOutline}`}>{preview.type}</Badge>
-                  </div>
-                  <div>
-                    <Label className={`text-[11px] ${labelMuted}`}>Priority</Label>
-                    <Badge variant="outline" className={`mt-0.5 ${badgeOutline}`}>{priorityLabel(preview.priority)}</Badge>
-                  </div>
-                  {preview.labels.length > 0 && (
-                    <div>
-                      <Label className={`text-[11px] ${labelMuted}`}>Labels</Label>
-                      <div className="mt-0.5 flex flex-wrap gap-1">
-                        {preview.labels.map((label) => (
-                          <Badge key={label} variant="secondary" className={`text-xs ${draftBadge}`}>{label}</Badge>
-                        ))}
-                      </div>
+                    <Label className={`text-[11px] ${labelMuted}`}>Tags</Label>
+                    <div className="mt-0.5 flex flex-wrap gap-1">
+                      {preview.tags.map((tag) => (
+                        <Badge key={tag} variant="secondary" className={`text-xs ${draftBadge}`}>{tag}</Badge>
+                      ))}
                     </div>
-                  )}
-                </div>
-
-                {preview.description && (
+                  </div>
+                )}
+                {preview.content && (
                   <div>
-                    <Label className={`text-[11px] ${labelMuted}`}>Description</Label>
-                    <div className={`mt-1 max-h-40 overflow-y-auto rounded-md border ${cardBg} p-3 text-sm`}>
-                      <Markdown content={preview.description} />
+                    <Label className={`text-[11px] ${labelMuted}`}>Content</Label>
+                    <div className={`mt-1 max-h-48 overflow-y-auto rounded-md border ${cardBg} p-3 text-sm`}>
+                      <Markdown content={preview.content} />
                     </div>
                   </div>
                 )}
@@ -223,22 +168,15 @@ export function CreateTicketAiModal({
         </div>
 
         <DialogFooter>
-          <span className={`text-[11px] ${hintColor} mr-auto`}>Press Enter to generate</span>
-          <button type="button" onClick={handleOpenChange.bind(null, false)} className={outlineBtn}>
-            Cancel
-          </button>
+          <span className="mr-auto text-[11px] text-gray-500">Press Enter to generate</span>
+          <button type="button" onClick={handleOpenChange.bind(null, false)} className={outlineBtn}>Cancel</button>
           {preview ? (
             <>
               {onOpenInForm && (
-                <button type="button" onClick={handleEditInForm} className={violetOutlineBtn}>
-                  Edit in form
-                </button>
+                <button type="button" onClick={handleEditInForm} className={violetOutlineBtn}>Edit in form</button>
               )}
-              <Button
-                onClick={handleCreate}
-                className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:from-violet-700 hover:to-fuchsia-700"
-              >
-                Create ticket
+              <Button onClick={handleCreate} className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:from-violet-700 hover:to-fuchsia-700">
+                Create skill
               </Button>
             </>
           ) : (
@@ -247,11 +185,7 @@ export function CreateTicketAiModal({
               disabled={loading}
               className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:from-violet-700 hover:to-fuchsia-700 shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-shadow hover:shadow-[0_0_25px_rgba(139,92,246,0.5)]"
             >
-              {loading ? (
-                <Loader2Icon className="size-4 animate-spin" data-icon="inline-start" />
-              ) : (
-                <SparklesIcon data-icon="inline-start" />
-              )}
+              {loading ? <Loader2Icon className="size-4 animate-spin" data-icon="inline-start" /> : <SparklesIcon data-icon="inline-start" />}
               Generate
             </Button>
           )}

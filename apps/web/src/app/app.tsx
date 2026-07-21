@@ -20,6 +20,7 @@ import { CodebaseGraphPage } from '@/features/codebase/codebase-graph-page';
 import { CodegenGraphPage } from '@/features/codebase/codegen-graph-page';
 import { KnowledgeGraphPage } from '@/features/codebase/knowledge-graph-page';
 import { IssuesPage } from '@/features/issues/issues-page';
+import { IssueViewPage } from '@/features/issues/issue-view-page';
 import { McpPage } from '@/features/mcp/mcp-page';
 import { SkillsPage } from '@/features/skills/skills-page';
 import { TimelinePage } from '@/features/timeline/timeline-page';
@@ -42,6 +43,7 @@ export function App() {
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/workflows/:name" element={<WorkflowTemplateView />} />
           <Route path="/issues" element={<IssuesPage />} />
+          <Route path="/issues/:ticketId" element={<IssueViewPage />} />
           <Route path="/timeline" element={<TimelinePage />} />
           <Route path="/schedule" element={<SchedulesPage />} />
           <Route path="/codebase" element={<CodebasePage />} />

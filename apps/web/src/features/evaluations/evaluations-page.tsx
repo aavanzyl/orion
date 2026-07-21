@@ -19,6 +19,14 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -39,7 +47,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { api, type RunListItem } from '@/lib/api';
-import { useProjects } from '@/features/projects/hooks';
+import { useProjectContext } from '@/lib/use-project-context';
 
 const DAY_RANGES = [
   { label: 'Last 7 days', value: '7' },
@@ -75,8 +83,7 @@ interface ReviewState {
 }
 
 export function EvaluationsPage() {
-  const { projects } = useProjects();
-  const [projectId, setProjectId] = useState('all');
+  const { projectId: globalProjectId } = useProjectContext();
   const [days, setDays] = useState('30');
   const [summary, setSummary] = useState<EvaluationSummary | null>(null);
   const [runs, setRuns] = useState<RunListItem[]>([]);
@@ -89,7 +96,7 @@ export function EvaluationsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const scoped = projectId !== 'all' ? projectId : undefined;
+      const scoped = globalProjectId || undefined;
       const d = parseInt(days, 10);
       const [summaryResult, runsResult, evalResult] = await Promise.all([
         api.getEvaluationSummary({ projectId: scoped, days: d > 0 ? d : undefined }),
@@ -105,7 +112,7 @@ export function EvaluationsPage() {
     } finally {
       setLoading(false);
     }
-  }, [projectId, days]);
+  }, [globalProjectId, days]);
 
   useEffect(() => {
     void load();
@@ -161,7 +168,7 @@ export function EvaluationsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-4 border-b px-6 py-4">
+      <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4 shrink-0">
         <div>
           <h1 className="text-lg font-semibold">Evaluations</h1>
           <p className="text-sm text-muted-foreground">
@@ -171,19 +178,6 @@ export function EvaluationsPage() {
       </header>
 
       <div className="flex items-center gap-3 border-b px-6 py-3">
-        <Select value={projectId} onValueChange={setProjectId}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="All projects" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All projects</SelectItem>
-            {projects.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
         <Select value={days} onValueChange={setDays}>
           <SelectTrigger className="w-40">
             <SelectValue />
@@ -233,7 +227,7 @@ export function EvaluationsPage() {
             )}
 
             {summary && summary.topLabels.length > 0 && (
-              <div className="rounded-lg border p-4">
+              <div className="rounded-lg border bg-card p-4">
                 <h3 className="mb-3 text-sm font-medium">Top labels</h3>
                 <div className="flex flex-wrap gap-2">
                   {summary.topLabels.map((l) => (
@@ -246,7 +240,7 @@ export function EvaluationsPage() {
               </div>
             )}
 
-            <div className="rounded-lg border p-4">
+            <div className="rounded-lg border bg-card p-4">
               <h3 className="mb-3 flex items-center gap-2 text-sm font-medium">
                 <BotIcon className="size-4" />
                 Agent scorecards
@@ -256,47 +250,47 @@ export function EvaluationsPage() {
                   No agent telemetry yet. Run a workflow to populate metrics.
                 </p>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b text-left text-muted-foreground">
-                        <th className="py-2 font-medium">Agent</th>
-                        <th className="py-2 font-medium">Model</th>
-                        <th className="py-2 font-medium">Runs</th>
-                        <th className="py-2 font-medium">Success</th>
-                        <th className="py-2 font-medium">Avg time</th>
-                        <th className="py-2 font-medium">Tokens</th>
-                        <th className="py-2 font-medium">Cost</th>
-                        <th className="py-2 font-medium">Feedback</th>
-                        <th className="py-2 font-medium">Score</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Agent</TableHead>
+                        <TableHead>Model</TableHead>
+                        <TableHead>Runs</TableHead>
+                        <TableHead>Success</TableHead>
+                        <TableHead>Avg time</TableHead>
+                        <TableHead>Tokens</TableHead>
+                        <TableHead>Cost</TableHead>
+                        <TableHead>Feedback</TableHead>
+                        <TableHead>Score</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {summary.byAgent.map((a) => (
-                        <tr key={a.agentId} className="border-b last:border-0">
-                          <td className="py-2 font-medium">{a.agentId}</td>
-                          <td className="py-2 text-muted-foreground">{a.model ?? '—'}</td>
-                          <td className="py-2">{a.nodeRuns}</td>
-                          <td className="py-2">{a.successRate}%</td>
-                          <td className="py-2">{formatDuration(a.avgDurationMs ?? undefined)}</td>
-                          <td className="py-2">{a.totalTokens.toLocaleString()}</td>
-                          <td className="py-2">${a.costUsd.toFixed(2)}</td>
-                          <td className="py-2">
+                        <TableRow key={a.agentId}>
+                          <TableCell className="font-medium">{a.agentId}</TableCell>
+                          <TableCell className="text-muted-foreground">{a.model ?? '—'}</TableCell>
+                          <TableCell>{a.nodeRuns}</TableCell>
+                          <TableCell>{a.successRate}%</TableCell>
+                          <TableCell>{formatDuration(a.avgDurationMs ?? undefined)}</TableCell>
+                          <TableCell>{a.totalTokens.toLocaleString()}</TableCell>
+                          <TableCell>${a.costUsd.toFixed(2)}</TableCell>
+                          <TableCell>
                             <span className="text-emerald-600 dark:text-emerald-400">
                               +{a.positive}
                             </span>{' '}
                             <span className="text-red-600 dark:text-red-400">-{a.negative}</span>
-                          </td>
-                          <td className="py-2">{a.avgScore != null ? a.avgScore.toFixed(2) : '—'}</td>
-                        </tr>
+                          </TableCell>
+                          <TableCell>{a.avgScore != null ? a.avgScore.toFixed(2) : '—'}</TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
               )}
             </div>
 
-            <div className="rounded-lg border p-4">
+            <div className="rounded-lg border bg-card p-4">
               <h3 className="mb-3 flex items-center gap-2 text-sm font-medium">
                 <ClipboardCheckIcon className="size-4" />
                 Recent runs to review
@@ -470,7 +464,7 @@ function SummaryCard({
   tone?: string;
 }) {
   return (
-    <div className="rounded-lg border p-4">
+    <div className="rounded-lg border bg-card p-4">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className={`text-2xl font-bold ${tone ?? ''}`}>{value}</div>
     </div>

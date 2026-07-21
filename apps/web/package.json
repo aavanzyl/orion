@@ -5,19 +5,27 @@
   "type": "module",
   "nx": {
     "projectType": "application",
-    "tags": ["scope:web", "type:app"],
+    "tags": [
+      "scope:web",
+      "type:app"
+    ],
     "targets": {
       "serve": {
-        "dependsOn": ["@orion/orchestrator:serve"]
+        "dependsOn": [
+          "@orion/orchestrator:serve"
+        ]
       },
       "dev": {
-        "dependsOn": ["@orion/orchestrator:serve"]
+        "dependsOn": [
+          "@orion/orchestrator:serve"
+        ]
       }
     }
   },
   "dependencies": {
     "@orion/config": "*",
     "@orion/models": "*",
+    "radix-ui": "^1.6.4",
     "yaml": "^2.6.1"
   }
 }

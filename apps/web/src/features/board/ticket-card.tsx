@@ -1,9 +1,10 @@
-import { forwardRef } from 'react';
+import { useState, forwardRef } from 'react';
 import { useDraggable } from '@dnd-kit/core';
-import { CalendarIcon, GitBranchIcon } from 'lucide-react';
+import { CalendarIcon, GitBranchIcon, PencilIcon } from 'lucide-react';
 import { ALL_DEFAULT_TICKET_TYPES, type Label, type Ticket } from '@orion/models';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { PriorityIcon } from './priority';
 
@@ -21,7 +22,9 @@ interface TicketCardViewProps extends React.ComponentProps<typeof Card> {
 }
 
 export const TicketCardView = forwardRef<HTMLDivElement, TicketCardViewProps>(
-  ({ ticket, labelsById, ticketsById, className, ...props }, ref) => {
+  ({ ticket, labelsById, ticketsById, className, style, ...props }, ref) => {
+    const [isHovered, setIsHovered] = useState(false);
+
     const ticketLabels = ticket.labelIds
       .map((id) => labelsById.get(id))
       .filter((l): l is Label => Boolean(l));
@@ -39,9 +42,32 @@ export const TicketCardView = forwardRef<HTMLDivElement, TicketCardViewProps>(
     })();
 
     return (
-      <Card ref={ref} className={cn('cursor-grab gap-3 py-4 transition-all hover:shadow-md hover:border-ring/50', priorityStyle, className)} {...props}>
+      <Card
+        ref={ref}
+        className={cn('relative cursor-grab gap-3 py-4 transition-all hover:shadow-md hover:border-ring/50', priorityStyle, className)}
+        style={style}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        {...props}
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(
+            'absolute top-1.5 right-1.5 size-7 transition-opacity',
+            isHovered ? 'opacity-100' : 'opacity-0',
+          )}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (props.onClick) {
+              (props.onClick as unknown as (e: React.MouseEvent<HTMLButtonElement>) => void)(e);
+            }
+          }}
+        >
+          <PencilIcon className="size-3.5" />
+        </Button>
         <CardHeader className="px-4">
-          <CardTitle className="flex items-start gap-2 text-sm leading-snug">
+          <CardTitle className="flex items-start gap-2 text-sm leading-snug pr-5">
             {ticket.priority > 0 && <PriorityIcon priority={ticket.priority} className="mt-0.5 shrink-0" />}
             <span>{ticket.title}</span>
           </CardTitle>
@@ -84,6 +110,7 @@ TicketCardView.displayName = 'TicketCardView';
 export function TicketCard({ ticket, labelsById, ticketsById, onOpen }: TicketCardProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: ticket.id,
+    data: { ticket, swimlane: ticket.swimlane },
   });
 
   return (
@@ -94,8 +121,8 @@ export function TicketCard({ ticket, labelsById, ticketsById, onOpen }: TicketCa
       ref={setNodeRef}
       className={cn(isDragging && 'opacity-40')}
       onClick={() => onOpen(ticket)}
-      {...listeners}
       {...attributes}
+      {...listeners}
     />
   );
 }

@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api';
-import { useProjects } from '@/features/projects/hooks';
+import { useProjectContext } from '@/lib/use-project-context';
 import { FileNode } from './file-node';
 import { ProjectGroupNode } from './project-group-node';
 
@@ -251,14 +251,7 @@ function GraphCanvas({ projectId }: { projectId: string }) {
 }
 
 export function CodegenGraphPage() {
-  const { projects } = useProjects();
-  const [projectId, setProjectId] = useState<string>('');
-
-  useEffect(() => {
-    if (!projectId && projects.length > 0) {
-      setProjectId(projects[0].id);
-    }
-  }, [projects, projectId]);
+  const { projectId } = useProjectContext();
 
   return (
     <div className="flex h-full flex-col">
@@ -269,16 +262,6 @@ export function CodegenGraphPage() {
             NX project-aware dependency graph — apps, libraries, and file import relationships.
           </p>
         </div>
-        <Select value={projectId} onValueChange={setProjectId}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Project" />
-          </SelectTrigger>
-          <SelectContent>
-            {projects.map((p) => (
-              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </header>
       <main className="min-h-0 flex-1 relative">
         {projectId ? (

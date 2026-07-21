@@ -14,6 +14,7 @@ import {
   SearchIcon,
   ArrowUpDownIcon,
   PlusIcon,
+  SparklesIcon,
 } from 'lucide-react';
 import type { RecommendedSkill, SkillCatalogEntry, SkillDetail, SkillReference } from '@orion/models';
 import { api } from '@/lib/api';
@@ -47,6 +48,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Markdown } from '@/components/markdown';
 import { toast } from 'sonner';
+import { CreateSkillAiModal } from '@/features/skills/create-skill-ai-modal';
 
 interface SkillsSectionProps {
   projectId?: string;
@@ -124,6 +126,8 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
   const [createDescription, setCreateDescription] = useState('');
   const [createContent, setCreateContent] = useState('');
   const [creating, setCreating] = useState(false);
+
+  const [aiModalOpen, setAiModalOpen] = useState(false);
 
   // Recommended catalog
   const [recommended, setRecommended] = useState<RecommendedSkill[]>([]);
@@ -298,6 +302,24 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
     } finally {
       setCreating(false);
     }
+  };
+
+  const createSkillFromAi = async (preview: import('@orion/models').AgentSkillPreviewResponse) => {
+    if (global) {
+      await api.createGlobalSkill({
+        name: preview.name,
+        description: preview.description,
+        content: preview.content,
+      });
+    } else {
+      await api.createSkill((projectId ?? ''), {
+        name: preview.name,
+        description: preview.description,
+        content: preview.content,
+      });
+    }
+    toast.success(`Created skill "${preview.name}"`);
+    load();
   };
 
   const confirmDelete = async (skill: SkillCatalogEntry) => {
@@ -479,13 +501,21 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}>
-              <PlusIcon data-icon="inline-start" />
-              Create skill
+            <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)} className="max-lg:size-8 max-lg:px-0">
+              <PlusIcon data-icon="inline-start" className="max-lg:mx-auto" />
+              <span className="hidden lg:inline">Create skill</span>
             </Button>
-            <Button size="sm" onClick={() => setInstallOpen(true)}>
-              <DownloadIcon data-icon="inline-start" />
-              Add skill
+            <Button size="sm" onClick={() => setInstallOpen(true)} className="max-lg:size-8 max-lg:px-0">
+              <DownloadIcon data-icon="inline-start" className="max-lg:mx-auto" />
+              <span className="hidden lg:inline">Add skill</span>
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setAiModalOpen(true)}
+              className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:from-violet-700 hover:to-fuchsia-700 shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-shadow hover:shadow-[0_0_25px_rgba(139,92,246,0.5)] animate-pulse-glow max-lg:size-8 max-lg:px-0"
+            >
+              <SparklesIcon data-icon="inline-start" className="max-lg:mx-auto" />
+              <span className="hidden lg:inline">Create with AI</span>
             </Button>
           </div>
         </div>
@@ -512,7 +542,7 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
                 : 'No skills match the current filters.'}
             </p>
           ) : (
-            <div className="max-h-[60vh] overflow-y-auto rounded-md border">
+            <div className="max-h-[60vh] overflow-y-auto rounded-md border bg-card">
               <Table className="min-w-[900px]">
                 <TableHeader>
                   <TableRow>
@@ -1062,6 +1092,12 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CreateSkillAiModal
+        open={aiModalOpen}
+        onOpenChange={setAiModalOpen}
+        onCreate={createSkillFromAi}
+      />
     </div>
   );
 }

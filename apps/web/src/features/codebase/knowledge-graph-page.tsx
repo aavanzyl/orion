@@ -49,7 +49,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
-import { useProjects } from '@/features/projects/hooks';
+import { useProjectContext } from '@/lib/use-project-context';
 
 const COMMUNITY_COLORS = [
   { border: 'border-blue-400 dark:border-blue-300', bg: 'bg-blue-500/10 dark:bg-blue-400/10', badge: 'bg-blue-500/10 text-blue-600 dark:text-blue-300' },
@@ -713,35 +713,18 @@ function QueryExplorerTab({ projectId }: { projectId: string }) {
 }
 
 export function KnowledgeGraphPage() {
-  const { projects } = useProjects();
-  const [projectId, setProjectId] = useState<string>('');
+  const { projectId } = useProjectContext();
   const [tab, setTab] = useState('graph');
-
-  useEffect(() => {
-    if (!projectId && projects.length > 0) {
-      setProjectId(projects[0].id);
-    }
-  }, [projects, projectId]);
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4">
+      <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4 shrink-0">
         <div>
           <h1 className="text-lg font-semibold">Knowledge Graph</h1>
           <p className="text-sm text-muted-foreground">
             Multi-layered code graph — code, documents, rationales, and concepts with community clustering.
           </p>
         </div>
-        <Select value={projectId} onValueChange={setProjectId}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Project" />
-          </SelectTrigger>
-          <SelectContent>
-            {projects.map((p) => (
-              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </header>
       <main className="min-h-0 flex-1 relative flex flex-col">
         {projectId ? (
