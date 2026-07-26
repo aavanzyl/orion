@@ -363,7 +363,8 @@ export class ChatService {
     const project = await this.c.projects.get(projectId);
     if (!project) throw new Error(`Project ${projectId} not found`);
     const configRoot = await this.workspaces.resolveConfigRoot(project);
-    const workingDirectory = configRoot;
+    const workingDirectory =
+      project.sourceKind !== 'remote' && project.rootPath ? project.rootPath : configRoot;
     const projectConfig = await loadProjectConfig(configRoot, project.configPath).catch(() => null);
     if (projectConfig) {
       workflowName = projectConfig.workflow.name;
