@@ -154,7 +154,7 @@ export interface WorkflowNodeConfig {
   /**
    * Names of skills available to this agent node. Each is materialized into
    * the run's worktree so the harness can discover it. Names resolve against the
-   * project's skill catalog (built-in defaults + skills under `.orion/skills/`).
+   * project's skill catalog (built-in defaults + skills under `.agents/skills/`).
    */
   skills?: string[];
   /**

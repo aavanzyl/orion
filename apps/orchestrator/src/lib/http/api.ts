@@ -194,7 +194,7 @@ export function createApiRouter(
     return null;
   }
 
-  // Global skills service (project-independent, stored under ~/.orion/skills/)
+  // Global skills service (project-independent, stored under ~/.agents/skills/)
   const skills = {
     listGlobal: () => listGlobalSkillCatalog(),
     getGlobalDetail: (name: string) => getGlobalSkillDetail(name),
@@ -259,6 +259,14 @@ export function createApiRouter(
         ? req.body.models.filter((m: unknown): m is string => typeof m === 'string')
         : [];
       const apiKey = typeof req.body?.apiKey === 'string' ? req.body.apiKey.trim() : undefined;
+      const promptPrice =
+        typeof req.body?.promptPrice === 'number' && req.body.promptPrice > 0
+          ? req.body.promptPrice
+          : undefined;
+      const completionPrice =
+        typeof req.body?.completionPrice === 'number' && req.body.completionPrice > 0
+          ? req.body.completionPrice
+          : undefined;
       ok(
         res,
         await c.providers.create({
@@ -268,6 +276,8 @@ export function createApiRouter(
           baseUrl: typeof req.body?.baseUrl === 'string' ? req.body.baseUrl : undefined,
           models,
           apiKey: apiKey ? encryptApiKey(apiKey, c.env.providerEncryptionSalt) : undefined,
+          promptPrice,
+          completionPrice,
         }),
         201,
       );
@@ -284,6 +294,12 @@ export function createApiRouter(
         input.apiKey = input.apiKey.trim()
           ? encryptApiKey(input.apiKey as string, c.env.providerEncryptionSalt)
           : null;
+      }
+      if (typeof input.promptPrice === 'number') {
+        input.promptPrice = input.promptPrice > 0 ? input.promptPrice : null;
+      }
+      if (typeof input.completionPrice === 'number') {
+        input.completionPrice = input.completionPrice > 0 ? input.completionPrice : null;
       }
       const updated = await c.providers.update(req.params.id, input);
       if (!updated) return fail(res, 'Provider not found', 404);
@@ -360,7 +376,7 @@ export function createApiRouter(
 
   // --- Skills: the catalog of reusable instruction bundles for agents --------
 
-  // Global skills (no project required) — installed to ~/.orion/skills/
+  // Global skills (no project required) — installed to ~/.agents/skills/
 
   router.get(
     '/skills',
@@ -815,6 +831,39 @@ export function createApiRouter(
     }),
   );
 
+  // --- Ticket semantic search (RAG): embeddings-backed ticket search ------
+
+  router.get(
+    '/projects/:id/ticket-index',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      ok(res, await c.ragService.getTicketStatus(req.params.id));
+    }),
+  );
+
+  router.post(
+    '/projects/:id/ticket-index',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      ok(res, await c.ragService.reindexTickets(req.params.id), 202);
+    }),
+  );
+
+  router.post(
+    '/projects/:id/tickets/search',
+    asyncHandler(async (req, res) => {
+      const project = await projects.get(req.params.id);
+      if (!project) return fail(res, 'Project not found', 404);
+      const query = typeof req.body?.query === 'string' ? req.body.query.trim() : '';
+      if (!query) return fail(res, 'query is required');
+      const topK =
+        typeof req.body?.topK === 'number' && req.body.topK > 0 ? Math.floor(req.body.topK) : 8;
+      ok(res, await c.ragService.searchTickets(req.params.id, query, topK));
+    }),
+  );
+
   router.get(
     '/projects/:id/files/dirs',
     asyncHandler(async (req, res) => {
@@ -981,6 +1030,7 @@ export function createApiRouter(
         epicId: req.body?.epicId ?? undefined,
       });
       c.bus.emit(`board:${req.params.id}`, { type: 'ticket.created', ticketId: ticket.id, ticket });
+      c.ragService.reindexTickets(req.params.id).catch(() => undefined);
       ok(res, ticket, 201);
     }),
   );
@@ -1122,6 +1172,7 @@ export function createApiRouter(
       if (prior) {
         c.bus.emit(`board:${prior.projectId}`, { type: 'ticket.updated', ticketId: updated.id, swimlane: updated.swimlane });
       }
+      c.ragService.reindexTickets(updated.projectId).catch(() => undefined);
       ok(res, updated);
     }),
   );
@@ -1135,6 +1186,7 @@ export function createApiRouter(
       if (!deleted) return fail(res, 'Ticket not found', 404);
       if (ticket) {
         c.bus.emit(`board:${ticket.projectId}`, { type: 'ticket.deleted', ticketId: req.params.id });
+        c.ragService.reindexTickets(ticket.projectId).catch(() => undefined);
       }
       ok(res, { deleted: true });
     }),
@@ -1207,6 +1259,7 @@ export function createApiRouter(
       }
 
       ok(res, { ticket: result, trigger });
+      c.ragService.reindexTickets(result.projectId).catch(() => undefined);
     }),
   );
 
@@ -1289,7 +1342,8 @@ export function createApiRouter(
     asyncHandler(async (req, res) => {
       const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
       if (!body) return fail(res, 'body is required');
-      const comment = await c.comments.create(req.params.id, body);
+      const attachments = Array.isArray(req.body?.attachments) ? req.body.attachments : [];
+      const comment = await c.comments.create(req.params.id, body, attachments);
       ok(res, comment, 201);
     }),
   );

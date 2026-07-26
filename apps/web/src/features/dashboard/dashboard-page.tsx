@@ -312,7 +312,7 @@ export function DashboardPage() {
                             <TooltipTrigger asChild>
                               <button
                                 type="button"
-                                onClick={(e) => { e.stopPropagation(); navigate(`/?project=${run.projectId}`); }}
+                                onClick={(e) => { e.stopPropagation(); navigate(`/projects/${run.projectId}`); }}
                                 className="text-muted-foreground hover:text-foreground"
                                 aria-label="Open in board"
                               >

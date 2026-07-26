@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { parse } from 'yaml';
@@ -23,34 +23,29 @@ export const SKILLS_LOCK_FILENAME = 'skills-lock.json';
 const INDEX_START = '<!-- orion:skills:start -->';
 const INDEX_END = '<!-- orion:skills:end -->';
 
-/** The absolute `.orion/` directory (the config file's folder). */
-function orionDir(repoDir: string, configPath: string): string {
-  return resolve(join(repoDir, dirname(configPath)));
-}
-
 /** Root directory for global skills shared across all projects. */
 export function globalSkillsRoot(): string {
-  return resolve(process.env.ORION_GLOBAL_SKILLS_DIR ?? join(homedir(), '.orion'));
+  return resolve(process.env.ORION_GLOBAL_SKILLS_DIR ?? join(homedir(), '.agents'));
 }
 
 /** The absolute skills directory for a given scope. */
 export function skillsDir(
   repoDir: string,
-  configPath: string = DEFAULT_CONFIG_PATH,
+  _configPath?: string,
   scope: SkillScope = 'project',
 ): string {
   if (scope === 'global') return join(globalSkillsRoot(), SKILLS_DIRNAME);
-  return join(orionDir(repoDir, configPath), SKILLS_DIRNAME);
+  return join(repoDir, '.agents', SKILLS_DIRNAME);
 }
 
 /** The absolute path to a skills-lock.json for a given scope. */
 export function skillsLockPath(
   repoDir: string,
-  configPath: string = DEFAULT_CONFIG_PATH,
+  _configPath?: string,
   scope: SkillScope = 'project',
 ): string {
   if (scope === 'global') return join(globalSkillsRoot(), SKILLS_LOCK_FILENAME);
-  return join(orionDir(repoDir, configPath), SKILLS_LOCK_FILENAME);
+  return join(repoDir, '.agents', SKILLS_LOCK_FILENAME);
 }
 
 function escapeRegExp(value: string): string {
@@ -109,11 +104,11 @@ export function parseSkillManifest(markdown: string): SkillManifest {
 /** Read a project's skills lock file, returning an empty lock when absent. */
 export async function readSkillsLock(
   repoDir: string,
-  configPath: string = DEFAULT_CONFIG_PATH,
+  _configPath?: string,
   scope: SkillScope = 'project',
 ): Promise<SkillLock> {
   try {
-    const raw = JSON.parse(await readFile(skillsLockPath(repoDir, configPath, scope), 'utf8')) as unknown;
+    const raw = JSON.parse(await readFile(skillsLockPath(repoDir, undefined, scope), 'utf8')) as unknown;
     if (raw && typeof raw === 'object' && 'skills' in raw && (raw as SkillLock).skills) {
       return { version: 1, skills: (raw as SkillLock).skills };
     }
@@ -127,21 +122,21 @@ export async function readSkillsLock(
 export async function writeSkillsLock(
   repoDir: string,
   lock: SkillLock,
-  configPath: string = DEFAULT_CONFIG_PATH,
+  _configPath?: string,
   scope: SkillScope = 'project',
 ): Promise<void> {
-  const target = skillsLockPath(repoDir, configPath, scope);
+  const target = skillsLockPath(repoDir, undefined, scope);
   await mkdir(dirname(target), { recursive: true });
   await writeFile(target, `${JSON.stringify(lock, null, 2)}\n`, 'utf8');
 }
 
-/** List the skills installed under a project's `.orion/skills/` directory. */
+/** List the skills installed under a project's `.agents/skills/` directory. */
 export async function listProjectSkills(
   repoDir: string,
-  configPath: string = DEFAULT_CONFIG_PATH,
+  _configPath?: string,
   scope: SkillScope = 'project',
 ): Promise<SkillCatalogEntry[]> {
-  const dir = skillsDir(repoDir, configPath, scope);
+  const dir = skillsDir(repoDir, undefined, scope);
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
@@ -149,7 +144,7 @@ export async function listProjectSkills(
     return [];
   }
 
-  const lock = await readSkillsLock(repoDir, configPath, scope);
+  const lock = await readSkillsLock(repoDir, undefined, scope);
   const out: SkillCatalogEntry[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
@@ -186,12 +181,12 @@ export async function listProjectSkills(
 
 /**
  * The full skill catalog for a project: Orion's built-in defaults plus any
- * global skills plus any skills installed under `.orion/skills/`. Project skills
+ * global skills plus any skills installed under `.agents/skills/`. Project skills
  * override global skills, which override built-in. Sorted by name.
  */
 export async function listSkillCatalog(
   repoDir: string,
-  configPath: string = DEFAULT_CONFIG_PATH,
+  _configPath?: string,
 ): Promise<SkillCatalogEntry[]> {
   const byName = new Map<string, SkillCatalogEntry>();
   for (const builtin of BUILTIN_SKILLS) {
@@ -204,11 +199,11 @@ export async function listSkillCatalog(
     });
   }
   // Global skills layer over built-ins
-  for (const global of await listProjectSkills(repoDir, configPath, 'global')) {
+  for (const global of await listProjectSkills(repoDir, undefined, 'global')) {
     byName.set(global.name, global);
   }
   // Project skills layer over global skills
-  for (const project of await listProjectSkills(repoDir, configPath, 'project')) {
+  for (const project of await listProjectSkills(repoDir, undefined, 'project')) {
     byName.set(project.name, project);
   }
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -226,8 +221,7 @@ export async function listGlobalSkillCatalog(): Promise<SkillCatalogEntry[]> {
       ...(builtin.tags ? { tags: builtin.tags } : {}),
     });
   }
-  // Use an empty repoDir for global scope — skillsDir will use globalSkillsRoot()
-  for (const global of await listProjectSkills('', '.orion/config.yaml', 'global')) {
+  for (const global of await listProjectSkills('', '', 'global')) {
     byName.set(global.name, global);
   }
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -241,17 +235,17 @@ export async function listGlobalSkillCatalog(): Promise<SkillCatalogEntry[]> {
 export async function getSkillDetail(
   repoDir: string,
   name: string,
-  configPath: string = DEFAULT_CONFIG_PATH,
+  _configPath?: string,
 ): Promise<SkillDetail | null> {
   // Try project scope first
-  const projectDir = skillsDir(repoDir, configPath, 'project');
+  const projectDir = skillsDir(repoDir, undefined, 'project');
   let text: string;
   let scope: SkillScope = 'project';
   try {
     text = await readFile(join(projectDir, name, SKILL_MANIFEST_FILENAME), 'utf8');
   } catch {
     // Try global scope
-    const globalDir = skillsDir(repoDir, configPath, 'global');
+    const globalDir = skillsDir(repoDir, undefined, 'global');
     try {
       text = await readFile(join(globalDir, name, SKILL_MANIFEST_FILENAME), 'utf8');
       scope = 'global';
@@ -270,7 +264,7 @@ export async function getSkillDetail(
   }
 
   const manifest = parseSkillManifest(text);
-  const lock = await readSkillsLock(repoDir, configPath, scope);
+  const lock = await readSkillsLock(repoDir, undefined, scope);
   const lockEntry = lock.skills[manifest.name];
   const mergedTags = [...new Set([...(manifest.tags ?? []), ...(lockEntry?.tags ?? [])])];
   return {
@@ -291,7 +285,7 @@ export async function getSkillDetail(
 
 /** Get skill detail from global skills only. */
 export async function getGlobalSkillDetail(name: string): Promise<SkillDetail | null> {
-  const dir = skillsDir('', '.orion/config.yaml', 'global');
+  const dir = skillsDir('', '', 'global');
   let text: string;
   try {
     text = await readFile(join(dir, name, SKILL_MANIFEST_FILENAME), 'utf8');
@@ -309,7 +303,7 @@ export async function getGlobalSkillDetail(name: string): Promise<SkillDetail | 
   }
 
   const manifest = parseSkillManifest(text);
-  const lock = await readSkillsLock('', '.orion/config.yaml', 'global');
+  const lock = await readSkillsLock('', undefined, 'global');
   const lockEntry = lock.skills[manifest.name];
   const mergedTags = [...new Set([...(manifest.tags ?? []), ...(lockEntry?.tags ?? [])])];
   return {
@@ -340,10 +334,10 @@ export type ResolvedSkill =
 export async function resolveSkills(
   repoDir: string,
   names: readonly string[],
-  configPath: string = DEFAULT_CONFIG_PATH,
+  _configPath?: string,
 ): Promise<ResolvedSkill[]> {
-  const projectDir = skillsDir(repoDir, configPath, 'project');
-  const globalDir = skillsDir(repoDir, configPath, 'global');
+  const projectDir = skillsDir(repoDir, undefined, 'project');
+  const globalDir = skillsDir(repoDir, undefined, 'global');
   const resolved: ResolvedSkill[] = [];
   const missing: string[] = [];
 
@@ -379,7 +373,7 @@ export async function resolveSkills(
   if (missing.length > 0) {
     throw new ConfigError(
       'Agent references skills that are not in the catalog',
-      missing.map((name) => `skill "${name}" not found (install it globally or under .orion/skills/)`),
+      missing.map((name) => `skill "${name}" not found (install it globally or under .agents/skills/)`),
     );
   }
   return resolved;
@@ -396,7 +390,7 @@ function buildIndexBlock(skills: readonly ResolvedSkill[]): string {
   ];
   for (const skill of skills) {
     lines.push(
-      `- **${skill.name}** — ${skill.description} (see \`.orion/${SKILLS_DIRNAME}/${skill.name}/${SKILL_MANIFEST_FILENAME}\`)`,
+      `- **${skill.name}** — ${skill.description} (see \`.agents/${SKILLS_DIRNAME}/${skill.name}/${SKILL_MANIFEST_FILENAME}\`)`,
     );
   }
   lines.push(INDEX_END);
@@ -433,8 +427,9 @@ async function writeSkillsIndex(destRoot: string, skills: readonly ResolvedSkill
 /**
  * Materialize resolved skills into a run's worktree so the harness discovers
  * them natively: each skill's files are copied to
- * `<destRoot>/.orion/skills/<name>/` and an index is written to the worktree's
- * `AGENTS.md`. Returns the names of the materialized skills.
+ * `<destRoot>/.agents/skills/<name>/`, a `.claude/skills` compatibility symlink
+ * is created pointing to `.agents/skills`, and an index is written to the
+ * worktree's `AGENTS.md`. Returns the names of the materialized skills.
  */
 export async function materializeSkills(
   destRoot: string,
@@ -442,10 +437,21 @@ export async function materializeSkills(
 ): Promise<string[]> {
   if (skills.length === 0) return [];
 
-  const base = join(destRoot, '.orion', SKILLS_DIRNAME);
+  const agentsSkills = join(destRoot, '.agents', SKILLS_DIRNAME);
+  await mkdir(agentsSkills, { recursive: true });
+
+  const claudeLink = join(destRoot, '.claude', SKILLS_DIRNAME);
+  await mkdir(join(destRoot, '.claude'), { recursive: true });
+  try {
+    await symlink(join('..', '.agents', SKILLS_DIRNAME), claudeLink, 'dir');
+  } catch {
+    try { await rm(claudeLink, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { await symlink(join('..', '.agents', SKILLS_DIRNAME), claudeLink, 'dir'); } catch { /* ignore */ }
+  }
+
   const materialized: string[] = [];
   for (const skill of skills) {
-    const dest = join(base, skill.name);
+    const dest = join(agentsSkills, skill.name);
     await rm(dest, { recursive: true, force: true });
     await mkdir(dest, { recursive: true });
     if (skill.source === 'builtin') {
@@ -468,10 +474,10 @@ export async function installSkillsIntoWorktree(
   configRoot: string,
   worktreeRoot: string,
   skillNames: readonly string[] | undefined,
-  configPath: string = DEFAULT_CONFIG_PATH,
+  _configPath?: string,
 ): Promise<string[]> {
   if (!skillNames || skillNames.length === 0) return [];
-  const resolved = await resolveSkills(configRoot, skillNames, configPath);
+  const resolved = await resolveSkills(configRoot, skillNames);
   return materializeSkills(worktreeRoot, resolved);
 }
 
@@ -533,10 +539,10 @@ export async function updateSkillLockEntry(
   repoDir: string,
   name: string,
   updates: { tags?: string[]; syncEnabled?: boolean },
-  configPath: string = DEFAULT_CONFIG_PATH,
+  _configPath?: string,
   scope: SkillScope = 'project',
 ): Promise<SkillLockEntry | null> {
-  const lock = await readSkillsLock(repoDir, configPath, scope);
+  const lock = await readSkillsLock(repoDir, undefined, scope);
   const entry = lock.skills[name];
   if (!entry) return null;
 
@@ -547,7 +553,7 @@ export async function updateSkillLockEntry(
     entry.syncEnabled = updates.syncEnabled;
   }
 
-  await writeSkillsLock(repoDir, lock, configPath, scope);
+  await writeSkillsLock(repoDir, lock, undefined, scope);
   return entry;
 }
 
@@ -560,10 +566,10 @@ export async function createSkill(
   name: string,
   description: string,
   content: string,
-  configPath: string = DEFAULT_CONFIG_PATH,
+  _configPath?: string,
   scope: SkillScope = 'project',
 ): Promise<void> {
-  const dir = skillsDir(repoDir, configPath, scope);
+  const dir = skillsDir(repoDir, undefined, scope);
   const skillDir = join(dir, name);
   await mkdir(skillDir, { recursive: true });
   const frontmatter = `---\nname: ${name}\ndescription: ${description}\n---\n\n${content}`;
@@ -579,12 +585,12 @@ export async function updateSkillContent(
   repoDir: string,
   name: string,
   content: string,
-  configPath: string = DEFAULT_CONFIG_PATH,
+  _configPath?: string,
   scope: SkillScope = 'project',
   newName?: string,
   newDescription?: string,
 ): Promise<void> {
-  const dir = skillsDir(repoDir, configPath, scope);
+  const dir = skillsDir(repoDir, undefined, scope);
   const skillDir = join(dir, name);
   const filePath = join(skillDir, SKILL_MANIFEST_FILENAME);
   const existing = await readFile(filePath, 'utf8');

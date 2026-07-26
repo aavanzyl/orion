@@ -99,6 +99,24 @@ export class WorkspaceService {
     return project.rootPath;
   }
 
+  /**
+   * The actual repository root for skill operations — always the real repo
+   * directory, never the managed config dir. Skills live in `.agents/skills/`
+   * at the repo root.
+   */
+  async resolveSkillRoot(project: Project): Promise<string> {
+    if (project.sourceKind === 'remote') {
+      return this.scm(project).resolveRepo(
+        { url: project.repoUrl },
+        { workspaceDir: this.c.env.workspaceDir },
+      );
+    }
+    if (!project.rootPath) {
+      throw new Error(`Project "${project.name}" has no rootPath`);
+    }
+    return project.rootPath;
+  }
+
   /** Prepare isolated worktrees for a run. */
   async prepare(project: Project, runId: string, branch: string): Promise<PreparedWorkspace> {
     const scm = this.scm(project);

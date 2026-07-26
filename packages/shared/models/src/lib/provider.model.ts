@@ -16,6 +16,10 @@ export interface Provider {
   models: string[];
   /** When set the provider has a stored API key (never returned in plaintext). */
   hasApiKey: boolean;
+  /** Custom input/prompt price in USD per 1M tokens. Overrides SDK-reported cost. */
+  promptPrice?: number;
+  /** Custom output/completion price in USD per 1M tokens. Overrides SDK-reported cost. */
+  completionPrice?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -27,6 +31,8 @@ export interface CreateProviderInput {
   baseUrl?: string;
   models?: string[];
   apiKey?: string;
+  promptPrice?: number;
+  completionPrice?: number;
 }
 
 /** Mutable fields of a provider. All optional — only provided fields change. */
@@ -37,6 +43,8 @@ export interface UpdateProviderInput {
   baseUrl?: string;
   models?: string[];
   apiKey?: string;
+  promptPrice?: number | null;
+  completionPrice?: number | null;
 }
 
 /**

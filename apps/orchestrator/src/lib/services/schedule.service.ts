@@ -71,7 +71,7 @@ export class ScheduleService {
    * returns empty lists on any failure.
    */
   async options(project: Project): Promise<ScheduleOptions> {
-    const configRoot = await this.workspaces.resolveConfigRoot(project).catch(() => null);
+    const configRoot = await this.workspaces.resolveSkillRoot(project).catch(() => null);
     if (!configRoot) {
       const [globalSkills, globalMcpServers] = await Promise.all([
         listGlobalSkillCatalog().catch(() => []),
@@ -215,10 +215,10 @@ export class ScheduleService {
     const model = agentNode?.model ?? DEFAULT_MODEL;
     const nodeConfig = agentNode?.config;
 
-    const { resolvedProvider, harness, baseUrl } = await this.resolveProvider(
-      rawProvider,
-      agentNode?.baseUrl,
-    );
+      const { resolvedProvider, harness, baseUrl, promptPrice, completionPrice } = await this.resolveProvider(
+        rawProvider,
+        agentNode?.baseUrl,
+      );
 
     const branch = `${BRANCH_PREFIX}/${schedule.id.slice(0, 8)}-${randomSuffix()}`;
     const { workspace, cleanup } = await this.workspaces.prepare(
@@ -229,10 +229,9 @@ export class ScheduleService {
 
     try {
       await installSkillsIntoWorktree(
-        workspace.configRoot,
+        project.rootPath!,
         workspace.rootPath,
         schedule.skills,
-        project.configPath,
       );
 
       const globalMcpServers = await this.c.mcpServers.list().catch(() => []);
@@ -261,6 +260,8 @@ export class ScheduleService {
         apiKey: await this.resolveApiKey(resolvedProvider),
         mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
         config: nodeConfig,
+        promptPrice,
+        completionPrice,
       });
       return result.finalResponse;
     } finally {
@@ -377,10 +378,14 @@ export class ScheduleService {
     resolvedProvider: string;
     harness: import('@orion/harness-core').AgentProvider;
     baseUrl?: string;
+    promptPrice?: number;
+    completionPrice?: number;
   }> {
     let resolvedProvider = providerName;
     let harness: import('@orion/harness-core').AgentProvider | undefined;
     let baseUrl: string | undefined = nodeBaseUrl;
+    let promptPrice: number | undefined;
+    let completionPrice: number | undefined;
 
     if (this.c.harnesses.has(providerName)) {
       harness = this.c.harnesses.get(providerName);
@@ -391,8 +396,13 @@ export class ScheduleService {
           : providerName === 'claude'
             ? this.c.env.claudeBaseUrl
             : undefined);
+      const dbProvider = await this.resolveDbProvider(providerName);
+      promptPrice = dbProvider?.promptPrice;
+      completionPrice = dbProvider?.completionPrice;
     } else {
       const dbProvider = await this.resolveDbProvider(providerName);
+      promptPrice = dbProvider?.promptPrice;
+      completionPrice = dbProvider?.completionPrice;
       if (dbProvider?.harness && this.c.harnesses.has(dbProvider.harness)) {
         resolvedProvider = dbProvider.harness;
         harness = this.c.harnesses.get(dbProvider.harness);
@@ -413,7 +423,7 @@ export class ScheduleService {
       harness = this.c.harnesses.get(keys[0]);
     }
 
-    return { resolvedProvider, harness, baseUrl };
+    return { resolvedProvider, harness, baseUrl, promptPrice, completionPrice };
   }
 
   private async resolveDbProvider(providerKey: string) {

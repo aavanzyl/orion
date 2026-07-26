@@ -579,8 +579,8 @@ export function BoardSyncDialog({
 
           <div className="flex items-center justify-between gap-2">
             <div>
-              <Label>Import new issues</Label>
-              <p className="text-xs text-muted-foreground">Create local tickets for new remote issues.</p>
+              <Label>Import new tickets</Label>
+              <p className="text-xs text-muted-foreground">Create local tickets for new remote tickets.</p>
             </div>
             <Switch checked={importNew} onCheckedChange={setImportNew} disabled={direction === 'push'} />
           </div>

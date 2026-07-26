@@ -133,6 +133,8 @@ export class ChatService {
         apiKey: agent.apiKey,
         mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
         config: agent.config,
+        promptPrice: agent.promptPrice,
+        completionPrice: agent.completionPrice,
       });
 
       for await (const event of stream) {
@@ -255,9 +257,16 @@ export class ChatService {
     if (!detail) throw new Error(`Ticket ${ticketId} not found`);
     const agent = await this.resolveChatAgent(detail.projectId);
     const labels = await board.listLabels(detail.projectId);
+    const allTickets = await this.c.tickets.listByProject(detail.projectId);
+    const epicTickets = allTickets.filter((t) => t.type === 'epic' && t.id !== ticketId);
     const harness = this.c.harnesses.get(agent.harness);
     const result = await harness.run(
-      buildTicketUpdatePrompt(detail, labels.map((l) => ({ id: l.id, name: l.name })), prompt),
+      buildTicketUpdatePrompt(
+        detail,
+        labels.map((l) => ({ id: l.id, name: l.name })),
+        epicTickets.map((t) => ({ id: t.id, title: t.title, displayKey: t.displayKey })),
+        prompt,
+      ),
       {
         workingDirectory: agent.workingDirectory ?? process.cwd(),
         model: agent.model,
@@ -359,6 +368,8 @@ export class ChatService {
     let apiKey: string | undefined;
     let config: Record<string, unknown> | undefined;
     let workflowName: string | undefined;
+    let promptPrice: number | undefined;
+    let completionPrice: number | undefined;
 
     const project = await this.c.projects.get(projectId);
     if (!project) throw new Error(`Project ${projectId} not found`);
@@ -386,10 +397,9 @@ export class ChatService {
       if (configured) {
         harness = configured.harness ?? harness;
         baseUrl = configured.baseUrl ?? baseUrl;
-        // Default to the provider's first model so the request targets a model
-        // the endpoint actually serves (e.g. `deepseek-chat`), never a codex
-        // default. An explicit Settings model below still takes precedence.
         model = configured.models[0] ?? undefined;
+        promptPrice = configured.promptPrice;
+        completionPrice = configured.completionPrice;
         const stored = await this.c.providers.getApiKey(configured.id).catch(() => null);
         if (stored) {
           apiKey = this.c.env.providerEncryptionSalt
@@ -410,6 +420,8 @@ export class ChatService {
       config,
       workingDirectory,
       workflowName,
+      promptPrice,
+      completionPrice,
     };
   }
 
@@ -518,6 +530,8 @@ interface ResolvedChatAgent {
   config?: Record<string, unknown>;
   workingDirectory?: string;
   workflowName?: string;
+  promptPrice?: number;
+  completionPrice?: number;
 }
 
 /** Concatenate the conversation history into a single prompt string. */
@@ -712,11 +726,19 @@ function parseTicketPreviewJson(text: string, fallbackTitle: string): AgentTicke
 }
 
 function buildTicketUpdatePrompt(
-  ticket: { title: string; description: string; type: string; priority: number },
+  ticket: { title: string; description: string; type: string; priority: number; epicId?: string | null },
   labels: { id: string; name: string }[],
+  epics: { id: string; title: string; displayKey?: string }[],
   prompt: string,
 ): string {
   const labelList = labels.map((l) => `${l.name} (id: ${l.id})`).join(', ');
+  const epicList = epics.map((e) => `${e.title} (id: ${e.id}${e.displayKey ? ', key: ' + e.displayKey : ''})`).join('\n');
+  const currentEpic = ticket.epicId
+    ? epics.find((e) => e.id === ticket.epicId)
+    : null;
+  const epicLine = currentEpic
+    ? `Current epic: ${currentEpic.title} (id: ${currentEpic.id})`
+    : 'Current epic: none';
   return [
     'You are an assistant that updates software project tickets. Given a ticket and a natural-language instruction, return the fields that should change.',
     '',
@@ -725,13 +747,16 @@ function buildTicketUpdatePrompt(
     `Type: ${ticket.type}`,
     `Priority: ${ticket.priority} (0=none, 1=urgent, 2=high, 3=medium, 4=low)`,
     `Description: ${ticket.description.slice(0, 500)}`,
+    epicLine,
     `Available labels: ${labelList || '(none)'}`,
+    `Available epics (set epicId to move to one, or null to remove):`,
+    epicList || '(none)',
     '',
     `Update instruction: ${prompt}`,
     '',
     'Reply with STRICT JSON only, no prose, matching exactly:',
-    '{ "title": string | null, "description": string | null, "type": string | null, "priority": number | null, "labelIds": string[] | null, "reasoning": string }',
-    'Only include fields that should change. For unchanged fields, use null. Use the exact label ids from the available list.',
+    '{ "title": string | null, "description": string | null, "type": string | null, "priority": number | null, "labelIds": string[] | null, "epicId": string | null, "reasoning": string }',
+    'Only include fields that should change. For unchanged fields, use null. Use the exact label ids from the available list. Use exact epic ids from the available epics list.',
   ].join('\n');
 }
 
@@ -745,6 +770,7 @@ function parseTicketUpdateJson(text: string, fallbackReason: string): AgentTicke
       type: typeof obj.type === 'string' && obj.type ? obj.type : undefined,
       priority: typeof obj.priority === 'number' && obj.priority >= 0 && obj.priority <= 4 ? obj.priority : undefined,
       labelIds: Array.isArray(obj.labelIds) ? obj.labelIds.filter((l: unknown): l is string => typeof l === 'string') : undefined,
+      epicId: obj.epicId === null ? null : typeof obj.epicId === 'string' && obj.epicId ? obj.epicId : undefined,
       reasoning: typeof obj.reasoning === 'string' && obj.reasoning ? obj.reasoning : fallbackReason,
     };
   }
@@ -754,6 +780,7 @@ function parseTicketUpdateJson(text: string, fallbackReason: string): AgentTicke
     type: undefined,
     priority: undefined,
     labelIds: undefined,
+    epicId: undefined,
     reasoning: fallbackReason,
   };
 }

@@ -1,5 +1,5 @@
 import { asc, eq } from 'drizzle-orm';
-import type { TicketComment } from '@orion/models';
+import type { CommentAttachment, TicketComment } from '@orion/models';
 import type { Database } from '../client.js';
 import { ticketComments } from '../schema.js';
 import { toTicketComment } from '../mappers.js';
@@ -7,10 +7,10 @@ import { toTicketComment } from '../mappers.js';
 export class CommentRepository {
   constructor(private readonly db: Database) {}
 
-  async create(ticketId: string, body: string): Promise<TicketComment> {
+  async create(ticketId: string, body: string, attachments: CommentAttachment[] = []): Promise<TicketComment> {
     const [row] = await this.db
       .insert(ticketComments)
-      .values({ ticketId, body })
+      .values({ ticketId, body, attachments })
       .returning();
     return toTicketComment(row);
   }

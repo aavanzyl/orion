@@ -22,6 +22,7 @@ interface BoardSwimlaneProps {
   onSortChange: (swimlane: string, sort: 'order' | 'priority' | 'created' | 'due') => void;
   waitingRuns?: Record<string, WaitingRunInfo>;
   onReview?: (runId: string, nodeKey: string) => void;
+  truncatedFrom?: number;
 }
 
 const SORT_LABELS: Record<string, string> = {
@@ -48,6 +49,7 @@ export function BoardSwimlane({
   onSortChange,
   waitingRuns,
   onReview,
+  truncatedFrom,
 }: BoardSwimlaneProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -78,7 +80,9 @@ export function BoardSwimlane({
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
           <Badge variant="secondary" className="tabular-nums h-5 min-w-5 flex items-center justify-center">
-            {swimlane.tickets.length}
+            {truncatedFrom !== undefined && truncatedFrom > swimlane.tickets.length
+              ? `${swimlane.tickets.length}/${truncatedFrom}`
+              : swimlane.tickets.length}
           </Badge>
           <Popover open={menuOpen} onOpenChange={setMenuOpen}>
             <PopoverTrigger asChild>

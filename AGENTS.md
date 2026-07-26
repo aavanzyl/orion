@@ -45,6 +45,8 @@ provider can surface them to users. Follow these rules when adding or changing b
 
 ## Docker
 
+**After making any code changes, always deploy to Docker** so the running containers reflect the latest state.
+
 - Deploy (rebuild on changes): `docker compose up -d --build`
 - Deploy from scratch (invalidate cache): `docker compose build --no-cache && docker compose up -d`
 - View running containers: `docker compose ps`

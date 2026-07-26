@@ -21,7 +21,7 @@ export interface Schedule {
   instruction: string;
   /**
    * Names of skills to materialize for the agent. Resolved against the project
-   * skill catalog (built-in defaults + global + project `.orion/skills/`).
+   * skill catalog (built-in defaults + global + project `.agents/skills/`).
    */
   skills: string[];
   /**

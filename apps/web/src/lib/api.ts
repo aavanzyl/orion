@@ -43,6 +43,7 @@ import type {
   RunEvent,
   RunNode,
   SearchResult,
+  TicketSearchResult,
   RecommendedSkill,
   SkillCatalogEntry,
   SkillDetail,
@@ -487,6 +488,14 @@ export const api = {
     request<CodeIndex>(`/projects/${projectId}/index`, { method: 'POST' }),
   searchCodebase: (projectId: string, query: string, topK?: number) =>
     request<SearchResult[]>(`/projects/${projectId}/search`, {
+      method: 'POST',
+      body: JSON.stringify({ query, topK }),
+    }),
+  getTicketIndex: (projectId: string) => request<import('@orion/models').TicketIndex>(`/projects/${projectId}/ticket-index`),
+  reindexTickets: (projectId: string) =>
+    request<import('@orion/models').TicketIndex>(`/projects/${projectId}/ticket-index`, { method: 'POST' }),
+  searchTickets: (projectId: string, query: string, topK?: number) =>
+    request<TicketSearchResult[]>(`/projects/${projectId}/tickets/search`, {
       method: 'POST',
       body: JSON.stringify({ query, topK }),
     }),

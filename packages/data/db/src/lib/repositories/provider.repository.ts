@@ -33,6 +33,8 @@ export class ProviderRepository {
         baseUrl: input.baseUrl ?? null,
         apiKey: input.apiKey ?? null,
         models: input.models ?? [],
+        promptPrice: input.promptPrice ?? null,
+        completionPrice: input.completionPrice ?? null,
       })
       .returning();
     return toProvider(row);
@@ -46,6 +48,8 @@ export class ProviderRepository {
     if (input.baseUrl !== undefined) values.baseUrl = input.baseUrl ?? null;
     if (input.models !== undefined) values.models = input.models;
     if (input.apiKey !== undefined) values.apiKey = input.apiKey || null;
+    if (input.promptPrice !== undefined) values.promptPrice = input.promptPrice;
+    if (input.completionPrice !== undefined) values.completionPrice = input.completionPrice;
 
     const [row] = await this.db
       .update(providers)

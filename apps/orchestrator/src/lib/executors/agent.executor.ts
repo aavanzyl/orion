@@ -1,7 +1,7 @@
 import type { NodeExecutor, NodeExecutionContext, NodeOutcome } from '@orion/workflow-engine';
 import type { HarnessRegistry, HarnessUsage } from '@orion/harness-core';
 import type { ProviderRepository, TicketRepository } from '@orion/db';
-import { ConfigError, installSkillsIntoWorktree, renderCommand, renderTemplate } from '@orion/config';
+import { ConfigError, installSkillsIntoWorktree, listProjectSkills, renderCommand, renderTemplate } from '@orion/config';
 import type { McpServerMap } from '@orion/models';
 import { decrypt } from '../crypto.js';
 import type { OrionEnv } from '../env.js';
@@ -95,12 +95,23 @@ export class AgentNodeExecutor implements NodeExecutor {
     }
 
     // Materialize the agent's selected skills into the run's worktree so the
-    // harness discovers them natively (via .orion/skills/ and AGENTS.md).
+    // harness discovers them natively (via .agents/skills/ and AGENTS.md).
+    // When no skills are explicitly configured, auto-include every local
+    // project skill so the agent always benefits from repo-level guidance.
     try {
+      let skills = nodeConfig.skills;
+      if (!skills || skills.length === 0) {
+        const repoRoot = ctx.workspace.repos[0]?.originPath ?? ctx.workspace.configRoot;
+        const local = await listProjectSkills(repoRoot, undefined, 'project');
+        if (local.length > 0) {
+          skills = local.map((s) => s.name);
+          await ctx.emit('log', { agent: nodeConfig.id, message: `Auto-loaded ${skills.length} project skill(s): ${skills.join(', ')}` });
+        }
+      }
       const materialized = await installSkillsIntoWorktree(
-        ctx.workspace.configRoot,
+        ctx.workspace.repos[0]?.originPath ?? ctx.workspace.configRoot,
         ctx.workspace.rootPath,
-        nodeConfig.skills,
+        skills,
       );
       if (materialized.length > 0) {
         await ctx.emit('log', { agent: nodeConfig.id, message: `Loaded skills: ${materialized.join(', ')}` });
@@ -114,13 +125,14 @@ export class AgentNodeExecutor implements NodeExecutor {
 
     let harness;
     let resolvedProvider = provider;
+    let dbProvider;
 
     if (this.harnesses.has(provider)) {
       harness = this.harnesses.get(provider);
     } else {
       // The node's `provider` may be a human-readable key (e.g. "deepseek")
       // that maps to a DB provider record specifying the actual harness.
-      const dbProvider = await this.resolveDbProvider(provider);
+      dbProvider = await this.resolveDbProvider(provider);
       if (dbProvider?.harness) {
         resolvedProvider = dbProvider.harness;
         if (this.harnesses.has(dbProvider.harness)) {
@@ -133,6 +145,12 @@ export class AgentNodeExecutor implements NodeExecutor {
         harness = this.harnesses.get(keys[0]);
       }
     }
+
+    // Resolve custom pricing from the DB provider so the harness can
+    // override the SDK-reported cost with per-model pricing.
+    const resolvedDbProvider = dbProvider ?? await this.resolveDbProvider(provider);
+    const promptPrice = resolvedDbProvider?.promptPrice;
+    const completionPrice = resolvedDbProvider?.completionPrice;
 
     // Auto-inject the codebase MCP (SSE) so running agents can search the repo.
     // On by default; node/project config of the same name overrides or disables it.
@@ -177,6 +195,8 @@ export class AgentNodeExecutor implements NodeExecutor {
       mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
       config: nodeConfig.config,
       signal: ctx.signal,
+      promptPrice,
+      completionPrice,
     });
 
     for await (const event of stream) {

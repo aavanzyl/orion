@@ -4,13 +4,13 @@ import type { BoardSwimlane, Label as LabelModel, Ticket } from '@orion/models';
 import { api } from '@/lib/api';
 import { TicketSheet } from '@/features/board/ticket-sheet';
 
-interface IssueDetailSheetProps {
+interface TicketDetailSheetProps {
   ticket: Ticket | null;
   onClose: () => void;
   onChanged: () => void;
 }
 
-export function IssueDetailSheet({ ticket, onClose, onChanged }: IssueDetailSheetProps) {
+export function TicketDetailSheet({ ticket, onClose, onChanged }: TicketDetailSheetProps) {
   const [labels, setLabels] = useState<LabelModel[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [swimlanes, setSwimlanes] = useState<BoardSwimlane[]>([]);

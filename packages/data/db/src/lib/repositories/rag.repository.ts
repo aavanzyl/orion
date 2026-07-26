@@ -1,9 +1,9 @@
 import { dirname } from 'node:path';
 import { and, eq, lte, sql } from 'drizzle-orm';
-import type { CodeIndex, IndexStatus, ProjectId } from '@orion/models';
+import type { CodeIndex, IndexStatus, ProjectId, TicketIndex } from '@orion/models';
 import type { Database } from '../client.js';
-import { codeChunks, codeIndexes } from '../schema.js';
-import { toCodeIndex } from '../mappers.js';
+import { codeChunks, codeIndexes, ticketChunks, ticketIndexes } from '../schema.js';
+import { toCodeIndex, toTicketIndex } from '../mappers.js';
 
 /** A chunk row ready to persist (project-scoped). */
 export interface InsertCodeChunkInput {
@@ -33,6 +33,32 @@ export interface CodeIndexPatch {
   provider?: string;
   dimensions?: number;
   fileCount?: number;
+  chunkCount?: number;
+  error?: string | null;
+  lastIndexedAt?: Date | null;
+}
+
+export interface InsertTicketChunkInput {
+  projectId: ProjectId;
+  ticketId: string;
+  chunkIndex: number;
+  content: string;
+  embedding: number[];
+}
+
+export interface TicketChunkVector {
+  id: string;
+  ticketId: string;
+  chunkIndex: number;
+  content: string;
+  embedding: number[];
+}
+
+export interface TicketIndexPatch {
+  status?: IndexStatus;
+  provider?: string;
+  dimensions?: number;
+  ticketCount?: number;
   chunkCount?: number;
   error?: string | null;
   lastIndexedAt?: Date | null;
@@ -198,5 +224,70 @@ export class RagRepository {
       .groupBy(codeChunks.filePath)
       .orderBy(codeChunks.filePath);
     return rows;
+  }
+
+  async getTicketIndex(projectId: ProjectId): Promise<TicketIndex | null> {
+    const [row] = await this.db.select().from(ticketIndexes).where(eq(ticketIndexes.projectId, projectId));
+    return row ? toTicketIndex(row) : null;
+  }
+
+  async upsertTicketIndex(projectId: ProjectId, patch: TicketIndexPatch): Promise<TicketIndex> {
+    const existing = await this.getTicketIndex(projectId);
+    if (existing) {
+      const values: Partial<typeof ticketIndexes.$inferInsert> = { updatedAt: new Date() };
+      if (patch.status !== undefined) values.status = patch.status;
+      if (patch.provider !== undefined) values.provider = patch.provider;
+      if (patch.dimensions !== undefined) values.dimensions = patch.dimensions;
+      if (patch.ticketCount !== undefined) values.ticketCount = patch.ticketCount;
+      if (patch.chunkCount !== undefined) values.chunkCount = patch.chunkCount;
+      if (patch.error !== undefined) values.error = patch.error;
+      if (patch.lastIndexedAt !== undefined) values.lastIndexedAt = patch.lastIndexedAt;
+      const [row] = await this.db
+        .update(ticketIndexes)
+        .set(values)
+        .where(eq(ticketIndexes.projectId, projectId))
+        .returning();
+      return toTicketIndex(row);
+    }
+
+    const [row] = await this.db
+      .insert(ticketIndexes)
+      .values({
+        projectId,
+        status: patch.status ?? 'idle',
+        provider: patch.provider ?? '',
+        dimensions: patch.dimensions ?? 0,
+        ticketCount: patch.ticketCount ?? 0,
+        chunkCount: patch.chunkCount ?? 0,
+        error: patch.error ?? null,
+        lastIndexedAt: patch.lastIndexedAt ?? null,
+      })
+      .returning();
+    return toTicketIndex(row);
+  }
+
+  async clearTicketChunks(projectId: ProjectId): Promise<void> {
+    await this.db.delete(ticketChunks).where(eq(ticketChunks.projectId, projectId));
+  }
+
+  async insertTicketChunks(rows: InsertTicketChunkInput[]): Promise<void> {
+    for (let i = 0; i < rows.length; i += CHUNK_INSERT_BATCH) {
+      const batch = rows.slice(i, i + CHUNK_INSERT_BATCH);
+      if (batch.length === 0) continue;
+      await this.db.insert(ticketChunks).values(batch);
+    }
+  }
+
+  async listTicketChunks(projectId: ProjectId): Promise<TicketChunkVector[]> {
+    return this.db
+      .select({
+        id: ticketChunks.id,
+        ticketId: ticketChunks.ticketId,
+        chunkIndex: ticketChunks.chunkIndex,
+        content: ticketChunks.content,
+        embedding: ticketChunks.embedding,
+      })
+      .from(ticketChunks)
+      .where(eq(ticketChunks.projectId, projectId));
   }
 }

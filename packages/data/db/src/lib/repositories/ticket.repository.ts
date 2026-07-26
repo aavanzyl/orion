@@ -284,6 +284,16 @@ export class TicketRepository {
     return rows.map((row) => toTicket(row, labels.get(row.id) ?? []));
   }
 
+  async listEpicTickets(epicId: TicketId): Promise<Ticket[]> {
+    const rows = await this.db
+      .select()
+      .from(tickets)
+      .where(eq(tickets.epicId, epicId))
+      .orderBy(asc(tickets.position), asc(tickets.createdAt));
+    const labels = await this.labelIdsFor(rows.map((r) => r.id));
+    return rows.map((row) => toTicket(row, labels.get(row.id) ?? []));
+  }
+
   async addRelation(ticketId: TicketId, relation: NewTicketRelation): Promise<TicketRelation> {
     const [row] = await this.db
       .insert(ticketRelations)
@@ -346,6 +356,8 @@ export class TicketRepository {
       relations.push({ relationId: row.id, kind, ticket: other });
     }
 
+    const epicTickets = ticket.type === 'epic' ? await this.listEpicTickets(id) : [];
+
     return {
       ...ticket,
       labelIds: attachedLabelIds,
@@ -353,6 +365,7 @@ export class TicketRepository {
       parent: parent ?? undefined,
       children,
       relations,
+      epicTickets,
     };
   }
 

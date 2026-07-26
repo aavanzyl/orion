@@ -47,6 +47,22 @@ function toHarnessUsage(usage: {
   };
 }
 
+/**
+ * Compute cost from token counts using custom per-model pricing (USD per 1M
+ * tokens). Returns undefined when pricing is not configured for both directions.
+ */
+function computeCustomCost(
+  inputTokens?: number,
+  outputTokens?: number,
+  promptPrice?: number,
+  completionPrice?: number,
+): number | undefined {
+  if (promptPrice == null || completionPrice == null) return undefined;
+  const inCost = (inputTokens ?? 0) / 1_000_000 * promptPrice;
+  const outCost = (outputTokens ?? 0) / 1_000_000 * completionPrice;
+  return Math.round((inCost + outCost) * 1_000_000) / 1_000_000;
+}
+
 /** Translate Orion's neutral MCP definitions into the Claude SDK's config shape. */
 function toMcpServers(
   servers: Record<string, HarnessMcpServer> | undefined,
@@ -183,7 +199,16 @@ export class ClaudeHarness implements AgentProvider {
         }
         case 'result': {
           threadId = message.session_id ?? threadId;
-          usage = toHarnessUsage(message.usage, message.total_cost_usd);
+          const customCost = computeCustomCost(
+            message.usage?.input_tokens,
+            message.usage?.output_tokens,
+            options.promptPrice,
+            options.completionPrice,
+          );
+          usage = toHarnessUsage(
+            message.usage,
+            customCost ?? message.total_cost_usd,
+          );
           if (message.subtype === 'success' && typeof message.result === 'string') {
             finalResponse = message.result || finalResponse;
             if (finalResponse && finalResponse !== lastYieldedText) {

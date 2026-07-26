@@ -43,6 +43,29 @@ export interface SearchResult {
   score: number;
 }
 
+/** Status + metadata of a project's ticket semantic index. */
+export interface TicketIndex {
+  id: string;
+  projectId: ProjectId;
+  status: IndexStatus;
+  provider: string;
+  dimensions: number;
+  ticketCount: number;
+  chunkCount: number;
+  error?: string;
+  lastIndexedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A ranked ticket search hit returned to callers. */
+export interface TicketSearchResult {
+  ticketId: string;
+  title: string;
+  snippet: string;
+  score: number;
+}
+
 export type GraphNodeType = 'file' | 'project_group';
 
 /** A node in the dependency graph — either a file or an NX project group. */

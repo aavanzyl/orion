@@ -24,6 +24,7 @@ import type {
   Schedule,
   Ticket,
   TicketComment,
+  TicketIndex,
   TicketPriority,
   TicketRelation,
   TicketRelationType,
@@ -54,6 +55,7 @@ import type {
   ticketRelations,
   tickets,
   schedules,
+  ticketIndexes,
   workflowRuns,
 } from './schema.js';
 
@@ -73,6 +75,7 @@ type BoardConnectionRow = typeof boardConnections.$inferSelect;
 type BoardSyncLogRow = typeof boardSyncLogs.$inferSelect;
 type ScheduleRow = typeof schedules.$inferSelect;
 type CodeIndexRow = typeof codeIndexes.$inferSelect;
+type TicketIndexRow = typeof ticketIndexes.$inferSelect;
 type McpServerRow = typeof mcpServers.$inferSelect;
 type AppSettingsRow = typeof appSettings.$inferSelect;
 type TicketCommentRow = typeof ticketComments.$inferSelect;
@@ -89,6 +92,8 @@ export function toProvider(row: ProviderRow): Provider {
     baseUrl: opt(row.baseUrl),
     models: row.models,
     hasApiKey: Boolean(row.apiKey),
+    promptPrice: opt(row.promptPrice),
+    completionPrice: opt(row.completionPrice),
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
   };
@@ -376,6 +381,22 @@ export function toCodeIndex(row: CodeIndexRow): CodeIndex {
   };
 }
 
+export function toTicketIndex(row: TicketIndexRow): TicketIndex {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    status: row.status as IndexStatus,
+    provider: row.provider,
+    dimensions: row.dimensions,
+    ticketCount: row.ticketCount,
+    chunkCount: row.chunkCount,
+    error: opt(row.error),
+    lastIndexedAt: row.lastIndexedAt ? iso(row.lastIndexedAt) : undefined,
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
+  };
+}
+
 export function toMcpServer(row: McpServerRow): McpServer {
   const oauth = (row.oauth ?? {}) as Record<string, unknown>;
   return {
@@ -409,6 +430,7 @@ export function toTicketComment(row: TicketCommentRow): TicketComment {
     id: row.id,
     ticketId: row.ticketId,
     body: row.body,
+    attachments: (row.attachments ?? []) as TicketComment['attachments'],
     createdAt: iso(row.createdAt),
   };
 }

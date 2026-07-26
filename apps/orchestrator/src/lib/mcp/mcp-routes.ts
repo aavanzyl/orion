@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import type { TicketPriority } from '@orion/models';
+import type { CommentAttachment, TicketPriority } from '@orion/models';
 import {
   createSkill,
   updateSkillContent,
@@ -11,6 +11,8 @@ import {
   listSkillCatalog,
   findSkillReferences,
   uninstallSkill,
+  loadProjectConfig,
+  resolveIssueTypes,
 } from '@orion/config';
 import type { Container } from '../container.js';
 import { WorkspaceService } from '../services/workspace.service.js';
@@ -117,13 +119,119 @@ function buildCodebaseServer(c: Container, defaultProjectId?: string, locked = f
 }
 
 /**
- * Tickets MCP — read/write access to a project's native board. Intended for
- * external agents; also handed to one-off agent triggers so they can file work.
+ * Tickets MCP — read/write access to a project's native board, labels,
+ * ticket relations, and comments. Epics are managed as tickets with type="epic"
+ * — use create_ticket/update_ticket for epics, and list_tickets with type="epic"
+ * to find them. Intended for external agents; also handed to one-off agent
+ * triggers so they can file work.
  */
 function buildTicketsServer(c: Container, defaultProjectId?: string, locked = false): McpServer {
   const server = new McpServer({ name: 'orion-tickets', version: '1.0.0' });
   const board = c.boards.get('native');
   const resolve = projectResolver(defaultProjectId, locked);
+
+  const ticketTypeEnum = z
+    .enum(['feature', 'bug', 'issue', 'hotfix', 'epic'])
+    .describe('Issue type: feature, bug, issue, hotfix, or epic');
+
+  /** Lazy cache of project swimlane keys so we don't reload config on every call. */
+  const swimlaneCache = new Map<string, Set<string>>();
+  async function getSwimlaneKeys(projectId: string): Promise<Set<string>> {
+    const cached = swimlaneCache.get(projectId);
+    if (cached) return cached;
+    const project = await c.projects.get(projectId);
+    if (!project) return new Set();
+    const ws = new WorkspaceService(c);
+    const configRoot = await ws.resolveConfigRoot(project);
+    const config = await loadProjectConfig(configRoot, project.configPath);
+    const keys = new Set(config.board.swimlanes);
+    swimlaneCache.set(projectId, keys);
+    return keys;
+  }
+
+  /**
+   * Validate that referenced entities exist before a mutation. Returns an
+   * error message string when validation fails, or `null` when everything
+   * checks out.
+   */
+  async function validateMutate(
+    projectId: string,
+    opts: {
+      swimlane?: string;
+      epicId?: string | null;
+      parentId?: string | null;
+      labelIds?: string[];
+      ticketId?: string;
+    },
+  ): Promise<string | null> {
+    if (opts.swimlane) {
+      const keys = await getSwimlaneKeys(projectId);
+      if (keys.size > 0 && !keys.has(opts.swimlane)) {
+        return `Invalid swimlane "${opts.swimlane}". Valid keys: ${[...keys].join(', ')}`;
+      }
+    }
+
+    if (opts.epicId) {
+      const epic = await c.tickets.get(opts.epicId);
+      if (!epic) return `Epic "${opts.epicId}" not found`;
+      if (epic.type !== 'epic') return `Ticket "${opts.epicId}" is not an epic (type: ${epic.type})`;
+    }
+
+    if (opts.parentId) {
+      const parent = await c.tickets.get(opts.parentId);
+      if (!parent) return `Parent ticket "${opts.parentId}" not found`;
+    }
+
+    if (opts.labelIds && opts.labelIds.length > 0) {
+      const existing = await board.listLabels(projectId);
+      const existingIds = new Set(existing.map((l) => l.id));
+      const missing = opts.labelIds.filter((lid) => !existingIds.has(lid));
+      if (missing.length > 0) return `Unknown label ids: ${missing.join(', ')}`;
+    }
+
+    if (opts.ticketId) {
+      const ticket = await c.tickets.get(opts.ticketId);
+      if (!ticket) return `Ticket "${opts.ticketId}" not found`;
+    }
+
+    return null;
+  }
+
+  /** Resolve or create labels by name for a project. Returns label ids. */
+  async function resolveLabelNames(projectId: string, names: string[]): Promise<string[]> {
+    const existing = await board.listLabels(projectId);
+    const nameMap = new Map(existing.map((l) => [l.name.toLowerCase(), l.id]));
+    const ids: string[] = [];
+    for (const name of names) {
+      const key = name.trim().toLowerCase();
+      if (!key) continue;
+      if (nameMap.has(key)) {
+        ids.push(nameMap.get(key)!);
+      } else {
+        const created = await board.createLabel({ projectId, name: name.trim() });
+        ids.push(created.id);
+      }
+    }
+    return ids;
+  }
+
+  /** Convert base64 image data to a data-URI attachment. */
+  function imageToAttachment(name: string, data: string): CommentAttachment {
+    const ext = name.split('.').pop()?.toLowerCase();
+    const mimeMap: Record<string, string> = {
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      gif: 'image/gif',
+      webp: 'image/webp',
+      svg: 'image/svg+xml',
+    };
+    const mime = mimeMap[ext ?? ''] ?? 'image/png';
+    const url = data.startsWith('data:') ? data : `data:${mime};base64,${data}`;
+    return { name, url, type: mime };
+  }
+
+  // ── discovery ────────────────────────────────────────────────
 
   server.registerTool(
     'list_projects',
@@ -135,27 +243,82 @@ function buildTicketsServer(c: Container, defaultProjectId?: string, locked = fa
   );
 
   server.registerTool(
-    'list_tickets',
+    'search_tickets',
     {
-      description: 'List a project\'s tickets, optionally filtered to a single board column.',
+      description: 'Semantic search over project tickets; returns the most relevant tickets for a natural-language query.',
       inputSchema: {
-        swimlane: z.string().optional().describe('Board swimlane key to filter by'),
+        query: z.string().describe('Natural-language search query to find matching tickets'),
+        topK: z.number().int().positive().max(20).optional().describe('Maximum results (default 8)'),
         projectId: projectIdArg,
       },
     },
-    async ({ swimlane, projectId }) => {
+    async ({ query, topK, projectId }) => {
       const id = resolve(projectId);
       if (!id) return errText(NO_PROJECT);
-      const tickets = await c.tickets.listByProject(id);
-      return text(swimlane ? tickets.filter((t) => t.swimlane === swimlane) : tickets);
+      return text(await c.ragService.searchTickets(id, query, topK ?? 8));
+    },
+  );
+
+  server.registerTool(
+    'list_swimlanes',
+    {
+      description:
+        'Get the project\'s swimlane keys, titles, and available issue types. Use this to discover valid swimlane values for create_ticket, update_ticket, and list_tickets.',
+      inputSchema: { projectId: projectIdArg },
+    },
+    async ({ projectId }) => {
+      const id = resolve(projectId);
+      if (!id) return errText(NO_PROJECT);
+      const project = await c.projects.get(id);
+      if (!project) return errText('Project not found');
+      const ws = new WorkspaceService(c);
+      const configRoot = await ws.resolveConfigRoot(project);
+      const config = await loadProjectConfig(configRoot, project.configPath);
+      const swimlanes = config.board.swimlanes.map((key) => ({
+        key,
+        title: key
+          .split(/[_\-\s]+/)
+          .filter(Boolean)
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(' '),
+      }));
+      const issueTypes = resolveIssueTypes(config);
+      return text({ swimlanes, issueTypes });
+    },
+  );
+
+  // ── tickets ──────────────────────────────────────────────────
+
+  server.registerTool(
+    'list_tickets',
+    {
+      description:
+        'List a project\'s tickets, optionally filtered by swimlane, type, priority, or epic. Set type to "epic" to list only epics.',
+      inputSchema: {
+        swimlane: z.string().optional().describe('Board swimlane key to filter by'),
+        type: ticketTypeEnum.optional().describe('Only return tickets of this type. Use "epic" to list epics.'),
+        priority: priority.optional().describe('Only return tickets with this priority level'),
+        epicId: z.string().optional().describe('Only return tickets belonging to this epic'),
+        projectId: projectIdArg,
+      },
+    },
+    async ({ swimlane, type, priority: p, epicId, projectId }) => {
+      const id = resolve(projectId);
+      if (!id) return errText(NO_PROJECT);
+      let tickets = await c.tickets.listByProject(id);
+      if (swimlane) tickets = tickets.filter((t) => t.swimlane === swimlane);
+      if (type) tickets = tickets.filter((t) => t.type === type);
+      if (p !== undefined) tickets = tickets.filter((t) => t.priority === p);
+      if (epicId) tickets = tickets.filter((t) => t.epicId === epicId);
+      return text(tickets);
     },
   );
 
   server.registerTool(
     'get_ticket',
     {
-      description: 'Fetch a single ticket with its labels, parent, sub-issues and relations.',
-      inputSchema: { ticketId: z.string() },
+      description: 'Fetch a single ticket with its labels, parent, sub-issues, relations, and epic tickets.',
+      inputSchema: { ticketId: z.string().describe('The ticket id returned from list_tickets or create_ticket') },
     },
     async ({ ticketId }) => text(await board.getTicketDetail(ticketId)),
   );
@@ -163,86 +326,259 @@ function buildTicketsServer(c: Container, defaultProjectId?: string, locked = fa
   server.registerTool(
     'create_ticket',
     {
-      description: 'Create a ticket on a project board.',
+      description:
+        'Create a ticket on a project board. Set type to "epic" to create an epic. Use labelNames to auto-create labels by name. Epics and tickets are the same entity — epics are simply tickets with type="epic".',
       inputSchema: {
-        title: z.string(),
-        description: z.string().optional(),
-        swimlane: z.string().optional(),
+        title: z.string().describe('Ticket title'),
+        description: z.string().optional().describe('Markdown body'),
+        swimlane: z.string().optional().describe('Board swimlane key (defaults to backlog)'),
         priority: priority.optional(),
-        agentId: z.string().optional(),
-        labelIds: z.array(z.string()).optional(),
-        parentId: z.string().optional(),
+        agentId: z.string().optional().describe('Agent id to assign'),
+        labelIds: z.array(z.string()).optional().describe('Label ids from manage_labels'),
+        labelNames: z.array(z.string()).optional().describe('Label names to auto-create and attach (case-insensitive)'),
+        parentId: z.string().optional().describe('Parent ticket id for sub-tickets'),
+        type: ticketTypeEnum.optional().describe('Defaults to feature. Set to "epic" to create an epic.'),
+        epicId: z.string().optional().describe('Epic id (ticket with type="epic") to assign this ticket to'),
+        startDate: z.string().optional().describe('Optional start date (YYYY-MM-DD)'),
+        dueDate: z.string().optional().describe('Optional due date (YYYY-MM-DD)'),
+        workflowName: z.string().optional().describe('Workflow name to bind this ticket to'),
+        relations: z
+          .array(
+            z.object({
+              kind: z.enum(['blocks', 'blocked_by', 'related']).describe('Relation kind'),
+              ticketId: z.string().describe('Target ticket id'),
+            }),
+          )
+          .optional()
+          .describe('Relations to create with other tickets'),
         projectId: projectIdArg,
       },
     },
     async (args) => {
       const id = resolve(args.projectId);
       if (!id) return errText(NO_PROJECT);
-      return text(
-        await board.createTicket({
-          projectId: id,
-          title: args.title,
-          description: args.description,
-          swimlane: args.swimlane,
-          priority: args.priority as TicketPriority | undefined,
-          agentId: args.agentId,
-          labelIds: args.labelIds,
-          parentId: args.parentId,
-        }),
-      );
+
+      let labelIds = args.labelIds ?? [];
+      if (args.labelNames && args.labelNames.length > 0) {
+        const nameIds = await resolveLabelNames(id, args.labelNames);
+        labelIds = [...new Set([...labelIds, ...nameIds])];
+      }
+
+      const error = await validateMutate(id, {
+        swimlane: args.swimlane,
+        epicId: args.epicId,
+        parentId: args.parentId,
+        labelIds,
+      });
+      if (error) return errText(error);
+
+      const ticket = await board.createTicket({
+        projectId: id,
+        title: args.title,
+        description: args.description,
+        swimlane: args.swimlane,
+        priority: args.priority as TicketPriority | undefined,
+        agentId: args.agentId,
+        labelIds,
+        parentId: args.parentId,
+        type: args.type,
+        epicId: args.epicId,
+        startDate: args.startDate,
+        dueDate: args.dueDate,
+        workflowName: args.workflowName,
+      });
+
+      if (args.relations) {
+        for (const rel of args.relations) {
+          await board.addRelation(ticket.id, rel).catch(() => undefined);
+        }
+      }
+
+      return text(ticket);
     },
   );
 
   server.registerTool(
     'update_ticket',
     {
-      description: 'Update a ticket\'s title, description, column or priority.',
+      description:
+        'Update a ticket\'s fields. Pass only the fields you want to change. Set a field to null to clear it (parentId, agentId, dates, epicId). Use swimlane to move the ticket between columns, and relations to add/remove ticket relations.',
       inputSchema: {
-        ticketId: z.string(),
+        ticketId: z.string().describe('The ticket id to update'),
         title: z.string().optional(),
         description: z.string().optional(),
-        swimlane: z.string().optional(),
+        swimlane: z.string().optional().describe('Target swimlane key (also moves the ticket)'),
+        order: z.number().int().optional().describe('Position within the swimlane after moving'),
         priority: priority.optional(),
+        type: ticketTypeEnum.optional(),
+        parentId: z.string().nullable().optional().describe('Set to null to un-parent'),
+        labelIds: z.array(z.string()).optional().describe('Full replacement list of label ids'),
+        labelNames: z.array(z.string()).optional().describe('Label names to auto-create and attach (added to existing labels)'),
+        agentId: z.string().nullable().optional().describe('Set to null to unassign'),
+        startDate: z.string().nullable().optional().describe('YYYY-MM-DD, or null to clear'),
+        dueDate: z.string().nullable().optional().describe('YYYY-MM-DD, or null to clear'),
+        epicId: z.string().nullable().optional().describe('Set to null to remove from epic'),
+        relations: z
+          .object({
+            add: z
+              .array(
+                z.object({
+                  kind: z.enum(['blocks', 'blocked_by', 'related']).describe('Relation kind'),
+                  ticketId: z.string().describe('Target ticket id'),
+                }),
+              )
+              .optional()
+              .describe('Relations to create'),
+            remove: z.array(z.string()).optional().describe('Relation ids to remove (from get_ticket relations)'),
+          })
+          .optional()
+          .describe('Manage ticket relations'),
       },
     },
-    async ({ ticketId, title, description, swimlane, priority: p }) =>
-      text(
-        await board.updateTicket(ticketId, {
-          title,
-          description,
-          swimlane,
-          priority: p as TicketPriority | undefined,
-        }),
-      ),
+    async ({ ticketId, title, description, swimlane, order, priority: p, type, parentId, labelIds, labelNames, agentId, startDate, dueDate, epicId, relations }) => {
+      const ticket = await c.tickets.get(ticketId);
+      if (!ticket) return errText(`Ticket "${ticketId}" not found`);
+
+      let resolvedLabelIds = labelIds;
+      if (labelNames && labelNames.length > 0) {
+        const nameIds = await resolveLabelNames(ticket.projectId, labelNames);
+        const existing = labelIds ?? ticket.labelIds;
+        resolvedLabelIds = [...new Set([...existing, ...nameIds])];
+      }
+
+      const error = await validateMutate(ticket.projectId, {
+        swimlane,
+        epicId,
+        parentId,
+        labelIds: resolvedLabelIds,
+      });
+      if (error) return errText(error);
+
+      if (swimlane || order !== undefined) {
+        await board.moveTicket({ ticketId, swimlane: swimlane ?? ticket.swimlane, order });
+        c.boardSync.pushTicketState(ticketId).catch(() => undefined);
+      }
+
+      const updated = await board.updateTicket(ticketId, {
+        title,
+        description,
+        swimlane,
+        priority: p as TicketPriority | undefined,
+        type,
+        parentId,
+        labelIds: resolvedLabelIds,
+        agentId,
+        startDate,
+        dueDate,
+        epicId,
+      });
+
+      if (relations?.remove) {
+        for (const relId of relations.remove) {
+          await board.removeRelation(relId).catch(() => undefined);
+        }
+      }
+      if (relations?.add) {
+        for (const rel of relations.add) {
+          await board.addRelation(ticketId, rel).catch(() => undefined);
+        }
+      }
+
+      return text(updated);
+    },
   );
 
   server.registerTool(
-    'move_ticket',
+    'delete_ticket',
     {
-      description: 'Move a ticket to a different board column (and optionally set its order).',
+      description: 'Permanently delete a ticket. Use with caution.',
       inputSchema: {
-        ticketId: z.string(),
-        swimlane: z.string(),
-        order: z.number().int().optional(),
+        ticketId: z.string().describe('The ticket id to delete'),
       },
     },
-    async ({ ticketId, swimlane, order }) => {
-      const result = await board.moveTicket({ ticketId, swimlane, order });
-      c.boardSync.pushTicketState(ticketId).catch(() => undefined);
-      return text(result);
+    async ({ ticketId }) => {
+      const deleted = await board.deleteTicket(ticketId);
+      return deleted ? text({ deleted: true, ticketId }) : errText(`Ticket "${ticketId}" not found`);
+    },
+  );
+
+  // ── labels ───────────────────────────────────────────────────
+
+  server.registerTool(
+    'manage_labels',
+    {
+      description:
+        'Manage project labels in one tool. Use action "list" to see all labels, "create" to add a new label (returns id), or "delete" to remove a label by id.',
+      inputSchema: {
+        action: z.enum(['list', 'create', 'delete']).describe('Operation: list, create, or delete labels'),
+        name: z.string().optional().describe('Label name (required for create)'),
+        color: z.string().optional().describe('Hex color for create, e.g. "#ff0000". Defaults to "#6366f1".'),
+        labelId: z.string().optional().describe('Label id (required for delete)'),
+        projectId: projectIdArg,
+      },
+    },
+    async ({ action, name, color, labelId, projectId }) => {
+      if (action === 'list') {
+        const id = resolve(projectId);
+        if (!id) return errText(NO_PROJECT);
+        return text(await board.listLabels(id));
+      }
+      if (action === 'create') {
+        const id = resolve(projectId);
+        if (!id) return errText(NO_PROJECT);
+        if (!name) return errText('name is required for create');
+        return text(await board.createLabel({ projectId: id, name, color }));
+      }
+      if (action === 'delete') {
+        if (!labelId) return errText('labelId is required for delete');
+        await board.deleteLabel(labelId);
+        return text({ deleted: true, labelId });
+      }
+      return errText(`Unknown action: ${action}`);
+    },
+  );
+
+  // ── comments ─────────────────────────────────────────────────
+
+  server.registerTool(
+    'add_comment',
+    {
+      description:
+        'Add a comment to a ticket, optionally with image attachments. Images should be base64-encoded data (omit the "data:image/..." prefix — the mime type is inferred from the filename extension).',
+      inputSchema: {
+        ticketId: z.string().describe('The ticket id to comment on'),
+        body: z.string().describe('Markdown comment body'),
+        images: z
+          .array(
+            z.object({
+              name: z.string().describe('Filename with extension, e.g. "screenshot.png"'),
+              data: z.string().describe('Base64-encoded image data (without the data URI prefix)'),
+            }),
+          )
+          .optional()
+          .describe('Optional image attachments'),
+      },
+    },
+    async ({ ticketId, body, images }) => {
+      const ticket = await c.tickets.get(ticketId);
+      if (!ticket) return errText(`Ticket "${ticketId}" not found`);
+      const attachments: CommentAttachment[] = (images ?? []).map((img) => imageToAttachment(img.name, img.data));
+      return text(await c.comments.create(ticketId, body, attachments));
     },
   );
 
   server.registerTool(
-    'list_labels',
+    'list_comments',
     {
-      description: 'List the labels defined for a project.',
-      inputSchema: { projectId: projectIdArg },
+      description: 'List all comments on a ticket, including any image attachments.',
+      inputSchema: {
+        ticketId: z.string().describe('The ticket id to list comments for'),
+      },
     },
-    async ({ projectId }) => {
-      const id = resolve(projectId);
-      if (!id) return errText(NO_PROJECT);
-      return text(await board.listLabels(id));
+    async ({ ticketId }) => {
+      const ticket = await c.tickets.get(ticketId);
+      if (!ticket) return errText(`Ticket "${ticketId}" not found`);
+      return text(await c.comments.listByTicket(ticketId));
     },
   );
 
@@ -251,13 +587,19 @@ function buildTicketsServer(c: Container, defaultProjectId?: string, locked = fa
 
 /**
  * Skills MCP — create, read, update, and delete Orion skills in a project's
- * `.orion/skills/` directory. The chat agent uses these tools when the user
+ * `.agents/skills/` directory. The chat agent uses these tools when the user
  * asks to create or modify a skill.
  */
 function buildSkillsServer(c: Container, defaultProjectId?: string, locked = false): McpServer {
   const server = new McpServer({ name: 'orion-skills', version: '1.0.0' });
   const resolve = projectResolver(defaultProjectId, locked);
   const workspaces = new WorkspaceService(c);
+
+  async function resolveSkillRoot(projectId: string): Promise<string> {
+    const project = await c.projects.get(projectId);
+    if (!project) throw new Error(`Project ${projectId} not found`);
+    return workspaces.resolveSkillRoot(project);
+  }
 
   async function resolveConfigRoot(projectId: string): Promise<string> {
     const project = await c.projects.get(projectId);
@@ -283,10 +625,8 @@ function buildSkillsServer(c: Container, defaultProjectId?: string, locked = fal
     async ({ projectId }) => {
       const id = resolve(projectId);
       if (!id) return errText(NO_PROJECT);
-      const configRoot = await resolveConfigRoot(id);
-      const project = await c.projects.get(id);
-      if (!project) return errText('Project not found');
-      const skills = await listSkillCatalog(configRoot, project.configPath);
+      const repoRoot = await resolveSkillRoot(id);
+      const skills = await listSkillCatalog(repoRoot);
       return text(skills);
     },
   );
@@ -303,10 +643,8 @@ function buildSkillsServer(c: Container, defaultProjectId?: string, locked = fal
     async ({ name, projectId }) => {
       const id = resolve(projectId);
       if (!id) return errText(NO_PROJECT);
-      const configRoot = await resolveConfigRoot(id);
-      const project = await c.projects.get(id);
-      if (!project) return errText('Project not found');
-      const detail = await getSkillDetail(configRoot, name, project.configPath);
+      const repoRoot = await resolveSkillRoot(id);
+      const detail = await getSkillDetail(repoRoot, name);
       if (!detail) return errText(`Skill "${name}" not found`);
       return text(detail);
     },
@@ -326,10 +664,8 @@ function buildSkillsServer(c: Container, defaultProjectId?: string, locked = fal
     async ({ name, description, content, projectId }) => {
       const id = resolve(projectId);
       if (!id) return errText(NO_PROJECT);
-      const configRoot = await resolveConfigRoot(id);
-      const project = await c.projects.get(id);
-      if (!project) return errText('Project not found');
-      await createSkill(configRoot, name, description, content, project.configPath, 'project');
+      const repoRoot = await resolveSkillRoot(id);
+      await createSkill(repoRoot, name, description, content, undefined, 'project');
       return text({ created: true, name, description });
     },
   );
@@ -349,10 +685,8 @@ function buildSkillsServer(c: Container, defaultProjectId?: string, locked = fal
     async ({ name, content, newName, newDescription, projectId }) => {
       const id = resolve(projectId);
       if (!id) return errText(NO_PROJECT);
-      const configRoot = await resolveConfigRoot(id);
-      const project = await c.projects.get(id);
-      if (!project) return errText('Project not found');
-      await updateSkillContent(configRoot, name, content, project.configPath, 'project', newName, newDescription);
+      const repoRoot = await resolveSkillRoot(id);
+      await updateSkillContent(repoRoot, name, content, undefined, 'project', newName, newDescription);
       return text({ updated: true, name: newName ?? name });
     },
   );
@@ -369,6 +703,7 @@ function buildSkillsServer(c: Container, defaultProjectId?: string, locked = fal
     async ({ name, projectId }) => {
       const id = resolve(projectId);
       if (!id) return errText(NO_PROJECT);
+      const repoRoot = await resolveSkillRoot(id);
       const configRoot = await resolveConfigRoot(id);
       const project = await c.projects.get(id);
       if (!project) return errText('Project not found');
@@ -380,7 +715,7 @@ function buildSkillsServer(c: Container, defaultProjectId?: string, locked = fal
           }. Remove the references first.`,
         );
       }
-      const removed = await uninstallSkill(configRoot, name, project.configPath, 'project');
+      const removed = await uninstallSkill(repoRoot, name, project.configPath, 'project');
       if (!removed) return errText(`Skill "${name}" not found`);
       return text({ deleted: true, name });
     },

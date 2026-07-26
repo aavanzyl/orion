@@ -58,3 +58,4 @@ test-output
 .nx/self-healing
 .nx/migrate-runs.playwright-mcp
 .playwright-mcp
+test-tmp

@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { extname, basename, dirname, normalize, join } from 'node:path';
-import type { CallGraph, CallGraphNode, CodeIndex, DirSummary, FileGraph, FileGraphNode, ImportEdge, NxProjectInfo, Project, ProjectId, SearchResult } from '@orion/models';
+import type { CallGraph, CallGraphNode, CodeIndex, DirSummary, FileGraph, FileGraphNode, ImportEdge, NxProjectInfo, Project, ProjectId, SearchResult, TicketIndex, TicketSearchResult } from '@orion/models';
 import {
   chunkFile,
   type CodeChunkInput,
@@ -10,7 +10,7 @@ import {
   rankBySimilarity,
   walkRepo,
 } from '@orion/rag';
-import type { InsertCodeChunkInput } from '@orion/db';
+import type { InsertCodeChunkInput, InsertTicketChunkInput } from '@orion/db';
 import type { Container } from '../container.js';
 import { WorkspaceService } from './workspace.service.js';
 import { parseSource } from './call-parser.js';
@@ -936,5 +936,108 @@ export class RagService {
       snippet: item.content,
       score,
     }));
+  }
+
+  /** The current ticket index status, or a default `idle` status when never indexed. */
+  async getTicketStatus(projectId: ProjectId): Promise<TicketIndex> {
+    const index = await this.c.rag.getTicketIndex(projectId);
+    if (index) return index;
+    const now = new Date().toISOString();
+    return {
+      id: '',
+      projectId,
+      status: 'idle',
+      provider: this.provider.id,
+      dimensions: this.provider.dimensions,
+      ticketCount: 0,
+      chunkCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  async reindexTickets(projectId: ProjectId): Promise<TicketIndex> {
+    const project = await this.c.projects.get(projectId);
+    if (!project) throw new Error(`Project ${projectId} not found`);
+
+    const status = await this.c.rag.upsertTicketIndex(projectId, {
+      status: 'indexing',
+      provider: this.provider.id,
+      dimensions: this.provider.dimensions,
+      error: null,
+    });
+
+    void this.runTicketIndex(projectId).catch(async (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.c.rag
+        .upsertTicketIndex(projectId, { status: 'error', error: message })
+        .catch(() => undefined);
+    });
+
+    return status;
+  }
+
+  private async runTicketIndex(projectId: ProjectId): Promise<void> {
+    const tickets = await this.c.tickets.listByProject(projectId);
+    if (tickets.length === 0) {
+      await this.c.rag.clearTicketChunks(projectId);
+      await this.c.rag.upsertTicketIndex(projectId, {
+        status: 'ready',
+        provider: this.provider.id,
+        dimensions: this.provider.dimensions,
+        ticketCount: 0,
+        chunkCount: 0,
+        error: null,
+        lastIndexedAt: new Date(),
+      });
+      return;
+    }
+
+    const texts = tickets.map((t) => `${t.title}\n${t.description || ''}`.trim());
+    const vectors = await this.provider.embed(texts);
+    const rows: InsertTicketChunkInput[] = tickets.map((t, i) => ({
+      projectId,
+      ticketId: t.id,
+      chunkIndex: 0,
+      content: texts[i],
+      embedding: vectors[i] ?? [],
+    }));
+
+    await this.c.rag.clearTicketChunks(projectId);
+    await this.c.rag.insertTicketChunks(rows);
+
+    await this.c.rag.upsertTicketIndex(projectId, {
+      status: 'ready',
+      provider: this.provider.id,
+      dimensions: this.provider.dimensions,
+      ticketCount: tickets.length,
+      chunkCount: rows.length,
+      error: null,
+      lastIndexedAt: new Date(),
+    });
+  }
+
+  async searchTickets(projectId: ProjectId, query: string, topK = 8): Promise<TicketSearchResult[]> {
+    const trimmed = query.trim();
+    if (!trimmed) return [];
+    const index = await this.c.rag.getTicketIndex(projectId);
+    if (!index || index.status !== 'ready') return [];
+
+    const chunks = await this.c.rag.listTicketChunks(projectId);
+    if (chunks.length === 0) return [];
+
+    const tickets = await this.c.tickets.listByProject(projectId);
+    const ticketMap = new Map(tickets.map((t) => [t.id, t]));
+
+    const [queryVec] = await this.provider.embed([trimmed]);
+    return rankBySimilarity(queryVec, chunks, topK).map(({ item, score }) => {
+      const ticket = ticketMap.get(item.ticketId);
+      return {
+        ticketId: item.ticketId,
+        title: ticket?.title ?? item.ticketId,
+        snippet: item.content,
+        score,
+      };
+    });
   }
 }

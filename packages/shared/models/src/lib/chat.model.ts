@@ -112,6 +112,7 @@ export interface AgentTicketUpdateResponse {
   type?: string;
   priority?: number;
   labelIds?: string[];
+  epicId?: string | null;
   reasoning: string;
 }
 

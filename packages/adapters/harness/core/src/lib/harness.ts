@@ -33,6 +33,10 @@ export interface HarnessRunOptions {
   config?: Record<string, unknown>;
   /** Abort signal used to cancel an in-flight turn. */
   signal?: AbortSignal;
+  /** Custom input/prompt price in USD per 1M tokens. Overrides SDK-reported cost. */
+  promptPrice?: number;
+  /** Custom output/completion price in USD per 1M tokens. Overrides SDK-reported cost. */
+  completionPrice?: number;
 }
 
 /** Token/cost usage reported by a harness for a single turn (best-effort). */

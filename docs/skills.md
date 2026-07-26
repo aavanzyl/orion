@@ -19,7 +19,7 @@ workflow:
 ```
 
 At run time, Orion resolves each name against the [catalog](#the-catalog) and copies the skill's
-files into `<worktree>/.orion/skills/<name>/`, then writes a managed index into the worktree's
+files into `<worktree>/.agents/skills/<name>/`, then writes a managed index into the worktree's
 `AGENTS.md` (between `<!-- orion:skills:start -->` / `<!-- orion:skills:end -->` markers) so the
 harness picks them up. A run **fails fast** with a clear error if an agent references a skill
 that isn't in the catalog.
@@ -30,8 +30,8 @@ A project's skill catalog is the union of three scopes, with later scopes overri
 ones by name:
 
 1. **Built-in** — shipped with Orion.
-2. **Global** — installed under `~/.orion/skills/`, available to every project.
-3. **Project** — installed under `<repo>/.orion/skills/`, committed with the repo.
+2. **Global** — installed under `~/.agents/skills/`, available to every project.
+3. **Project** — installed under `<repo>/.agents/skills/`, committed with the repo.
 
 ### Built-in skills
 
@@ -82,8 +82,8 @@ for the full list.
 
 Installed skills are recorded in `skills-lock.json` for reproducible checkouts:
 
-- Project scope: `<repo>/.orion/skills-lock.json`
-- Global scope: `~/.orion/skills-lock.json`
+- Project scope: `<repo>/.agents/skills-lock.json`
+- Global scope: `~/.agents/skills-lock.json`
 
 Each entry records the `source`, `sourceType`, `skillPath`, optional `ref`, the computed hash,
 tags, and sync status. Syncing re-clones the source, compares the hash, and replaces the files
@@ -106,7 +106,7 @@ Detailed instructions the agent should follow when this skill is active…
 ```
 
 Add any supporting reference files or scripts alongside `SKILL.md`; the whole folder is copied
-into the worktree. Place it under `.orion/skills/<name>/` (project scope) or `~/.orion/skills/`
+into the worktree. Place it under `.agents/skills/<name>/` (project scope) or `~/.agents/skills/`
 (global scope), or publish it to a GitHub repo and install it as above.
 
 ## Related reading

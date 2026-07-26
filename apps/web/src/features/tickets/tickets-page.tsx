@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { HistoryIcon, PencilIcon, PlusIcon, SearchIcon, SettingsIcon, SparklesIcon, TicketIcon, TrashIcon, WorkflowIcon, XIcon } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { HistoryIcon, PencilIcon, PlusIcon, RefreshCwIcon, SearchIcon, SettingsIcon, SparklesIcon, TicketIcon, TrashIcon, WorkflowIcon, XIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import type { AgentTicketPreviewResponse, Label as LabelModel, Ticket, TicketPriority, TicketType } from '@orion/models';
+import type { AgentTicketPreviewResponse, Label as LabelModel, Ticket, TicketIndex, TicketPriority, TicketSearchResult, TicketType } from '@orion/models';
 import { ALL_DEFAULT_TICKET_TYPES } from '@orion/models';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -47,8 +47,8 @@ import { CreateTicketAiModal } from '@/features/board/create-ticket-ai-modal';
 import { useProjects } from '@/features/projects/hooks';
 import { useProjectContext } from '@/lib/use-project-context';
 import { ACCENT_PRESETS, type AccentKey } from '@/lib/use-branding';
-import { BoardFilters, EMPTY_FILTERS, type BoardFilterState } from '@/features/board/board-filters';
-import { IssueDetailSheet } from './issue-detail-sheet';
+import { BoardFilters, EMPTY_FILTERS, HIDDEN_SWIMLANE_LIMIT, type BoardFilterState } from '@/features/board/board-filters';
+import { TicketDetailSheet } from './ticket-detail-sheet';
 
 const BG_PRESETS = [
   { label: 'Default', value: '', bg: undefined as string | undefined },
@@ -61,7 +61,7 @@ const BG_PRESETS = [
   ),
 ];
 
-const BG_STORAGE_KEY = 'orion-issues-background';
+const BG_STORAGE_KEY = 'orion-tickets-background';
 
 function loadBg(): string {
   try {
@@ -97,10 +97,11 @@ function formatDate(iso: string): string {
 type SortField = 'key' | 'title' | 'swimlane' | 'priority' | 'type' | 'labels' | 'createdAt' | 'updatedAt';
 type SortDir = 'asc' | 'desc';
 
-export function IssuesPage() {
+export function TicketsPage() {
   const { projects } = useProjects();
   const { projectId: globalProjectId } = useProjectContext();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [labels, setLabels] = useState<LabelModel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,6 +122,12 @@ export function IssuesPage() {
 
   const [aiModalOpen, setAiModalOpen] = useState(false);
 
+  const [ticketIndex, setTicketIndex] = useState<TicketIndex | null>(null);
+  const [semanticResults, setSemanticResults] = useState<TicketSearchResult[]>([]);
+  const [semanticSearching, setSemanticSearching] = useState(false);
+  const [indexLoading, setIndexLoading] = useState(false);
+  const semanticPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const [bg, setBg] = useState<string>(loadBg);
   const [historyOpen, setHistoryOpen] = useState(false);
 
@@ -137,6 +144,88 @@ export function IssuesPage() {
 
   useEffect(load, []);
 
+  useEffect(() => {
+    const ticketId = searchParams.get('ticket');
+    if (!ticketId) return;
+    const existing = tickets.find((t) => t.id === ticketId);
+    if (existing) {
+      setSelectedTicket(existing);
+    }
+  }, [searchParams, tickets]);
+
+  const fetchTicketIndex = useCallback(async () => {
+    if (!globalProjectId) return;
+    try {
+      setIndexLoading(true);
+      const status = await api.getTicketIndex(globalProjectId);
+      setTicketIndex(status);
+    } catch {
+      // ignore
+    } finally {
+      setIndexLoading(false);
+    }
+  }, [globalProjectId]);
+
+  useEffect(() => {
+    if (globalProjectId) {
+      fetchTicketIndex();
+    }
+  }, [globalProjectId, fetchTicketIndex]);
+
+  useEffect(() => {
+    if (ticketIndex && ticketIndex.status === 'idle' && globalProjectId) {
+      handleReindexTickets();
+    }
+  }, [ticketIndex?.status]);
+
+  useEffect(() => {
+    if (ticketIndex?.status === 'indexing') {
+      semanticPollRef.current = setInterval(fetchTicketIndex, 3000);
+      return () => {
+        if (semanticPollRef.current) clearInterval(semanticPollRef.current);
+      };
+    }
+    return undefined;
+  }, [ticketIndex?.status, fetchTicketIndex]);
+
+  useEffect(() => {
+    if (filters.search.trim()) {
+      const timer = setTimeout(() => {
+        void handleSemanticSearch(filters.search);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+    setSemanticResults([]);
+    return undefined;
+  }, [filters.search]);
+
+  const handleReindexTickets = async () => {
+    if (!globalProjectId) return;
+    try {
+      await api.reindexTickets(globalProjectId);
+      fetchTicketIndex();
+      toast.success('Ticket index started');
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
+  const handleSemanticSearch = async (query: string) => {
+    if (!globalProjectId || !query.trim()) {
+      setSemanticResults([]);
+      return;
+    }
+    setSemanticSearching(true);
+    try {
+      const results = await api.searchTickets(globalProjectId, query, 20);
+      setSemanticResults(results);
+    } catch {
+      setSemanticResults([]);
+    } finally {
+      setSemanticSearching(false);
+    }
+  };
+
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const labelMap = useMemo(() => {
     const map = new Map<string, LabelModel>();
@@ -144,10 +233,32 @@ export function IssuesPage() {
     return map;
   }, [labels]);
 
+  const swimlaneKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const t of tickets) keys.add(t.swimlane);
+    return Array.from(keys).sort();
+  }, [tickets]);
+
   const filtered = useMemo(() => {
     let result = tickets;
+
     if (filters.search.trim()) {
       const q = filters.search.trim().toLowerCase();
+      const scoredIds = new Set(semanticResults.map((r) => r.ticketId));
+      const hasSemanticResults = scoredIds.size > 0;
+
+      if (hasSemanticResults) {
+        result = result.filter((t) => scoredIds.has(t.id));
+        result.sort((a, b) => {
+          const aIdx = semanticResults.findIndex((r) => r.ticketId === a.id);
+          const bIdx = semanticResults.findIndex((r) => r.ticketId === b.id);
+          if (aIdx === -1 && bIdx === -1) return 0;
+          if (aIdx === -1) return 1;
+          if (bIdx === -1) return -1;
+          return aIdx - bIdx;
+        });
+      }
+
       result = result.filter(
         (t) =>
           t.title.toLowerCase().includes(q) ||
@@ -166,8 +277,17 @@ export function IssuesPage() {
     if (filters.labelIds.length > 0) {
       result = result.filter((t) => filters.labelIds.every((id) => t.labelIds.includes(id)));
     }
+    if (filters.hiddenSwimlanes.length > 0) {
+      const hiddenSet = new Set(filters.hiddenSwimlanes);
+      const hidden = result.filter((t) => hiddenSet.has(t.swimlane));
+      const visible = result.filter((t) => !hiddenSet.has(t.swimlane));
+      const recentHidden = [...hidden]
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        .slice(0, HIDDEN_SWIMLANE_LIMIT);
+      result = [...visible, ...recentHidden];
+    }
     return result;
-  }, [tickets, filters, globalProjectId, projectMap]);
+  }, [tickets, filters, globalProjectId, projectMap, semanticResults]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -287,10 +407,32 @@ export function IssuesPage() {
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between gap-4 border-b bg-card px-6 py-4 shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold">Issues</h1>
+          <h1 className="text-lg font-semibold">Tickets</h1>
         </div>
         <div className="flex items-center gap-2">
-          <BoardFilters filters={filters} labels={labels} onChange={setFilters} />
+          <BoardFilters filters={filters} labels={labels} swimlaneKeys={swimlaneKeys} onChange={setFilters} />
+
+          {globalProjectId && (
+            <>
+              {ticketIndex && ticketIndex.status !== 'ready' && !indexLoading && (
+                <Button variant="outline" size="sm" onClick={handleReindexTickets}>
+                  <RefreshCwIcon className="size-3.5 mr-1" />
+                  Index
+                </Button>
+              )}
+              {indexLoading && (
+                <span className="text-xs text-muted-foreground">Loading index...</span>
+              )}
+              {semanticSearching && (
+                <span className="text-xs text-muted-foreground">Searching...</span>
+              )}
+              {ticketIndex?.status === 'ready' && (
+                <Badge variant="success" className="text-xs">
+                  {ticketIndex.ticketCount} indexed
+                </Badge>
+              )}
+            </>
+          )}
 
           <Button onClick={() => setNewTicketOpen(true)} className="max-lg:size-9 max-lg:px-0">
             <PlusIcon data-icon="inline-start" className="max-lg:mx-auto" />
@@ -308,7 +450,7 @@ export function IssuesPage() {
           {globalProjectId && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" title="Issues settings">
+                <Button variant="ghost" size="icon" title="Tickets settings">
                   <SettingsIcon className="size-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -373,7 +515,11 @@ export function IssuesPage() {
         ) : !hasResults ? (
           <div className="flex flex-col items-center gap-3 py-16 text-center">
             <SearchIcon className="size-8 text-muted-foreground" />
-            <p className="text-muted-foreground">No tickets match your filters.</p>
+            <p className="text-muted-foreground">
+              {filters.search.trim() && ticketIndex?.status !== 'ready'
+                ? 'Ticket index not ready. Click "Index" to enable semantic search.'
+                : 'No tickets match your filters.'}
+            </p>
           </div>
         ) : (
           <div className="rounded-md border bg-card">
@@ -401,7 +547,12 @@ export function IssuesPage() {
                     <TableRow
                       key={ticket.id}
                       className="cursor-pointer hover:bg-muted/30"
-                      onClick={() => setSelectedTicket(ticket)}
+                      onClick={() => {
+                        setSelectedTicket(ticket);
+                        if (searchParams.get('ticket') !== ticket.id) {
+                          setSearchParams((prev) => { prev.set('ticket', ticket.id); return prev; }, { replace: true });
+                        }
+                      }}
                     >
                       <TableCell className="whitespace-nowrap font-mono text-sm text-muted-foreground">
                         {ticket.displayKey ?? '—'}
@@ -528,9 +679,15 @@ export function IssuesPage() {
         onConfirm={confirmDelete}
       />
 
-      <IssueDetailSheet
+      <TicketDetailSheet
         ticket={selectedTicket}
-        onClose={() => setSelectedTicket(null)}
+        onClose={() => {
+          setSelectedTicket(null);
+          if (searchParams.has('ticket')) {
+            searchParams.delete('ticket');
+            setSearchParams(searchParams, { replace: true });
+          }
+        }}
         onChanged={handleChanged}
       />
 
@@ -542,7 +699,7 @@ export function IssuesPage() {
         onCreate={createFromAi}
       />
 
-      <IssuesActivitySheet
+      <TicketsActivitySheet
         open={historyOpen}
         onOpenChange={setHistoryOpen}
         tickets={tickets}
@@ -551,7 +708,7 @@ export function IssuesPage() {
   );
 }
 
-function IssuesActivitySheet({
+function TicketsActivitySheet({
   open,
   onOpenChange,
   tickets,

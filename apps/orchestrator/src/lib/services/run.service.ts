@@ -293,12 +293,16 @@ export class RunService {
 
       let effectiveBaseUrl: string | undefined;
       let effectiveApiKey: string | undefined;
+      let promptPrice: number | undefined;
+      let completionPrice: number | undefined;
 
       // Resolve apiKey and baseUrl from the DB provider matching this harness.
       const allProviders = await this.c.providers.list().catch(() => []);
       const matching = allProviders.find((p) => p.harness === resolvedHarness);
       if (matching) {
         effectiveBaseUrl = matching.baseUrl;
+        promptPrice = matching.promptPrice;
+        completionPrice = matching.completionPrice;
         const stored = await this.c.providers.getApiKey(matching.id).catch(() => null);
         if (stored) {
           effectiveApiKey = this.c.env.providerEncryptionSalt
@@ -316,6 +320,8 @@ export class RunService {
         model: resolvedModel,
         baseUrl: effectiveBaseUrl,
         apiKey: effectiveApiKey,
+        promptPrice,
+        completionPrice,
       });
 
       let finalResponse = '';

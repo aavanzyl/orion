@@ -511,7 +511,7 @@ export function TimelinePage() {
                           return (
                             <div key={ticket.id} style={{ height: TICKET_ROW_HEIGHT }} className="relative">
                               <Link
-                                to={`/?ticket=${ticket.id}`}
+                                to={`/projects/${projectId}?ticket=${ticket.id}`}
                                 className={cn(
                                   'absolute top-0.5 flex h-6 items-center rounded-sm border px-1.5 text-[0.625rem] font-medium transition-colors hover:brightness-90',
                                   pastDue && 'border-destructive/40 bg-destructive/10 text-destructive',
@@ -542,7 +542,7 @@ export function TimelinePage() {
                     return (
                       <div key={ticket.id} style={{ height: TICKET_ROW_HEIGHT }} className="relative">
                         <Link
-                          to={`/?ticket=${ticket.id}`}
+                          to={`/projects/${projectId}?ticket=${ticket.id}`}
                           className={cn(
                             'absolute top-0.5 flex h-6 items-center rounded-md border px-2 text-[0.625rem] font-medium transition-colors hover:brightness-95',
                             pastDue

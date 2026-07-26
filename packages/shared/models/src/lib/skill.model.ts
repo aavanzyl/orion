@@ -6,7 +6,7 @@
  * natively.
  *
  * A project's skill catalog is the union of Orion's built-in default skills and
- * any skills installed under `.orion/skills/`. Installed skills are recorded in
+ * any skills installed under `.agents/skills/`. Installed skills are recorded in
  * a lock file so a checkout is reproducible.
  */
 
@@ -34,7 +34,7 @@ export interface SkillCatalogEntry {
   description: string;
   /** `builtin` (shipped with Orion) or `project` (installed under `.orion/`). */
   source: SkillSource;
-  /** True when a matching entry exists in `.orion/skills-lock.json`. */
+  /** True when a matching entry exists in `.agents/skills-lock.json`. */
   installed: boolean;
   /** `global` (available to all projects) or `project` (scoped to one project). */
   scope?: SkillScope;
@@ -54,7 +54,7 @@ export interface SkillDetail extends SkillCatalogEntry {
   content: string;
 }
 
-/** Provenance recorded for an installed skill in `.orion/skills-lock.json`. */
+/** Provenance recorded for an installed skill in `.agents/skills-lock.json`. */
 export interface SkillLockEntry {
   /** Origin identifier, e.g. a GitHub repo URL. */
   source: string;
@@ -74,7 +74,7 @@ export interface SkillLockEntry {
   lastSyncedAt?: string;
 }
 
-/** The on-disk shape of `.orion/skills-lock.json`. */
+/** The on-disk shape of `.agents/skills-lock.json`. */
 export interface SkillLock {
   version: 1;
   skills: Record<string, SkillLockEntry>;

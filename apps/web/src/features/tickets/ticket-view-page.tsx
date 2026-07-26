@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { Ticket } from '@orion/models';
 import { api } from '@/lib/api';
-import { IssueDetailSheet } from './issue-detail-sheet';
+import { TicketDetailSheet } from './ticket-detail-sheet';
 
-export function IssueViewPage() {
+export function TicketViewPage() {
   const { ticketId } = useParams<{ ticketId: string }>();
   const navigate = useNavigate();
   const [ticket, setTicket] = useState<Ticket | null>(null);
@@ -34,13 +34,13 @@ export function IssueViewPage() {
   if (!ticket) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2">
-        <p className="text-muted-foreground">Issue not found.</p>
+        <p className="text-muted-foreground">Ticket not found.</p>
         <button
           type="button"
-          onClick={() => navigate('/issues')}
+          onClick={() => navigate('/tickets')}
           className="text-sm text-primary hover:underline"
         >
-          Back to issues
+          Back to tickets
         </button>
       </div>
     );
@@ -51,9 +51,9 @@ export function IssueViewPage() {
   };
 
   return (
-    <IssueDetailSheet
+    <TicketDetailSheet
       ticket={ticket}
-      onClose={() => navigate('/issues')}
+      onClose={() => navigate('/tickets')}
       onChanged={handleChanged}
     />
   );

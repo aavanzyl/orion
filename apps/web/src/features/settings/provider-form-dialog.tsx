@@ -69,6 +69,8 @@ export function ProviderFormDialog({
   const [apiKey, setApiKey] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [modelDraft, setModelDraft] = useState('');
+  const [promptPrice, setPromptPrice] = useState('');
+  const [completionPrice, setCompletionPrice] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const apiKeyInputRef = useRef<HTMLInputElement>(null);
@@ -84,6 +86,8 @@ export function ProviderFormDialog({
     setApiKey('');
     setModels(provider?.models ?? []);
     setModelDraft('');
+    setPromptPrice(provider?.promptPrice != null ? String(provider.promptPrice) : '');
+    setCompletionPrice(provider?.completionPrice != null ? String(provider.completionPrice) : '');
   }, [open, provider]);
 
   useEffect(() => {
@@ -121,9 +125,17 @@ export function ProviderFormDialog({
         baseUrl: baseUrl.trim() || undefined,
         apiKey: apiKey.trim() || undefined,
         models,
+        promptPrice: promptPrice ? Number(promptPrice) : undefined,
+        completionPrice: completionPrice ? Number(completionPrice) : undefined,
       };
       if (editing && provider) {
-        await api.updateProvider(provider.id, payload);
+        // Allow clearing pricing by sending null on update.
+        const updatePayload: Record<string, unknown> = {
+          ...payload,
+          promptPrice: promptPrice ? Number(promptPrice) : null,
+          completionPrice: completionPrice ? Number(completionPrice) : null,
+        };
+        await api.updateProvider(provider.id, updatePayload);
         toast.success('Provider updated');
       } else {
         await api.createProvider(payload);
@@ -266,6 +278,39 @@ export function ProviderFormDialog({
                 ))}
               </div>
             )}
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="provider-prompt-price">Prompt price ($/1M tokens)</Label>
+              <Input
+                id="provider-prompt-price"
+                type="number"
+                min="0"
+                step="0.01"
+                value={promptPrice}
+                onChange={(e) => setPromptPrice(e.target.value)}
+                placeholder="e.g. 0.14"
+              />
+              <p className="text-xs text-muted-foreground">
+                Custom input/prompt price per 1M tokens. Overrides the SDK-reported cost.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="provider-completion-price">Completion price ($/1M tokens)</Label>
+              <Input
+                id="provider-completion-price"
+                type="number"
+                min="0"
+                step="0.01"
+                value={completionPrice}
+                onChange={(e) => setCompletionPrice(e.target.value)}
+                placeholder="e.g. 0.28"
+              />
+              <p className="text-xs text-muted-foreground">
+                Custom output/completion price per 1M tokens. Overrides the SDK-reported cost.
+              </p>
+            </div>
           </div>
         </div>
 

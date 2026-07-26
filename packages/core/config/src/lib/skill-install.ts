@@ -13,7 +13,6 @@ import type {
   SkillScope,
   SyncSkillResult,
 } from '@orion/models';
-import { DEFAULT_CONFIG_PATH } from './load-config.js';
 import { ConfigError } from './errors.js';
 import {
   SKILL_MANIFEST_FILENAME,
@@ -162,8 +161,8 @@ async function scanSkillDir(dir: string): Promise<ScanResult> {
 }
 
 /**
- * Install skills from a GitHub repository into `.orion/skills/<name>/` and
- * record them in `.orion/skills-lock.json`.
+ * Install skills from a GitHub repository into `.agents/skills/<name>/` and
+ * record them in `.agents/skills-lock.json`.
  *
  * `skillPath` can be:
  *   - A path to a `SKILL.md` file (the containing directory is installed).
@@ -178,7 +177,6 @@ export async function installSkillFromGitHub(
   options: InstallSkillOptions,
 ): Promise<InstallSkillResult> {
   const { repoDir, source, skillPath, ref, tags: inputTags, scope = 'global', syncEnabled, token } = options;
-  const configPath = options.configPath ?? DEFAULT_CONFIG_PATH;
 
   validateSource(source);
 
@@ -199,7 +197,7 @@ export async function installSkillFromGitHub(
 
     const discovered = await discoverSkillDirs(temp, skillPath);
 
-    const lock = await readSkillsLock(repoDir, configPath, scope);
+    const lock = await readSkillsLock(repoDir, undefined, scope);
     const installed: InstalledSkillResult[] = [];
 
     let scan: ScanResult = { scanned: false };
@@ -209,7 +207,7 @@ export async function installSkillFromGitHub(
       const manifest = parseSkillManifest(manifestText);
       const name = manifest.name || basename(skillDir);
 
-      const dest = join(skillsDir(repoDir, configPath, scope), name);
+      const dest = join(skillsDir(repoDir, undefined, scope), name);
       await rm(dest, { recursive: true, force: true });
       await mkdir(dirname(dest), { recursive: true });
       await cp(skillDir, dest, { recursive: true });
@@ -249,7 +247,7 @@ export async function installSkillFromGitHub(
         : { scanned: false };
     }
 
-    await writeSkillsLock(repoDir, lock, configPath, scope);
+    await writeSkillsLock(repoDir, lock, undefined, scope);
 
     return { skills: installed, scan };
   } finally {
@@ -265,11 +263,11 @@ export async function installSkillFromGitHub(
 export async function syncSkill(
   repoDir: string,
   name: string,
-  configPath: string = DEFAULT_CONFIG_PATH,
+  _configPath?: string,
   scope: SkillScope = 'global',
   token?: string,
 ): Promise<SyncSkillResult> {
-  const lock = await readSkillsLock(repoDir, configPath, scope);
+  const lock = await readSkillsLock(repoDir, undefined, scope);
   const entry = lock.skills[name];
   if (!entry) {
     return { updated: false, computedHash: '', success: false, error: 'Skill not found in lock' };
@@ -315,18 +313,18 @@ export async function syncSkill(
 
     if (newHash === entry.computedHash) {
       entry.lastSyncedAt = new Date().toISOString();
-      await writeSkillsLock(repoDir, lock, configPath, scope);
+      await writeSkillsLock(repoDir, lock, undefined, scope);
       return { updated: false, computedHash: newHash, success: true };
     }
 
-    const dest = join(skillsDir(repoDir, configPath, scope), name);
+    const dest = join(skillsDir(repoDir, undefined, scope), name);
     await rm(dest, { recursive: true, force: true });
     await mkdir(dirname(dest), { recursive: true });
     await cp(skillDir, dest, { recursive: true });
 
     entry.computedHash = newHash;
     entry.lastSyncedAt = new Date().toISOString();
-    await writeSkillsLock(repoDir, lock, configPath, scope);
+    await writeSkillsLock(repoDir, lock, undefined, scope);
 
     return { updated: true, computedHash: newHash, success: true };
   } finally {
@@ -338,15 +336,15 @@ export async function syncSkill(
 export async function uninstallSkill(
   repoDir: string,
   name: string,
-  configPath: string = DEFAULT_CONFIG_PATH,
+  _configPath?: string,
   scope: SkillScope = 'global',
 ): Promise<boolean> {
-  const lock = await readSkillsLock(repoDir, configPath, scope);
+  const lock = await readSkillsLock(repoDir, undefined, scope);
   const known = name in lock.skills;
-  await rm(join(skillsDir(repoDir, configPath, scope), name), { recursive: true, force: true });
+  await rm(join(skillsDir(repoDir, undefined, scope), name), { recursive: true, force: true });
   if (known) {
     delete lock.skills[name];
-    await writeSkillsLock(repoDir, lock, configPath, scope);
+    await writeSkillsLock(repoDir, lock, undefined, scope);
   }
   return known;
 }

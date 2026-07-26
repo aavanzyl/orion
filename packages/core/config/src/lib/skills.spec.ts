@@ -145,7 +145,7 @@ describe('resolveSkills / materializeSkills', () => {
       expect(names).toEqual(['conventional-commits']);
 
       const skill = await readFile(
-        join(worktree, '.orion', 'skills', 'conventional-commits', 'SKILL.md'),
+        join(worktree, '.agents', 'skills', 'conventional-commits', 'SKILL.md'),
         'utf8',
       );
       expect(skill).toContain('name: conventional-commits');
@@ -181,7 +181,7 @@ describe('resolveSkills / materializeSkills', () => {
       expect(resolved[0].source).toBe('project');
       await materializeSkills(worktree, resolved);
       const skill = await readFile(
-        join(worktree, '.orion', 'skills', 'pr-description', 'SKILL.md'),
+        join(worktree, '.agents', 'skills', 'pr-description', 'SKILL.md'),
         'utf8',
       );
       expect(skill).toContain('# Custom body');

@@ -150,6 +150,8 @@ export interface TicketDetail extends Ticket {
   parent?: Ticket;
   children: Ticket[];
   relations: TicketRelationView[];
+  /** Tickets that reference this ticket as their epic (only populated when type is 'epic'). */
+  epicTickets: Ticket[];
 }
 
 /** A relation to create, expressed from the perspective of the ticket. */
@@ -206,14 +208,22 @@ export interface MoveTicketInput {
   order?: number;
 }
 
+export interface CommentAttachment {
+  name: string;
+  url: string;
+  type: string;
+}
+
 export interface TicketComment {
   id: string;
   ticketId: TicketId;
   body: string;
+  attachments: CommentAttachment[];
   createdAt: string;
 }
 
 export interface CreateTicketCommentInput {
   ticketId: TicketId;
   body: string;
+  attachments?: CommentAttachment[];
 }

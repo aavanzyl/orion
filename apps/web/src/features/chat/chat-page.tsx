@@ -320,7 +320,7 @@ export function ChatPage() {
                       <p className="text-sm font-medium">What can the agent do?</p>
                       <div className="grid grid-cols-2 gap-2 text-left">
                         {[
-                          'Create, view, and manage issues',
+                          'Create, view, and manage tickets',
                           'Answer questions about your codebase',
                           'Execute workflows and automation',
                           'Suggest workflow recommendations',

@@ -1037,7 +1037,7 @@ export function SkillsSection({ projectId, global = true }: SkillsSectionProps) 
             <DialogTitle>Create a skill</DialogTitle>
             <DialogDescription>
               Write a new skill from scratch. The skill will be saved to{' '}
-              {global ? '~/.orion/skills/' : '.orion/skills/'} as a SKILL.md
+              {global ? '~/.agents/skills/' : '.agents/skills/'} as a SKILL.md
               file. You can also ask the chat agent to help write skill
               content — it has access to your project&rsquo;s codebase.
             </DialogDescription>

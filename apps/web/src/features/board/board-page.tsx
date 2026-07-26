@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom';
 import { SettingsIcon, SparklesIcon, HistoryIcon, PlusIcon, WorkflowIcon, XIcon } from 'lucide-react';
 import {
   DndContext,
@@ -39,7 +39,7 @@ import { ACCENT_PRESETS, type AccentKey } from '@/lib/use-branding';
 import { useBoard, useLabels } from './hooks';
 import { BoardSwimlane } from './board-swimlane';
 import { TicketCardView } from './ticket-card';
-import { BoardFilters, EMPTY_FILTERS, isFilterActive, type BoardFilterState } from './board-filters';
+import { BoardFilters, EMPTY_FILTERS, isFilterActive, HIDDEN_SWIMLANE_LIMIT, type BoardFilterState } from './board-filters';
 import { NewTicketSheet } from './new-ticket-sheet';
 import { TicketSheet } from './ticket-sheet';
 import { ApprovalDialog } from './approval-dialog';
@@ -96,6 +96,7 @@ export function BoardPage() {
   const [approvalNodeKey, setApprovalNodeKey] = useState('');
 
   const navigate = useNavigate();
+  const location = useLocation();
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -103,6 +104,16 @@ export function BoardPage() {
     () => board?.swimlanes.flatMap((c) => c.tickets) ?? [],
     [board],
   );
+  const swimlaneKeys = useMemo(
+    () => board?.swimlanes.map((s) => s.key) ?? [],
+    [board],
+  );
+  const originalTicketCounts = useMemo(() => {
+    if (!board) return new Map<string, number>();
+    const map = new Map<string, number>();
+    for (const s of board.swimlanes) map.set(s.key, s.tickets.length);
+    return map;
+  }, [board]);
   const labelsById = useMemo(() => {
     const map = new Map<string, Label>();
     for (const label of labels) map.set(label.id, label);
@@ -128,23 +139,40 @@ export function BoardPage() {
   }, [board?.issueTypes]);
 
   const filtered = useMemo(() => {
-    if (!board || !isFilterActive(filters)) return board;
+    if (!board) return board;
     const query = filters.search.trim().toLowerCase();
-    const matches = (ticket: Ticket): boolean => {
-      if (query) {
-        const haystack = `${ticket.title} ${ticket.description}`.toLowerCase();
-        if (!haystack.includes(query)) return false;
+    const hasContentFilters = isFilterActive(filters);
+
+    let swimlanes = board.swimlanes;
+
+    if (hasContentFilters) {
+      swimlanes = swimlanes.map((c) => {
+        const tickets = c.tickets.filter((ticket) => {
+          if (query) {
+            const haystack = `${ticket.title} ${ticket.description}`.toLowerCase();
+            if (!haystack.includes(query)) return false;
+          }
+          if (filters.priority !== 'all' && ticket.priority !== filters.priority) return false;
+          if (filters.labelIds.length > 0 && !filters.labelIds.every((id) => ticket.labelIds.includes(id))) {
+            return false;
+          }
+          return true;
+        });
+        return { ...c, tickets };
+      });
+    }
+
+    swimlanes = swimlanes.map((c) => {
+      if (filters.hiddenSwimlanes.includes(c.key)) {
+        const sorted = [...c.tickets].sort(
+          (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+        );
+        return { ...c, tickets: sorted.slice(0, HIDDEN_SWIMLANE_LIMIT) };
       }
-      if (filters.priority !== 'all' && ticket.priority !== filters.priority) return false;
-      if (filters.labelIds.length > 0 && !filters.labelIds.every((id) => ticket.labelIds.includes(id))) {
-        return false;
-      }
-      return true;
-    };
-    return {
-      ...board,
-      swimlanes: board.swimlanes.map((c) => ({ ...c, tickets: c.tickets.filter(matches) })),
-    };
+      return c;
+    });
+
+    return { ...board, swimlanes };
   }, [board, filters]);
 
   useEffect(() => {
@@ -159,6 +187,19 @@ export function BoardPage() {
       setActiveTicket(detail);
     }).catch(() => undefined);
   }, [searchParams, allTickets]);
+
+  useEffect(() => {
+    if (projectId && location.pathname === '/') {
+      navigate(`/projects/${projectId}${location.search}`, { replace: true });
+    }
+  }, [projectId, location.pathname, location.search, navigate]);
+
+  const handleOpenTicket = useCallback((ticket: Ticket) => {
+    setActiveTicket(ticket);
+    if (searchParams.get('ticket') !== ticket.id) {
+      setSearchParams((prev) => { prev.set('ticket', ticket.id); return prev; }, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   useBoardStream(projectId, () => {
     void refetchBoard();
@@ -291,7 +332,7 @@ export function BoardPage() {
         <div className="flex items-center gap-2">
           {board && (
             <>
-              <BoardFilters filters={filters} labels={labels} onChange={setFilters} />
+              <BoardFilters filters={filters} labels={labels} swimlaneKeys={swimlaneKeys} onChange={setFilters} />
 
               <Button
                 onClick={() => { setNewTicketSwimlane(undefined); setNewTicketOpen(true); }}
@@ -379,11 +420,12 @@ export function BoardPage() {
                   swimlane={swimlane}
                   labelsById={labelsById}
                   ticketsById={ticketsById}
-                  onOpenTicket={setActiveTicket}
+                  onOpenTicket={handleOpenTicket}
                   onAddTicket={handleAddTicketToSwimlane}
                   sortBy={sortModes[swimlane.key] ?? 'order'}
                   onSortChange={handleSortChange}
                   waitingRuns={board.waitingRuns}
+                  truncatedFrom={originalTicketCounts.get(swimlane.key)}
                   onReview={(runId, nodeKey) => {
                     setApprovalRunId(runId);
                     setApprovalNodeKey(nodeKey);

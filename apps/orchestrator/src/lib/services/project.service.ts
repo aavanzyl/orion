@@ -160,44 +160,44 @@ export class ProjectService {
 
   /** The project's skill catalog: built-in defaults plus installed skills. */
   async listSkills(project: Project): Promise<SkillCatalogEntry[]> {
-    const configRoot = await this.workspaces.resolveConfigRoot(project);
-    return listSkillCatalog(configRoot, project.configPath);
+    const repoRoot = await this.workspaces.resolveSkillRoot(project);
+    return listSkillCatalog(repoRoot);
   }
 
   /** Get the full details and content of a single skill. */
   async getSkill(project: Project, name: string): Promise<SkillDetail | null> {
-    const configRoot = await this.workspaces.resolveConfigRoot(project);
-    return getSkillDetail(configRoot, name, project.configPath);
+    const repoRoot = await this.workspaces.resolveSkillRoot(project);
+    return getSkillDetail(repoRoot, name);
   }
 
-  /** Install a skill from a GitHub repository into the project's `.orion/`. */
+  /** Install a skill from a GitHub repository into the project's `.agents/`. */
   async installSkill(project: Project, input: InstallSkillInput): Promise<InstallSkillResult> {
-    const configRoot = await this.workspaces.resolveConfigRoot(project);
+    const repoRoot = await this.workspaces.resolveSkillRoot(project);
     return installSkillFromGitHub({
       ...input,
-      repoDir: configRoot,
+      repoDir: repoRoot,
       configPath: project.configPath,
       scope: input.scope ?? 'project',
       token: this.c.env.githubToken,
     });
   }
 
-  /** Remove an installed skill from the project's `.orion/`. */
+  /** Remove an installed skill from the project's `.agents/`. */
   async uninstallSkill(project: Project, name: string): Promise<boolean> {
-    const configRoot = await this.workspaces.resolveConfigRoot(project);
-    return uninstallSkill(configRoot, name, project.configPath, 'project');
+    const repoRoot = await this.workspaces.resolveSkillRoot(project);
+    return uninstallSkill(repoRoot, name, project.configPath, 'project');
   }
 
   /** Update metadata (tags, syncEnabled) for an installed skill. */
   async updateSkill(project: Project, name: string, updates: UpdateSkillInput): Promise<SkillLockEntry | null> {
-    const configRoot = await this.workspaces.resolveConfigRoot(project);
-    return updateSkillLockEntry(configRoot, name, updates, project.configPath, 'project');
+    const repoRoot = await this.workspaces.resolveSkillRoot(project);
+    return updateSkillLockEntry(repoRoot, name, updates, project.configPath, 'project');
   }
 
   /** Sync an installed skill from its source repository. */
   async syncSkill(project: Project, name: string): Promise<SyncSkillResult> {
-    const configRoot = await this.workspaces.resolveConfigRoot(project);
-    return syncSkill(configRoot, name, project.configPath, 'project', this.c.env.githubToken);
+    const repoRoot = await this.workspaces.resolveSkillRoot(project);
+    return syncSkill(repoRoot, name, project.configPath, 'project', this.c.env.githubToken);
   }
 
   /** Find workflow nodes that reference a given skill. */
@@ -206,10 +206,10 @@ export class ProjectService {
     return findSkillReferences(configRoot, name, project.configPath);
   }
 
-  /** Create a new local skill under the project's `.orion/skills/` directory. */
+  /** Create a new local skill under the project's `.agents/skills/` directory. */
   async createSkill(project: Project, name: string, description: string, content: string): Promise<void> {
-    const configRoot = await this.workspaces.resolveConfigRoot(project);
-    await createSkill(configRoot, name, description, content, project.configPath, 'project');
+    const repoRoot = await this.workspaces.resolveSkillRoot(project);
+    await createSkill(repoRoot, name, description, content, project.configPath, 'project');
   }
 
   /** Update an existing local skill's body content, preserving its frontmatter. */
@@ -220,7 +220,7 @@ export class ProjectService {
     newName?: string,
     newDescription?: string,
   ): Promise<void> {
-    const configRoot = await this.workspaces.resolveConfigRoot(project);
-    await updateSkillContent(configRoot, name, content, project.configPath, 'project', newName, newDescription);
+    const repoRoot = await this.workspaces.resolveSkillRoot(project);
+    await updateSkillContent(repoRoot, name, content, project.configPath, 'project', newName, newDescription);
   }
 }

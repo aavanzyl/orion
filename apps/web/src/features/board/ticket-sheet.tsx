@@ -294,8 +294,7 @@ export function TicketSheet({
 
   const copyIssueLink = () => {
     if (!ticket) return;
-    const url = `${window.location.origin}/issues/${ticket.id}`;
-    console.log(url);
+    const url = `${window.location.origin}/projects/${ticket.projectId}?ticket=${ticket.id}`;
     copyToClipboard(url).then(() => {
       toast.success('Link copied');
     }).catch(() => {
@@ -585,7 +584,7 @@ export function TicketSheet({
                 <Separator />
 
                 <div className="flex flex-col gap-1.5">
-                  <Label className="text-xs text-muted-foreground">Sub-issues</Label>
+                  <Label className="text-xs text-muted-foreground">Sub-tickets</Label>
                   {detail && detail.children.length > 0 && (
                     <div className="flex flex-col gap-1">
                       {detail.children.map((child) => (
@@ -614,6 +613,22 @@ export function TicketSheet({
                     </Button>
                   </div>
                 </div>
+
+                {detail && detail.type === 'epic' && detail.epicTickets && detail.epicTickets.length > 0 ? (
+                  <div className="flex flex-col gap-1.5">
+                    <Label className="text-xs text-muted-foreground">Tickets ({detail.epicTickets.length})</Label>
+                    <div className="flex flex-col gap-1">
+                      {detail.epicTickets.map((et) => (
+                        <div key={et.id} className="rounded-md border px-2 py-1 text-sm">
+                          {et.displayKey && (
+                            <span className="text-muted-foreground text-xs mr-1">{et.displayKey}</span>
+                          )}
+                          {et.title}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </>
             ) : (
               <>
@@ -716,9 +731,25 @@ export function TicketSheet({
                           </div>
                         ) : null}
 
+                        {detail && detail.type === 'epic' && detail.epicTickets && detail.epicTickets.length > 0 ? (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-muted-foreground">Tickets ({detail.epicTickets.length})</span>
+                            <div className="flex flex-col gap-1">
+                              {detail.epicTickets.map((et) => (
+                                <div key={et.id} className="rounded-md border px-2 py-1 text-sm">
+                                  {et.displayKey && (
+                                    <span className="text-muted-foreground text-xs mr-1">{et.displayKey}</span>
+                                  )}
+                                  {et.title}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
                         {detail && detail.children.length > 0 ? (
                           <div className="flex flex-col gap-1">
-                            <span className="text-xs text-muted-foreground">Sub-issues</span>
+                            <span className="text-xs text-muted-foreground">Sub-tickets</span>
                             <div className="flex flex-col gap-1">
                               {detail.children.map((child) => (
                                 <div key={child.id} className="rounded-md border px-2 py-1 text-sm">

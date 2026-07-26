@@ -20,7 +20,7 @@ import {
   CalendarIcon,
   NetworkIcon,
 } from 'lucide-react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
@@ -59,7 +59,7 @@ const PROJECT_SECTIONS: NavSection[] = [
     title: 'Work',
     items: [
       { to: '/', label: 'Board', icon: LayoutDashboardIcon, end: true, description: 'Kanban board with drag-and-drop' },
-      { to: '/issues', label: 'Issues', icon: TicketIcon, description: 'Search and filter all tickets' },
+      { to: '/tickets', label: 'Tickets', icon: TicketIcon, description: 'Search and filter all tickets' },
       { to: '/timeline', label: 'Timeline', icon: CalendarIcon, description: 'Project timeline with due dates' },
       { to: '/chat', label: 'Chat', icon: MessagesSquareIcon, description: 'Chat with your AI agents' },
     ],
@@ -164,6 +164,8 @@ export function AppLayout() {
   const { collapsed, toggle } = useSidebar();
   const { projectId, setProjectId } = useProjectContext();
   const { projects } = useProjects();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
     document.title = branding.title;
@@ -254,7 +256,17 @@ export function AppLayout() {
               <div className="px-3 pt-3 pb-1">
                 <Select
                   value={projectId ?? ''}
-                  onValueChange={(value) => setProjectId(value || null)}
+                  onValueChange={(value) => {
+                    setProjectId(value || null);
+                    if (value) {
+                      const path = location.pathname;
+                      if (path === '/' || path.startsWith('/projects/')) {
+                        const match = path.match(/^\/projects\/[^/]+(\/.*)?$/);
+                        const suffix = match ? (match[1] ?? '') : '';
+                        navigate(`/projects/${value}${suffix}${location.search}`, { replace: true });
+                      }
+                    }
+                  }}
                 >
                   <SelectTrigger className="h-9 w-full text-sm">
                     <FolderKanbanIcon className="size-3.5 shrink-0 text-muted-foreground" />

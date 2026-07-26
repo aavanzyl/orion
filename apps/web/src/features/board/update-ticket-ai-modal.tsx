@@ -99,6 +99,7 @@ export function UpdateTicketAiModal({
       if (result.type) input.type = result.type;
       if (result.priority !== undefined) input.priority = result.priority as import('@orion/models').TicketPriority;
       if (result.labelIds) input.labelIds = result.labelIds;
+      if (result.epicId !== undefined) input.epicId = result.epicId;
       if (Object.keys(input).length > 0) {
         await api.updateTicket(ticketId, input);
       }
@@ -123,6 +124,7 @@ export function UpdateTicketAiModal({
     if (result.type) changedFields.push('Type');
     if (result.priority !== undefined) changedFields.push('Priority');
     if (result.labelIds) changedFields.push('Labels');
+    if (result.epicId !== undefined) changedFields.push('Epic');
   }
 
   return (
@@ -218,6 +220,14 @@ export function UpdateTicketAiModal({
                   <div>
                     <Label className={`text-[11px] ${labelMuted}`}>Updated labels</Label>
                     <span className={`text-xs ${labelMuted}`}>{result.labelIds.length} label(s)</span>
+                  </div>
+                )}
+                {result.epicId !== undefined && (
+                  <div>
+                    <Label className={`text-[11px] ${labelMuted}`}>Epic</Label>
+                    <Badge variant="outline" className={`mt-0.5 ${badgeOutline}`}>
+                      {result.epicId === null ? 'Removed' : 'Assigned'}
+                    </Badge>
                   </div>
                 )}
                 {changedFields.length === 0 && (

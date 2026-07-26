@@ -42,7 +42,7 @@ export class HarnessTextGenerator implements AgentTextGenerator {
   ) {}
 
   async generate(input: AgentTextRequest): Promise<string> {
-    const { harnessKey, baseUrl } = await this.resolveProvider(input.provider);
+    const { harnessKey, baseUrl, promptPrice, completionPrice } = await this.resolveProvider(input.provider);
     if (!harnessKey) {
       throw new Error('no harness provider available to generate content');
     }
@@ -54,13 +54,17 @@ export class HarnessTextGenerator implements AgentTextGenerator {
       baseUrl,
       apiKey,
       signal: input.signal,
+      promptPrice,
+      completionPrice,
     });
     return result.finalResponse.trim();
   }
 
-  private async resolveProvider(provider?: string): Promise<{ harnessKey?: string; baseUrl?: string }> {
+  private async resolveProvider(provider?: string): Promise<{ harnessKey?: string; baseUrl?: string; promptPrice?: number; completionPrice?: number }> {
     let harnessKey: string | undefined;
     let baseUrl: string | undefined;
+    let promptPrice: number | undefined;
+    let completionPrice: number | undefined;
 
     if (provider) {
       if (this.harnesses.has(provider)) {
@@ -68,8 +72,13 @@ export class HarnessTextGenerator implements AgentTextGenerator {
         baseUrl = provider === 'codex' ? this.env.codexBaseUrl
           : provider === 'claude' ? this.env.claudeBaseUrl
           : undefined;
+        const dbProvider = await this.resolveDbProvider(provider);
+        promptPrice = dbProvider?.promptPrice;
+        completionPrice = dbProvider?.completionPrice;
       } else {
         const dbProvider = await this.resolveDbProvider(provider);
+        promptPrice = dbProvider?.promptPrice;
+        completionPrice = dbProvider?.completionPrice;
         if (dbProvider?.harness && this.harnesses.has(dbProvider.harness)) {
           harnessKey = dbProvider.harness;
           baseUrl = dbProvider.baseUrl
@@ -86,7 +95,7 @@ export class HarnessTextGenerator implements AgentTextGenerator {
       }
     }
 
-    return { harnessKey, baseUrl };
+    return { harnessKey, baseUrl, promptPrice, completionPrice };
   }
 
   private async resolveDbProvider(providerKey: string) {

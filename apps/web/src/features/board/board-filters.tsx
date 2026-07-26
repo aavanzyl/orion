@@ -19,16 +19,20 @@ import {
 import { cn } from '@/lib/utils';
 import { PRIORITY_META } from './priority';
 
+export const HIDDEN_SWIMLANE_LIMIT = 5;
+
 export interface BoardFilterState {
   search: string;
   priority: TicketPriority | 'all';
   labelIds: string[];
+  hiddenSwimlanes: string[];
 }
 
 export const EMPTY_FILTERS: BoardFilterState = {
   search: '',
   priority: 'all',
   labelIds: [],
+  hiddenSwimlanes: ['done'],
 };
 
 export function isFilterActive(f: BoardFilterState): boolean {
@@ -38,10 +42,11 @@ export function isFilterActive(f: BoardFilterState): boolean {
 interface BoardFiltersProps {
   filters: BoardFilterState;
   labels: LabelModel[];
+  swimlaneKeys: string[];
   onChange: (filters: BoardFilterState) => void;
 }
 
-export function BoardFilters({ filters, labels, onChange }: BoardFiltersProps) {
+export function BoardFilters({ filters, labels, swimlaneKeys, onChange }: BoardFiltersProps) {
   const [open, setOpen] = useState(false);
 
   const toggleLabel = (id: string) => {
@@ -51,7 +56,14 @@ export function BoardFilters({ filters, labels, onChange }: BoardFiltersProps) {
     onChange({ ...filters, labelIds: next });
   };
 
-  const filterActiveCount = (filters.priority !== 'all' ? 1 : 0) + filters.labelIds.length;
+  const toggleSwimlane = (key: string) => {
+    const next = filters.hiddenSwimlanes.includes(key)
+      ? filters.hiddenSwimlanes.filter((s) => s !== key)
+      : [...filters.hiddenSwimlanes, key];
+    onChange({ ...filters, hiddenSwimlanes: next });
+  };
+
+  const filterActiveCount = (filters.priority !== 'all' ? 1 : 0) + filters.labelIds.length + filters.hiddenSwimlanes.length;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -135,12 +147,39 @@ export function BoardFilters({ filters, labels, onChange }: BoardFiltersProps) {
               </div>
             )}
 
+            {swimlaneKeys.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Status</span>
+                <div className="flex flex-wrap gap-1">
+                  {swimlaneKeys.map((key) => {
+                    const active = !filters.hiddenSwimlanes.includes(key);
+                    const title = titleizeKey(key);
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => toggleSwimlane(key)}
+                        className={cn(
+                          'rounded-full border px-2 py-0.5 text-xs transition-colors',
+                          active
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'text-muted-foreground hover:bg-muted',
+                        )}
+                      >
+                        {title}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {filterActiveCount > 0 && (
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  onChange({ ...filters, priority: 'all', labelIds: [] });
+                  onChange(EMPTY_FILTERS);
                   setOpen(false);
                 }}
                 className="h-7"
@@ -161,4 +200,12 @@ export function BoardFilters({ filters, labels, onChange }: BoardFiltersProps) {
       )}
     </div>
   );
+}
+
+function titleizeKey(key: string): string {
+  return key
+    .split(/[_\-\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }

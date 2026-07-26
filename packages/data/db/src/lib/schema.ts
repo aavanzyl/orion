@@ -27,6 +27,10 @@ export const providers = pgTable('providers', {
   apiKey: text('api_key'),
   /** Model identifiers available for this provider. */
   models: jsonb('models').$type<string[]>().notNull().default([]),
+  /** Custom input/prompt price in USD per 1M tokens. Overrides SDK-reported cost. */
+  promptPrice: doublePrecision('prompt_price'),
+  /** Custom output/completion price in USD per 1M tokens. Overrides SDK-reported cost. */
+  completionPrice: doublePrecision('completion_price'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -403,5 +407,43 @@ export const ticketComments = pgTable('ticket_comments', {
     .notNull()
     .references(() => tickets.id, { onDelete: 'cascade' }),
   body: text('body').notNull(),
+  attachments: jsonb('attachments').$type<Array<{ name: string; url: string; type: string }>>().notNull().default([]),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Embedded chunks of ticket content for semantic search (title + description). */
+export const ticketChunks = pgTable(
+  'ticket_chunks',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    ticketId: uuid('ticket_id')
+      .notNull()
+      .references(() => tickets.id, { onDelete: 'cascade' }),
+    chunkIndex: integer('chunk_index').notNull(),
+    content: text('content').notNull(),
+    embedding: jsonb('embedding').$type<number[]>().notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('ticket_chunks_project_id_idx').on(table.projectId)],
+);
+
+/** Status + metadata of a project's ticket semantic index (one row per project). */
+export const ticketIndexes = pgTable('ticket_indexes', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id')
+    .notNull()
+    .unique()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('idle'),
+  provider: text('provider').notNull().default(''),
+  dimensions: integer('dimensions').notNull().default(0),
+  ticketCount: integer('ticket_count').notNull().default(0),
+  chunkCount: integer('chunk_count').notNull().default(0),
+  error: text('error'),
+  lastIndexedAt: timestamp('last_indexed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
