@@ -61,6 +61,7 @@ workflow:
       type: approval
       dependsOn: [verify]
       swimlane: review
+      onFailureTransitionTo: verify
 
     - id: open_pr
       type: scm

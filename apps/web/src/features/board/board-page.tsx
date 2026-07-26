@@ -42,6 +42,7 @@ import { TicketCardView } from './ticket-card';
 import { BoardFilters, EMPTY_FILTERS, isFilterActive, type BoardFilterState } from './board-filters';
 import { NewTicketSheet } from './new-ticket-sheet';
 import { TicketSheet } from './ticket-sheet';
+import { ApprovalDialog } from './approval-dialog';
 import { CreateTicketAiModal } from './create-ticket-ai-modal';
 import { useBoardStream } from '@/lib/use-board-stream';
 
@@ -89,6 +90,10 @@ export function BoardPage() {
 
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiPrefill, setAiPrefill] = useState<AgentTicketPreviewResponse | null>(null);
+
+  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
+  const [approvalRunId, setApprovalRunId] = useState('');
+  const [approvalNodeKey, setApprovalNodeKey] = useState('');
 
   const navigate = useNavigate();
 
@@ -378,6 +383,12 @@ export function BoardPage() {
                   onAddTicket={handleAddTicketToSwimlane}
                   sortBy={sortModes[swimlane.key] ?? 'order'}
                   onSortChange={handleSortChange}
+                  waitingRuns={board.waitingRuns}
+                  onReview={(runId, nodeKey) => {
+                    setApprovalRunId(runId);
+                    setApprovalNodeKey(nodeKey);
+                    setApprovalDialogOpen(true);
+                  }}
                 />
               ))}
             </div>
@@ -413,6 +424,14 @@ export function BoardPage() {
         }}
         onChanged={refetchBoard}
         onMoveTicket={async (ticketId, swimlane, force) => { await moveTicket(ticketId, swimlane, undefined, force); }}
+      />
+
+      <ApprovalDialog
+        open={approvalDialogOpen}
+        onOpenChange={setApprovalDialogOpen}
+        runId={approvalRunId}
+        nodeKey={approvalNodeKey}
+        onResolved={refetchBoard}
       />
 
       <Dialog open={conflict !== null} onOpenChange={() => setConflict(null)}>

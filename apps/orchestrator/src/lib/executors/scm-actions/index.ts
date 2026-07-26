@@ -1,6 +1,8 @@
 import type { ScmAction } from './types.js';
 import { checkoutBranch } from './checkout-branch.js';
+import { commit } from './commit.js';
 import { openPullRequest } from './open-pull-request.js';
+import { push } from './push.js';
 import { tagRelease } from './tag-release.js';
 import { merge } from './merge.js';
 import { review } from './review.js';
@@ -11,7 +13,9 @@ import { review } from './review.js';
  */
 export const SCM_ACTIONS: Record<string, ScmAction> = {
   checkout_branch: checkoutBranch,
+  commit: commit,
   open_pull_request: openPullRequest,
+  push: push,
   tag_release: tagRelease,
   merge: merge,
   review: review,

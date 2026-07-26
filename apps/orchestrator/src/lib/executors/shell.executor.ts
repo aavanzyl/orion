@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { renderTemplate } from '@orion/config';
 import type { NodeExecutor, NodeExecutionContext, NodeOutcome } from '@orion/workflow-engine';
@@ -17,9 +18,13 @@ export class ShellNodeExecutor implements NodeExecutor {
     const variables: Record<string, string> = {};
     let scope: Record<string, unknown> | undefined;
     const script = renderTemplate(rawScript, variables, ctx.nodeOutputs, scope);
+    if (!ctx.nodeConfig.workingDirectory) {
+      return { status: 'failed', error: 'shell node has no workingDirectory' };
+    }
+    const cwd = resolve(ctx.workspace.rootPath, ctx.nodeConfig.workingDirectory);
     try {
       const { stdout, stderr } = await execFileAsync('sh', ['-c', script], {
-        cwd: ctx.workspace.rootPath,
+        cwd,
         maxBuffer: 1024 * 1024 * 32,
         signal: ctx.signal,
       });

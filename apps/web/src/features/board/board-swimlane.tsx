@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { EllipsisVerticalIcon, PlusIcon, ArrowUpDownIcon, ChevronRightIcon } from 'lucide-react';
-import type { BoardSwimlane, Label, Ticket } from '@orion/models';
+import type { BoardSwimlane, Label, Ticket, WaitingRunInfo } from '@orion/models';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,6 +20,8 @@ interface BoardSwimlaneProps {
   onAddTicket: (swimlane: string) => void;
   sortBy: 'order' | 'priority' | 'created' | 'due';
   onSortChange: (swimlane: string, sort: 'order' | 'priority' | 'created' | 'due') => void;
+  waitingRuns?: Record<string, WaitingRunInfo>;
+  onReview?: (runId: string, nodeKey: string) => void;
 }
 
 const SORT_LABELS: Record<string, string> = {
@@ -44,6 +46,8 @@ export function BoardSwimlane({
   onAddTicket,
   sortBy,
   onSortChange,
+  waitingRuns,
+  onReview,
 }: BoardSwimlaneProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -131,6 +135,8 @@ export function BoardSwimlane({
                 labelsById={labelsById}
                 ticketsById={ticketsById}
                 onOpen={onOpenTicket}
+                waitingRun={waitingRuns?.[ticket.id]}
+                onReview={onReview}
               />
             ))}
             {sortedTickets.length === 0 && (

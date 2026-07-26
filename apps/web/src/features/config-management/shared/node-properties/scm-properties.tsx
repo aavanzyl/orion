@@ -102,6 +102,40 @@ export function ScmProperties({ data, onChange }: NodeTypeEditorProps) {
         </>
       )}
 
+      {data.action === 'commit' && (
+        <>
+          <Separator />
+          <div className="flex flex-col gap-1.5">
+            <FieldLabel>Commit message</FieldLabel>
+            <Input
+              value={configString(config, 'message')}
+              onChange={(e) => setConfigValue('message', e.target.value)}
+              placeholder="fix: describe the change"
+            />
+            <FieldHint>
+              Stage and commit all pending changes in every workspace repo. Supports template variables.
+            </FieldHint>
+          </div>
+        </>
+      )}
+
+      {data.action === 'push' && (
+        <>
+          <Separator />
+          <div className="flex flex-col gap-1.5">
+            <FieldLabel>Branch</FieldLabel>
+            <Input
+              value={configString(config, 'branch')}
+              onChange={(e) => setConfigValue('branch', e.target.value)}
+              placeholder="current repo branch"
+            />
+            <FieldHint>
+              Branch to push (defaults to the current branch for each repo). Supports template variables.
+            </FieldHint>
+          </div>
+        </>
+      )}
+
       {data.action === 'open_pull_request' && (
         <>
           <Separator />

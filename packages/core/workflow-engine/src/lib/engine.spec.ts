@@ -78,6 +78,11 @@ const workspace = {
 };
 
 function config(nodes: ProjectConfig['workflow']['nodes']): ProjectConfig {
+  for (const node of nodes) {
+    if (node.type === 'shell' && !node.workingDirectory) {
+      node.workingDirectory = '.';
+    }
+  }
   return {
     project: { name: 'p', defaultBranch: 'main' },
     board: { swimlanes: ['todo', 'doing', 'done'] },

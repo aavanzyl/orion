@@ -118,6 +118,9 @@ export class GitHubScmProvider implements ScmProvider {
       await git(repoPath, [...identity, 'commit', '--allow-empty', '-m', 'Initial commit']);
     }
 
+    // Prune stale worktree registrations so recovery restarts can re-create them.
+    await git(repoPath, ['worktree', 'prune']).catch(() => undefined);
+
     await git(repoPath, ['worktree', 'add', '-b', options.branch, worktreePath, options.base]);
 
     return {

@@ -33,6 +33,7 @@ workflows:
     nodes:
       - id: fix
         type: shell
+        workingDirectory: '.'
         script: 'echo fixing'
 
 workflow:
@@ -259,9 +260,11 @@ workflow:
   nodes:
     - id: step-one
       type: shell
+      workingDirectory: '.'
       script: 'echo "ok"'
     - id: step-two
       type: shell
+      workingDirectory: '.'
       script: 'exit 1'
       dependsOn: [step-one]
 `;
@@ -363,15 +366,17 @@ board:
 workflow:
   name: default
   nodes:
-    - id: step-one
-      type: shell
-      script: 'echo "ok"'
-      column: in_progress
-    - id: step-two
-      type: shell
-      script: 'echo "ok"'
-      dependsOn: [step-one]
-      column: done
+     - id: step-one
+       type: shell
+       workingDirectory: '.'
+       script: 'echo "ok"'
+       column: in_progress
+     - id: step-two
+       type: shell
+       workingDirectory: '.'
+       script: 'echo "ok"'
+       dependsOn: [step-one]
+       column: done
 `;
     const rootPath = await seedProjectRepo({}, configYaml);
     await initGitRepo(rootPath);

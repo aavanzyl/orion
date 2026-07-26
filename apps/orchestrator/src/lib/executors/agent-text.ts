@@ -23,6 +23,8 @@ interface AgentTextRequest {
   provider?: string;
   /** Optional model override. */
   model?: string;
+  /** Optional API key override; supersedes provider-resolved and env keys. */
+  apiKey?: string;
   /** Abort signal to cancel the turn. */
   signal?: AbortSignal;
 }
@@ -45,7 +47,7 @@ export class HarnessTextGenerator implements AgentTextGenerator {
       throw new Error('no harness provider available to generate content');
     }
     const harnessInstance = this.harnesses.get(harnessKey);
-    const apiKey = await this.resolveApiKey(harnessKey);
+    const apiKey = input.apiKey ?? (await this.resolveApiKey(harnessKey));
     const result = await harnessInstance.run(input.prompt, {
       workingDirectory: input.workingDirectory,
       model: input.model,

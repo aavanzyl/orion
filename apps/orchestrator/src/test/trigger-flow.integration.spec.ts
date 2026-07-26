@@ -84,6 +84,7 @@ workflows:
     nodes:
       - id: fix
         type: shell
+        workingDirectory: '.'
         script: 'echo fix'
         swimlane: investigating
   feature-flow:
@@ -91,6 +92,7 @@ workflows:
     nodes:
       - id: build
         type: shell
+        workingDirectory: '.'
         script: 'echo build'
         swimlane: building
 workflow:
@@ -98,6 +100,7 @@ workflow:
   nodes:
     - id: implement
       type: shell
+      workingDirectory: '.'
       script: 'echo implement'
 `;
 

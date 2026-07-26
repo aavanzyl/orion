@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,12 +7,13 @@ import { ShellNodeExecutor } from './shell.executor.js';
 
 function makeCtx(
   script: string | undefined,
+  workingDirectory: string | undefined,
   rootPath: string,
   nodeOutputs: Record<string, unknown> = {},
 ): { ctx: NodeExecutionContext; emit: ReturnType<typeof vi.fn> } {
   const emit = vi.fn(async () => undefined);
   const ctx = {
-    nodeConfig: { id: 'sh', type: 'shell', script },
+    nodeConfig: { id: 'sh', type: 'shell', script, workingDirectory },
     workspace: { rootPath, configRoot: rootPath, repos: [] },
     nodeOutputs,
     emit,
@@ -33,13 +34,21 @@ describe('ShellNodeExecutor', () => {
   });
 
   it('fails when the node has no script', async () => {
-    const { ctx } = makeCtx(undefined, cwd);
+    const { ctx } = makeCtx(undefined, '.', cwd);
     const outcome = await executor.execute(ctx);
     expect(outcome.status).toBe('failed');
+    expect(outcome.status === 'failed' && outcome.error).toContain('script');
+  });
+
+  it('fails when the node has no working directory', async () => {
+    const { ctx } = makeCtx('echo hi', undefined, cwd);
+    const outcome = await executor.execute(ctx);
+    expect(outcome.status).toBe('failed');
+    expect(outcome.status === 'failed' && outcome.error).toContain('workingDirectory');
   });
 
   it('runs a script and returns stdout', async () => {
-    const { ctx, emit } = makeCtx('echo hello', cwd);
+    const { ctx, emit } = makeCtx('echo hello', '.', cwd);
     const outcome = await executor.execute(ctx);
     expect(outcome.status).toBe('completed');
     if (outcome.status === 'completed') {
@@ -49,8 +58,19 @@ describe('ShellNodeExecutor', () => {
   });
 
   it('returns failed when the command exits non-zero', async () => {
-    const { ctx } = makeCtx('exit 3', cwd);
+    const { ctx } = makeCtx('exit 3', '.', cwd);
     const outcome = await executor.execute(ctx);
     expect(outcome.status).toBe('failed');
+  });
+
+  it('runs a script in the configured working directory', async () => {
+    await mkdir(join(cwd, 'subdir'));
+    const { ctx, emit } = makeCtx('pwd', 'subdir', cwd);
+    const outcome = await executor.execute(ctx);
+    expect(outcome.status).toBe('completed');
+    if (outcome.status === 'completed') {
+      expect((outcome.output as { stdout: string }).stdout).toContain('subdir');
+    }
+    expect(emit).toHaveBeenCalled();
   });
 });

@@ -31,6 +31,8 @@ export interface NodeData {
   /** For `scm` open_pull_request and `message` nodes: draft content with an agent. */
   agentGenerated?: boolean;
   script?: string;
+  /** Working directory for `shell` nodes, relative to the workspace root. */
+  workingDirectory?: string;
   /** For `message` nodes: deliver as a notification or a ticket comment. */
   messageTarget?: MessageTarget;
   message?: string;
@@ -103,7 +105,9 @@ export const NODE_TYPE_DESCRIPTIONS: Record<EditableNodeType, string> = {
 /** SCM actions the engine currently supports for `scm` nodes. */
 export const SCM_ACTIONS = [
   'checkout_branch',
+  'commit',
   'open_pull_request',
+  'push',
   'tag_release',
   'merge',
   'review',
@@ -113,7 +117,9 @@ export type ScmAction = (typeof SCM_ACTIONS)[number];
 /** Human-readable labels for the supported SCM actions. */
 export const SCM_ACTION_LABELS: Record<string, string> = {
   checkout_branch: 'Checkout branch',
+  commit: 'Commit',
   open_pull_request: 'Open pull request',
+  push: 'Push',
   tag_release: 'Tag / release',
   merge: 'Merge pull request',
   review: 'Request review',
@@ -164,6 +170,7 @@ export function nodeConfigToData(node: WorkflowNodeConfig): NodeData {
     action: node.action,
     agentGenerated: node.agentGenerated,
     script: node.script,
+    workingDirectory: node.workingDirectory,
     messageTarget,
     message: node.message,
     level: node.level,
@@ -224,6 +231,7 @@ export function dataToNodeConfig(
     if (data.model?.trim()) node.model = data.model.trim();
   }
   if (isShell && data.script?.trim()) node.script = data.script.trim();
+  if (isShell && data.workingDirectory?.trim()) node.workingDirectory = data.workingDirectory.trim();
   if (isMessage) {
     node.messageTarget = data.messageTarget ?? 'notify';
     if (data.agentGenerated) {
@@ -286,6 +294,9 @@ export function validateNodeData(data: NodeData, id: string): string[] {
   if (data.type === 'shell' && !data.script?.trim()) {
     issues.push(`Node "${label}" is a shell node but has no script.`);
   }
+  if (data.type === 'shell' && !data.workingDirectory?.trim()) {
+    issues.push(`Node "${label}" is a shell node but has no working directory.`);
+  }
   if (data.type === 'message' && !data.agentGenerated && !data.message?.trim()) {
     issues.push(`Node "${label}" is a message node but has no message.`);
   }
@@ -300,6 +311,9 @@ export function validateNodeData(data: NodeData, id: string): string[] {
   if (data.type === 'graphql') {
     if (!data.url?.trim()) issues.push(`Node "${label}" is a graphql node but has no url.`);
     if (!data.query?.trim()) issues.push(`Node "${label}" is a graphql node but has no query.`);
+  }
+  if (data.type === 'approval' && !data.onFailureTransitionTo?.trim()) {
+    issues.push(`Node "${label}" is an approval node but has no on-failure transition target.`);
   }
   return issues;
 }

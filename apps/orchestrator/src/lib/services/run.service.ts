@@ -6,7 +6,11 @@ import {
   type NodeExecutor,
   type RunWorkspace,
 } from '@orion/workflow-engine';
+import { rm } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Container } from '../container.js';
+import { decrypt } from '../crypto.js';
 import { AgentNodeExecutor } from '../executors/agent.executor.js';
 import { ShellNodeExecutor } from '../executors/shell.executor.js';
 import { ApprovalNodeExecutor } from '../executors/approval.executor.js';
@@ -185,13 +189,26 @@ export class RunService {
 
   /** Approve a waiting node and continue the run. */
   async approve(runId: string, nodeKey: string): Promise<WorkflowRun> {
-    const activeRun = this.active.get(runId);
     const run = await this.c.runs.get(runId);
     if (!run) throw new Error(`Run ${runId} not found`);
-    if (!activeRun) {
-      throw new Error(`Run ${runId} is not active in this process and cannot be resumed`);
+    const action = { action: 'approve' as const, nodeKey };
+    if (!this.active.has(runId)) {
+      return this.launch(runId, action);
     }
-    return this.drive(run, activeRun.config, activeRun.workspace, activeRun.controller, nodeKey);
+    const activeRun = this.active.get(runId)!;
+    return this.drive(run, activeRun.config, activeRun.workspace, activeRun.controller, action);
+  }
+
+  /** Reject a waiting node and continue the run (or fail it). */
+  async reject(runId: string, nodeKey: string, reason?: string): Promise<WorkflowRun> {
+    const run = await this.c.runs.get(runId);
+    if (!run) throw new Error(`Run ${runId} not found`);
+    const action = { action: 'reject' as const, nodeKey, reason };
+    if (!this.active.has(runId)) {
+      return this.launch(runId, action);
+    }
+    const activeRun = this.active.get(runId)!;
+    return this.drive(run, activeRun.config, activeRun.workspace, activeRun.controller, action);
   }
 
   /** Cancel a queued or in-flight run. */
@@ -204,6 +221,139 @@ export class RunService {
     await this.cleanup(runId);
     await this.c.runs.update(runId, { status: 'cancelled' });
     await this.emitStatus(runId, 'run.status', { status: 'cancelled' });
+  }
+
+  /** Generate a human-readable summary of the changes in a waiting run,
+   *  using the same provider/model resolution as the chat feature. */
+  async summarizeRun(runId: string): Promise<string> {
+    const run = await this.c.runs.get(runId);
+    if (!run) throw new Error(`Run ${runId} not found`);
+    if (!run.diff) return 'No changes to summarize.';
+
+    const activeRun = this.active.get(runId);
+    const workingDirectory = activeRun?.workspace.rootPath ?? '';
+
+    // Resolve the agent to use — same chain as chat.service.ts resolveChatAgent.
+    let harness: string | undefined;
+    let model: string | undefined;
+
+    try {
+      const project = await this.c.projects.get(run.projectId);
+      if (project) {
+        const configRoot = await this.workspaces.resolveConfigRoot(project);
+        const projectConfig = await loadProjectConfig(configRoot, project.configPath).catch(() => null);
+        if (projectConfig) {
+          const firstAgent = projectConfig.workflow.nodes.find((n) => n.type === 'agent');
+          if (firstAgent) {
+            harness = firstAgent.provider ?? harness;
+            model = firstAgent.model ?? model;
+          }
+        }
+      }
+    } catch {
+      // Project config may not be available — continue with defaults.
+    }
+
+    try {
+      const settings = await this.c.settings.get();
+      const defaults = settings.preferences?.agentDefaults ?? {};
+      if (defaults.providerId) {
+        const configured = await this.c.providers.get(defaults.providerId).catch(() => null);
+        if (configured) {
+          harness = configured.harness ?? harness;
+          model = configured.models[0] ?? undefined;
+        }
+      }
+      if (defaults.harness) harness = defaults.harness;
+      if (defaults.model) model = defaults.model;
+    } catch {
+      // Settings may not be available.
+    }
+
+    const resolvedHarness = harness ?? this.c.harnesses.keys()[0];
+    if (!resolvedHarness) return 'Unable to generate summary (no agent provider configured).';
+
+    const resolvedModel = model ?? 'gpt-5-codex';
+
+    console.log(`[ orion orchestrator ] summarizing run ${runId} → harness=${resolvedHarness} model=${resolvedModel}`);
+
+    const prompt = [
+      'You are reviewing the output of an automated workflow run.',
+      'Below is a git diff of all changes made. Write a concise summary (2-4 sentences)',
+      'describing what was implemented, what files were changed, and the purpose of the changes.',
+      'Focus on the intent and impact, not low-level line-by-line details.',
+      '',
+      '```diff',
+      run.diff.slice(0, 8000),
+      '```',
+    ].join('\n');
+
+    try {
+      const harnessInstance = this.c.harnesses.get(resolvedHarness);
+
+      let effectiveBaseUrl: string | undefined;
+      let effectiveApiKey: string | undefined;
+
+      // Resolve apiKey and baseUrl from the DB provider matching this harness.
+      const allProviders = await this.c.providers.list().catch(() => []);
+      const matching = allProviders.find((p) => p.harness === resolvedHarness);
+      if (matching) {
+        effectiveBaseUrl = matching.baseUrl;
+        const stored = await this.c.providers.getApiKey(matching.id).catch(() => null);
+        if (stored) {
+          effectiveApiKey = this.c.env.providerEncryptionSalt
+            ? decrypt(stored, this.c.env.providerEncryptionSalt)
+            : stored;
+        }
+      }
+
+      // Fallback to env vars, matching chat.service.ts resolveChatAgent.
+      effectiveBaseUrl = effectiveBaseUrl ?? this.c.env.codexBaseUrl;
+      effectiveApiKey = effectiveApiKey ?? this.c.env.codexApiKey ?? this.c.env.claudeApiKey;
+
+      const stream = harnessInstance.runStreamed(prompt, {
+        workingDirectory,
+        model: resolvedModel,
+        baseUrl: effectiveBaseUrl,
+        apiKey: effectiveApiKey,
+      });
+
+      let finalResponse = '';
+      for await (const event of stream) {
+        if (event.type === 'message') finalResponse = event.text;
+        else if (event.type === 'completed') finalResponse = event.result.finalResponse || finalResponse;
+      }
+
+      return finalResponse.trim();
+    } catch (err) {
+      console.error(`[ orion orchestrator ] summarize failed for run ${runId}:`, err);
+      return 'Unable to generate summary (no agent provider available).';
+    }
+  }
+
+  /** Get the current content of changed files in a waiting run's worktree. */
+  async getChangedFiles(runId: string): Promise<Record<string, string>> {
+    const run = await this.c.runs.get(runId);
+    if (!run) throw new Error(`Run ${runId} not found`);
+    if (!run.diff) return {};
+
+    const activeRun = this.active.get(runId);
+    if (!activeRun) return {};
+
+    const filePaths = parseDiffFilePaths(run.diff);
+    const result: Record<string, string> = {};
+
+    for (const filePath of filePaths) {
+      try {
+        const fullPath = join(activeRun.workspace.rootPath, filePath);
+        const content = await readFile(fullPath, 'utf-8');
+        result[filePath] = content;
+      } catch {
+        result[filePath] = '(file not accessible)';
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -226,6 +376,24 @@ export class RunService {
     console.log(`[ orion orchestrator ] recovered ${unfinished.length} interrupted run(s)`);
   }
 
+  /**
+   * Re-admit runs that were waiting for human approval when the orchestrator
+   * restarted. They restart in waiting state so the board shows the review
+   * button and the user can approve/reject.
+   */
+  async recoverWaitingRuns(): Promise<void> {
+    const waiting = await this.c.runs.listWaiting();
+    if (waiting.length === 0) return;
+    for (const run of waiting) {
+      try {
+        await this.admit(run);
+      } catch (err) {
+        console.error(`[ orion orchestrator ] failed to recover waiting run ${run.id}: ${err}`);
+      }
+    }
+    console.log(`[ orion orchestrator ] recovered ${waiting.length} waiting run(s)`);
+  }
+
   /** Launch immediately if a concurrency slot is free, otherwise queue. */
   private async admit(run: WorkflowRun): Promise<WorkflowRun> {
     if (this.canLaunch()) {
@@ -246,8 +414,13 @@ export class RunService {
   /**
    * Prepare an isolated worktree, wire the engine and begin driving the run.
    * Reused by fresh starts, retries and queue draining. Occupies a slot.
+   * When `action` is provided the run is resumed with approve/reject instead
+   * of a fresh advance.
    */
-  private async launch(runId: string): Promise<WorkflowRun> {
+  private async launch(
+    runId: string,
+    action?: { action: 'approve' | 'reject'; nodeKey: string; reason?: string },
+  ): Promise<WorkflowRun> {
     this.slots.add(runId);
     try {
       let run = await this.c.runs.get(runId);
@@ -275,6 +448,12 @@ export class RunService {
         RUN_ID_SHORT: runIdShort,
         RANDOM: randomSuffix(),
       });
+
+      // Clean up any leftover worktree directory from a previous process so a
+      // restarted waiting run can re-create its workspace.
+      const runDir = join(this.c.env.workspaceDir, 'runs', run.id);
+      await rm(runDir, { recursive: true, force: true }).catch(() => undefined);
+
       const { workspace, cleanup: cleanupWorkspace } = await this.workspaces.prepare(
         project,
         run.id,
@@ -318,7 +497,7 @@ export class RunService {
         await engine.initializeNodes(run.id, config);
       }
 
-      void this.drive(run, config, workspace, controller);
+      void this.drive(run, config, workspace, controller, action);
       return run;
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
@@ -334,16 +513,21 @@ export class RunService {
     config: ProjectConfig,
     workspace: RunWorkspace,
     controller: AbortController,
-    approveNodeKey?: string,
+    action?: { action: 'approve' | 'reject'; nodeKey: string; reason?: string },
   ): Promise<WorkflowRun> {
     const activeRun = this.active.get(run.id);
     if (!activeRun) {
       throw new Error(`Run ${run.id} is not active`);
     }
     try {
-      const result = approveNodeKey
-        ? await activeRun.engine.approve(run, config, workspace, approveNodeKey)
-        : await activeRun.engine.advance(run, config, workspace, controller.signal);
+      let result: WorkflowRun;
+      if (action?.action === 'approve') {
+        result = await activeRun.engine.approve(run, config, workspace, action.nodeKey);
+      } else if (action?.action === 'reject') {
+        result = await activeRun.engine.reject(run, config, workspace, action.nodeKey, action.reason);
+      } else {
+        result = await activeRun.engine.advance(run, config, workspace, controller.signal);
+      }
 
       await this.captureDiff(run.id, workspace);
 
@@ -477,4 +661,14 @@ export class RunService {
       });
     }
   }
+}
+
+function parseDiffFilePaths(diff: string): string[] {
+  const paths = new Set<string>();
+  const pattern = /^diff --git a\/(.+) b\/(.+)$/gm;
+  let match;
+  while ((match = pattern.exec(diff)) !== null) {
+    paths.add(match[2] ?? match[1] ?? '');
+  }
+  return [...paths];
 }

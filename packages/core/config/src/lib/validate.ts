@@ -99,7 +99,7 @@ export function assertValidConfig(config: ProjectConfig): void {
 }
 
 function validateNode(
-  node: { id: string; type: string; provider?: string; action?: string; agentGenerated?: boolean; script?: string; message?: string; condition?: string; url?: string; query?: string; swimlane?: string; dependsOn?: string[]; retries?: number; retryDelayMs?: number; timeoutMs?: number; loop?: unknown; matrix?: unknown },
+  node: { id: string; type: string; provider?: string; action?: string; agentGenerated?: boolean; script?: string; workingDirectory?: string; message?: string; condition?: string; url?: string; query?: string; swimlane?: string; dependsOn?: string[]; retries?: number; retryDelayMs?: number; timeoutMs?: number; loop?: unknown; matrix?: unknown },
   swimlaneKeys: Set<string>,
   nodeIds: Set<string>,
   issues: string[],
@@ -114,6 +114,9 @@ function validateNode(
   }
   if (node.type === 'shell' && !node.script) {
     issues.push(`node "${node.id}" is type shell but has no script set`);
+  }
+  if (node.type === 'shell' && !node.workingDirectory) {
+    issues.push(`node "${node.id}" is type shell but has no workingDirectory set`);
   }
   if (node.type === 'message') {
     if (!node.agentGenerated && !node.message) {

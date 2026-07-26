@@ -23,12 +23,14 @@ workflows:
     nodes:
       - id: build
         type: shell
+        workingDirectory: '.'
         script: 'echo "building feature"'
   bug-fix:
     name: bug-fix
     nodes:
       - id: fix
         type: shell
+        workingDirectory: '.'
         script: 'echo "fixing bug"'
 
 workflow:

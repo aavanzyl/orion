@@ -1,5 +1,5 @@
 import type { ProjectId } from './project.model.js';
-import type { Ticket } from './ticket.model.js';
+import type { Ticket, TicketId } from './ticket.model.js';
 
 export interface BoardSwimlane {
   key: string;
@@ -7,11 +7,19 @@ export interface BoardSwimlane {
   tickets: Ticket[];
 }
 
+/** A waiting approval run on a ticket, surfaced on the board card. */
+export interface WaitingRunInfo {
+  runId: string;
+  nodeKey: string;
+}
+
 export interface Board {
   projectId: ProjectId;
   swimlanes: BoardSwimlane[];
   /** Configurable issue types available for new tickets in this project. */
   issueTypes?: { value: string; label: string }[];
+  /** Map of ticket id → waiting approval run, so cards can show a Review button. */
+  waitingRuns?: Record<TicketId, WaitingRunInfo>;
 }
 
 /** What a swimlane entry did to the ticket's workflow, if anything. */

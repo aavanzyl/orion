@@ -43,12 +43,14 @@ workflow:
     - id: verify
       type: shell
       script: 'echo "run tests here"'
+      workingDirectory: '.'
       dependsOn: [implement]
       column: in_progress
     - id: approval
       type: approval
       dependsOn: [verify]
       column: review
+      onFailureTransitionTo: implement
 `;
 
 /** Create a fresh temp directory under the OS temp root. */

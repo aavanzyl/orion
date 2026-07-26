@@ -41,7 +41,10 @@ export class NativeBoardProvider implements BoardProvider {
     projectId: ProjectId,
     swimlanes: string[],
   ): Promise<Board> {
-    const all = await this.tickets.listByProject(projectId);
+    const [all, waitingRuns] = await Promise.all([
+      this.tickets.listByProject(projectId),
+      this.tickets.listWaitingRuns(projectId),
+    ]);
     const bySwimlane = new Map<string, Ticket[]>();
     for (const swimlane of swimlanes) {
       bySwimlane.set(swimlane, []);
@@ -57,7 +60,7 @@ export class NativeBoardProvider implements BoardProvider {
       tickets: (bySwimlane.get(key) ?? []).sort((a, b) => a.order - b.order),
     }));
 
-    return { projectId, swimlanes: boardSwimlanes };
+    return { projectId, swimlanes: boardSwimlanes, waitingRuns };
   }
 
   createTicket(input: CreateTicketInput): Promise<Ticket> {

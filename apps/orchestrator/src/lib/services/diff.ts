@@ -20,7 +20,7 @@ export async function computeRunDiff(repoPath: string, baseBranch: string): Prom
   const mergeBase = await mergeBaseHead(repoPath, baseBranch);
   const baseRef = mergeBase || 'HEAD';
 
-  const { stdout: diff } = await execFileAsync('git', ['diff', '--stat', baseRef], {
+  const { stdout: diff } = await execFileAsync('git', ['diff', baseRef], {
     cwd: repoPath,
     maxBuffer: 1024 * 1024 * 32,
   });
@@ -42,8 +42,9 @@ export async function computeRunDiff(repoPath: string, baseBranch: string): Prom
   const lines: string[] = [];
   if (diffText) lines.push(diffText);
   if (untracked) {
+    lines.push(`\nUntracked files:`);
     for (const file of untracked.split('\n').filter(Boolean)) {
-      lines.push(` ?? ${file}`);
+      lines.push(`  ${file}`);
     }
   }
   return lines.join('\n');

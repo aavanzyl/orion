@@ -16,6 +16,7 @@ workflow:
   nodes:
     - id: test
       type: shell
+      workingDirectory: '.'
       script: 'echo test'
       swimlane: investigating
 `;
@@ -30,6 +31,7 @@ workflow:
   nodes:
     - id: step
       type: shell
+      workingDirectory: '.'
       script: 'echo ok'
 `;
 
@@ -44,6 +46,7 @@ workflow:
   nodes:
     - id: build
       type: shell
+      workingDirectory: '.'
       script: 'echo build'
 `;
 

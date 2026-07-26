@@ -693,6 +693,160 @@ export class WorkflowEngine {
     return this.advance(run, config, workspace);
   }
 
+  /** Reject a waiting approval node. If onFailureTransitionTo is configured the
+   *  target node (and its dependents) are reset so the workflow re-runs from
+   *  that point. Otherwise the node is failed, which fails the entire run. */
+  async reject(
+    run: WorkflowRun,
+    config: ProjectConfig,
+    workspace: RunWorkspace,
+    nodeKey: string,
+    reason?: string,
+  ): Promise<WorkflowRun> {
+    const nodes = await this.deps.store.listNodes(run.id);
+    const byKey = new Map(nodes.map((n) => [n.nodeKey, n]));
+    const node = nodes.find((n) => n.nodeKey === nodeKey);
+    if (!node || node.status !== 'waiting') {
+      return this.advance(run, config, workspace);
+    }
+
+    const nodeConfig = config.workflow.nodes.find((c) => c.id === node.nodeKey);
+    const rejectionError = reason?.trim() || 'Rejected by human';
+
+    if (nodeConfig?.onFailureTransitionTo) {
+      const targetKey = nodeConfig.onFailureTransitionTo;
+
+      const counts = this.transitionCountsByRun.get(run.id) ?? new Map();
+      if (!this.transitionCountsByRun.has(run.id)) {
+        this.transitionCountsByRun.set(run.id, counts);
+      }
+      const limit = nodeConfig.onFailureTransitionLimit ?? 3;
+      const currentCount = (counts.get(node.nodeKey) ?? 0) + 1;
+      counts.set(node.nodeKey, currentCount);
+
+      if (currentCount > limit) {
+        const error = `${rejectionError} (onFailureTransitionTo limit (${limit}) reached)`;
+        await this.deps.store.updateNode(node.id, { error, status: 'failed', completedAt: new Date().toISOString() });
+        await this.deps.emit({
+          runId: run.id,
+          nodeId: node.id,
+          type: 'node.failed',
+          payload: { nodeKey, error },
+        });
+        await this.deps.emit({
+          runId: run.id,
+          type: 'log',
+          payload: { message: `Node "${nodeKey}" rejected (limit reached): ${error}`, transition: 'node.rejected.limit', nodeKey, error },
+        });
+        return this.advance(run, config, workspace);
+      }
+
+      const targetNode = byKey.get(targetKey);
+      if (targetNode) {
+        const failureContext = { onFailureFrom: node.nodeKey, error: rejectionError };
+        await this.deps.store.updateNode(targetNode.id, {
+          status: 'pending',
+          input: failureContext,
+        });
+
+        const allNodes = [...byKey.values()];
+        const toReset = new Set<string>([node.id]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const n of allNodes) {
+            if (toReset.has(n.id)) continue;
+            if (n.dependsOn.some((depKey) => {
+              const depNode = byKey.get(depKey);
+              return depNode !== undefined && toReset.has(depNode.id);
+            })) {
+              toReset.add(n.id);
+              changed = true;
+            }
+          }
+        }
+
+        for (const nodeId of toReset) {
+          await this.deps.store.updateNode(nodeId, { status: 'pending' });
+        }
+        await this.deps.store.updateNode(node.id, { error: rejectionError });
+
+        await this.deps.emit({
+          runId: run.id,
+          nodeId: node.id,
+          type: 'node.failed',
+          payload: { nodeKey, error: rejectionError, transitionedTo: targetKey },
+        });
+        await this.deps.emit({
+          runId: run.id,
+          nodeId: node.id,
+          type: 'transition',
+          payload: { nodeKey, from: node.status, to: 'pending', reason: 'onFailureTransitionTo', targetNode: targetKey, error: rejectionError },
+        });
+        await this.deps.emit({
+          runId: run.id,
+          type: 'log',
+          payload: { message: `Node "${nodeKey}" rejected, transitioning to "${targetKey}"`, transition: 'node.rejected.transition', nodeKey, targetNode: targetKey, error: rejectionError },
+        });
+
+        return this.advance(run, config, workspace);
+      }
+
+      const swimlanes = config.board.swimlanes ?? [];
+      if (swimlanes.includes(targetKey)) {
+        await this.deps.moveTicket(run.ticketId, targetKey);
+        await this.deps.store.updateNode(node.id, { error: rejectionError, status: 'failed', completedAt: new Date().toISOString() });
+        await this.deps.emit({
+          runId: run.id,
+          nodeId: node.id,
+          type: 'node.failed',
+          payload: { nodeKey, error: rejectionError, transitionedToSwimlane: targetKey },
+        });
+        await this.deps.emit({
+          runId: run.id,
+          type: 'log',
+          payload: { message: `Node "${nodeKey}" rejected, ticket moved to swimlane "${targetKey}"`, transition: 'node.rejected.swimlane', nodeKey, targetSwimlane: targetKey, error: rejectionError },
+        });
+        return this.advance(run, config, workspace);
+      }
+
+      const error = `onFailureTransitionTo target "${targetKey}" not found`;
+      await this.deps.store.updateNode(node.id, { error, status: 'failed', completedAt: new Date().toISOString() });
+      await this.deps.emit({
+        runId: run.id,
+        nodeId: node.id,
+        type: 'node.failed',
+        payload: { nodeKey, error },
+      });
+      await this.deps.emit({
+        runId: run.id,
+        type: 'log',
+        payload: { message: `Node "${nodeKey}" rejected: ${error}`, transition: 'node.rejected.error', nodeKey, targetNode: targetKey, error },
+      });
+    } else {
+      await this.deps.store.updateNode(node.id, { error: rejectionError, status: 'failed', completedAt: new Date().toISOString() });
+      await this.deps.emit({
+        runId: run.id,
+        nodeId: node.id,
+        type: 'node.failed',
+        payload: { nodeKey, error: rejectionError },
+      });
+      await this.deps.emit({
+        runId: run.id,
+        nodeId: node.id,
+        type: 'transition',
+        payload: { nodeKey, from: node.status, to: 'failed', error: rejectionError },
+      });
+      await this.deps.emit({
+        runId: run.id,
+        type: 'log',
+        payload: { message: `Node "${nodeKey}" rejected: ${rejectionError}`, transition: 'node.rejected', nodeKey, error: rejectionError },
+      });
+    }
+
+    return this.advance(run, config, workspace);
+  }
+
   private async runNode(
     run: WorkflowRun,
     node: RunNode,

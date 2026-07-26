@@ -74,6 +74,7 @@ const DEFAULT: WorkflowTemplate = {
       {
         id: 'verify',
         type: 'shell',
+        workingDirectory: '.',
         script: 'echo "run your test suite here"',
         dependsOn: ['implement'],
         swimlane: 'in_progress',
@@ -129,6 +130,7 @@ const PLAN_IMPLEMENT_VERIFY: WorkflowTemplate = {
       {
         id: 'verify',
         type: 'shell',
+        workingDirectory: '.',
         script: 'echo "run your test suite here"',
         dependsOn: ['implement'],
         swimlane: 'in_progress',
@@ -168,6 +170,7 @@ const TDD: WorkflowTemplate = {
       {
         id: 'verify',
         type: 'shell',
+        workingDirectory: '.',
         script: 'npm test',
         dependsOn: ['implement'],
         swimlane: 'in_progress',
@@ -205,6 +208,7 @@ const FIX_BUG: WorkflowTemplate = {
       {
         id: 'verify',
         type: 'shell',
+        workingDirectory: '.',
         script: 'npm test',
         dependsOn: ['fix'],
         swimlane: 'in_progress',
@@ -243,6 +247,7 @@ const FEATURE_DEVELOPMENT: WorkflowTemplate = {
       {
         id: 'verify',
         type: 'shell',
+        workingDirectory: '.',
         script: 'echo "run your test suite here"',
         dependsOn: ['implement'],
         swimlane: 'in_progress',
@@ -274,6 +279,7 @@ const REFACTOR_SAFELY: WorkflowTemplate = {
       {
         id: 'typecheck',
         type: 'shell',
+        workingDirectory: '.',
         script: 'npm run typecheck',
         dependsOn: ['refactor'],
         swimlane: 'in_progress',
@@ -281,6 +287,7 @@ const REFACTOR_SAFELY: WorkflowTemplate = {
       {
         id: 'lint',
         type: 'shell',
+        workingDirectory: '.',
         script: 'npm run lint',
         dependsOn: ['refactor'],
         swimlane: 'in_progress',
@@ -289,6 +296,7 @@ const REFACTOR_SAFELY: WorkflowTemplate = {
       {
         id: 'test',
         type: 'shell',
+        workingDirectory: '.',
         script: 'npm test',
         dependsOn: ['refactor'],
         swimlane: 'in_progress',
@@ -325,6 +333,7 @@ const QUICK_FIX: WorkflowTemplate = {
       {
         id: 'verify',
         type: 'shell',
+        workingDirectory: '.',
         script: 'npm test',
         dependsOn: ['implement'],
         swimlane: 'in_progress',
@@ -378,6 +387,7 @@ const DEPENDENCY_UPGRADE: WorkflowTemplate = {
       {
         id: 'verify',
         type: 'shell',
+        workingDirectory: '.',
         script: 'npm install && npm test',
         dependsOn: ['upgrade'],
         swimlane: 'in_progress',
@@ -549,6 +559,7 @@ const REVIEW_AND_FIX: WorkflowTemplate = {
       {
         id: 'verify',
         type: 'shell',
+        workingDirectory: '.',
         script: 'npm test',
         dependsOn: ['fix'],
         swimlane: 'in_progress',
@@ -672,6 +683,7 @@ const CONTEXT_AWARE_FIX: WorkflowTemplate = {
       {
         id: 'verify',
         type: 'shell',
+        workingDirectory: '.',
         script: 'npm test',
         dependsOn: ['implement'],
         swimlane: 'in_progress',
@@ -715,6 +727,7 @@ const FAN_OUT_MIGRATION: WorkflowTemplate = {
       {
         id: 'test',
         type: 'shell',
+        workingDirectory: '.',
         script: 'npx nx run-many -t test',
         dependsOn: ['migrate'],
         swimlane: 'in_progress',
@@ -745,6 +758,7 @@ const SHIP_AND_ANNOUNCE: WorkflowTemplate = {
       {
         id: 'verify',
         type: 'shell',
+        workingDirectory: '.',
         script: 'npm test',
         dependsOn: ['implement'],
         swimlane: 'in_progress',

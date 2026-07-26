@@ -46,6 +46,7 @@ import { NODE_VISUALS } from './workflow-node';
 import { McpServersEditor } from '@/features/settings/mcp-servers-editor';
 import { InstructionsField } from '../shared/instructions-field';
 import { FieldLabel, Checkbox, NumberField } from '../shared/node-properties/fields';
+import { PathPicker } from '@/features/projects/path-picker';
 import { LoopEditor } from '../shared/node-properties/loop-editor';
 import { ScmProperties } from '../shared/node-properties/scm-properties';
 import { MessageProperties } from '../shared/node-properties/message-properties';
@@ -316,15 +317,25 @@ export function NodePropertiesPanel({
           {isScm && <ScmProperties data={data} onChange={onChange} />}
 
           {isShell && (
-            <div className="flex flex-col gap-1.5">
-              <FieldLabel>Script</FieldLabel>
-              <Textarea
-                value={data.script ?? ''}
-                onChange={(e) => onChange({ script: e.target.value })}
-                placeholder="npm test"
-                spellCheck={false}
-                className="min-h-24 font-mono text-xs"
-              />
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1.5">
+                <FieldLabel>Working directory</FieldLabel>
+                <PathPicker
+                  value={data.workingDirectory ?? ''}
+                  onChange={(value) => onChange({ workingDirectory: value })}
+                  placeholder="e.g. packages/frontend"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <FieldLabel>Script</FieldLabel>
+                <Textarea
+                  value={data.script ?? ''}
+                  onChange={(e) => onChange({ script: e.target.value })}
+                  placeholder="npm test"
+                  spellCheck={false}
+                  className="min-h-24 font-mono text-xs"
+                />
+              </div>
             </div>
           )}
 
@@ -401,18 +412,12 @@ export function NodePropertiesPanel({
             Continue on error
           </Checkbox>
 
-          <Checkbox
-            checked={Boolean(data.onFailureTransitionTo)}
-            onChange={(v) =>
-              onChange({
-                onFailureTransitionTo: v ? '' : undefined,
-              })
-            }
-          >
-            On failure, transition to
-          </Checkbox>
-          {data.onFailureTransitionTo !== undefined && (
-            <div className="ml-6 mt-1">
+          {isApproval ? (
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-medium">On rejection, transition to</span>
+              <p className="text-xs text-muted-foreground">
+                Required for approval nodes — specifies where the workflow resumes after a rejection.
+              </p>
               <Select
                 value={data.onFailureTransitionTo || NONE}
                 onValueChange={(v) =>
@@ -449,6 +454,58 @@ export function NodePropertiesPanel({
                 </SelectContent>
               </Select>
             </div>
+          ) : (
+            <>
+              <Checkbox
+                checked={Boolean(data.onFailureTransitionTo)}
+                onChange={(v) =>
+                  onChange({
+                    onFailureTransitionTo: v ? '' : undefined,
+                  })
+                }
+              >
+                On failure, transition to
+              </Checkbox>
+              {data.onFailureTransitionTo !== undefined && (
+                <div className="ml-6 mt-1">
+                  <Select
+                    value={data.onFailureTransitionTo || NONE}
+                    onValueChange={(v) =>
+                      onChange({ onFailureTransitionTo: v === NONE ? '' : v })
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select target node..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>Select target node...</SelectItem>
+                      <SelectItem value="__divider__" disabled className="text-[10px] font-semibold text-muted-foreground">
+                        — Nodes —
+                      </SelectItem>
+                      {allNodeIds
+                        .filter((id) => id !== data.nodeId)
+                        .map((id) => (
+                          <SelectItem key={id} value={id}>
+                            {id}
+                          </SelectItem>
+                        ))}
+                      {swimlanes.length > 0 && (
+                        <>
+                          <SelectItem value="__divider_sw__" disabled className="text-[10px] font-semibold text-muted-foreground">
+                            — Swimlanes —
+                          </SelectItem>
+                          {swimlanes.map((sw) => (
+                            <SelectItem key={`sw_${sw}`} value={sw}>
+                              {sw}
+                            </SelectItem>
+                          ))}
+                        </>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </>
           )}
 
           {(canLoop) && (

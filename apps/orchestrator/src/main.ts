@@ -34,6 +34,11 @@ async function main(): Promise<void> {
     console.error('[ orion orchestrator ] run recovery failed:', err);
   });
 
+  // Re-admit runs awaiting approval so they can be resumed.
+  await runs.recoverWaitingRuns().catch((err: unknown) => {
+    console.error('[ orion orchestrator ] waiting run recovery failed:', err);
+  });
+
   // Begin polling cron schedules once recovery has settled.
   await schedules.startScheduler().catch((err: unknown) => {
     console.error('[ orion orchestrator ] schedule scheduler failed to start:', err);

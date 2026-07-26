@@ -235,8 +235,18 @@ export class RunRepository {
       .select()
       .from(workflowRuns)
       .where(
-        inArray(workflowRuns.status, ['created', 'queued', 'scheduled', 'running', 'waiting']),
+        inArray(workflowRuns.status, ['created', 'queued', 'scheduled', 'running']),
       )
+      .orderBy(asc(workflowRuns.createdAt));
+    return rows.map(toWorkflowRun);
+  }
+
+  /** Runs awaiting human approval — re-admitted on startup for resumption. */
+  async listWaiting(): Promise<WorkflowRun[]> {
+    const rows = await this.db
+      .select()
+      .from(workflowRuns)
+      .where(eq(workflowRuns.status, 'waiting'))
       .orderBy(asc(workflowRuns.createdAt));
     return rows.map(toWorkflowRun);
   }

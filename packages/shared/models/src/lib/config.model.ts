@@ -189,6 +189,11 @@ export interface WorkflowNodeConfig {
   /** Shell command for `shell` nodes. */
   script?: string;
   /**
+   * Working directory for `shell` nodes, relative to the run's workspace root.
+   * Defaults to the workspace root when omitted.
+   */
+  workingDirectory?: string;
+  /**
    * Delivery target for a `message` node: `notify` sends the rendered body
    * through the configured notification providers, `comment` posts it on the
    * run's ticket. Default `notify`.

@@ -64,6 +64,7 @@ export const workflowNodeConfigSchema = z.object({
   action: z.string().optional(),
   agentGenerated: z.boolean().optional(),
   script: z.string().optional(),
+  workingDirectory: z.string().optional(),
   messageTarget: z.enum(['notify', 'comment']).optional(),
   message: z.string().optional(),
   level: z.enum(['info', 'warn', 'error']).optional(),

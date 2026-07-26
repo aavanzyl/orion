@@ -1,6 +1,7 @@
 import { useState, forwardRef } from 'react';
 import { useDraggable } from '@dnd-kit/core';
-import { CalendarIcon, GitBranchIcon, PencilIcon } from 'lucide-react';
+import { CalendarIcon, CheckCircle2Icon, GitBranchIcon, PencilIcon } from 'lucide-react';
+import type { WaitingRunInfo } from '@orion/models';
 import { ALL_DEFAULT_TICKET_TYPES, type Label, type Ticket } from '@orion/models';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -13,16 +14,20 @@ interface TicketCardProps {
   labelsById: Map<string, Label>;
   ticketsById: Map<string, Ticket>;
   onOpen: (ticket: Ticket) => void;
+  waitingRun?: WaitingRunInfo;
+  onReview?: (runId: string, nodeKey: string) => void;
 }
 
 interface TicketCardViewProps extends React.ComponentProps<typeof Card> {
   ticket: Ticket;
   labelsById: Map<string, Label>;
   ticketsById: Map<string, Ticket>;
+  waitingRun?: WaitingRunInfo;
+  onReview?: (runId: string, nodeKey: string) => void;
 }
 
 export const TicketCardView = forwardRef<HTMLDivElement, TicketCardViewProps>(
-  ({ ticket, labelsById, ticketsById, className, style, ...props }, ref) => {
+  ({ ticket, labelsById, ticketsById, waitingRun, onReview, className, style, ...props }, ref) => {
     const [isHovered, setIsHovered] = useState(false);
 
     const ticketLabels = ticket.labelIds
@@ -44,7 +49,7 @@ export const TicketCardView = forwardRef<HTMLDivElement, TicketCardViewProps>(
     return (
       <Card
         ref={ref}
-        className={cn('relative cursor-grab gap-3 py-4 transition-all hover:shadow-md hover:border-ring/50', priorityStyle, className)}
+        className={cn('relative cursor-grab transition-all hover:shadow-md hover:border-ring/50', waitingRun ? 'pt-4 pb-0 gap-2' : 'gap-3 py-4', priorityStyle, className)}
         style={style}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
@@ -101,13 +106,27 @@ export const TicketCardView = forwardRef<HTMLDivElement, TicketCardViewProps>(
             </Badge>
           )}
         </CardContent>
+        {waitingRun && onReview && (
+          <Button
+            variant="default"
+            size="sm"
+            className="w-full h-8 text-xs rounded-none rounded-b-[calc(var(--radius)-1px)] font-medium"
+            onClick={(e) => {
+              e.stopPropagation();
+              onReview(waitingRun.runId, waitingRun.nodeKey);
+            }}
+          >
+            <CheckCircle2Icon data-icon="inline-start" />
+            Review changes
+          </Button>
+        )}
       </Card>
     );
   },
 );
 TicketCardView.displayName = 'TicketCardView';
 
-export function TicketCard({ ticket, labelsById, ticketsById, onOpen }: TicketCardProps) {
+export function TicketCard({ ticket, labelsById, ticketsById, onOpen, waitingRun, onReview }: TicketCardProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: ticket.id,
     data: { ticket, swimlane: ticket.swimlane },
@@ -118,6 +137,8 @@ export function TicketCard({ ticket, labelsById, ticketsById, onOpen }: TicketCa
       ticket={ticket}
       labelsById={labelsById}
       ticketsById={ticketsById}
+      waitingRun={waitingRun}
+      onReview={onReview}
       ref={setNodeRef}
       className={cn(isDragging && 'opacity-40')}
       onClick={() => onOpen(ticket)}

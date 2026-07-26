@@ -1303,6 +1303,29 @@ export function createApiRouter(
   );
 
   router.post(
+    '/runs/:id/reject',
+    asyncHandler(async (req, res) => {
+      if (!req.body?.nodeKey) return fail(res, 'nodeKey is required');
+      ok(res, await runs.reject(req.params.id, req.body.nodeKey, req.body.reason));
+    }),
+  );
+
+  router.get(
+    '/runs/:id/summarize',
+    asyncHandler(async (req, res) => {
+      const summary = await runs.summarizeRun(req.params.id);
+      ok(res, { summary });
+    }),
+  );
+
+  router.get(
+    '/runs/:id/changed-files',
+    asyncHandler(async (req, res) => {
+      ok(res, await runs.getChangedFiles(req.params.id));
+    }),
+  );
+
+  router.post(
     '/runs/:id/cancel',
     asyncHandler(async (req, res) => {
       await runs.cancel(req.params.id);

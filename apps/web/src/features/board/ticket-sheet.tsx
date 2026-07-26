@@ -50,6 +50,7 @@ import { MarkdownEditor } from '@/components/markdown-editor';
 import { Markdown } from '@/components/markdown';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { RunLogViewer } from '@/components/run-log-viewer';
+import { ApprovalDialog } from '@/features/board/approval-dialog';
 import { api } from '@/lib/api';
 import { copyToClipboard } from '@/lib/utils';
 import { useTicketDetail } from './hooks';
@@ -103,6 +104,10 @@ export function TicketSheet({
   const [logsLoading, setLogsLoading] = useState(false);
 
   const [updateAiModalOpen, setUpdateAiModalOpen] = useState(false);
+
+  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
+  const [approvalRunId, setApprovalRunId] = useState('');
+  const [approvalNodeKey, setApprovalNodeKey] = useState('');
 
   const [comments, setComments] = useState<TicketComment[]>([]);
   const [commentText, setCommentText] = useState('');
@@ -882,20 +887,19 @@ export function TicketSheet({
                                             toast.error('No waiting approval node found');
                                             return;
                                           }
-                                          await api.approveRun(run.id, waitingNode.nodeKey);
-                                          toast.success('Approved — resuming workflow');
-                                          api.listTicketRuns(ticket!.id).then(setRuns).catch(() => undefined);
-                                          onChanged();
+                                          setApprovalRunId(run.id);
+                                          setApprovalNodeKey(waitingNode.nodeKey);
+                                          setApprovalDialogOpen(true);
                                         } catch (e) {
                                           toast.error((e as Error).message);
                                         }
                                       }}
                                     >
                                       <CheckCircle2Icon data-icon="inline-start" />
-                                      Approve
+                                      Review
                                     </Button>
                                   </TooltipTrigger>
-                                  <TooltipContent>Approve the waiting node and resume the run</TooltipContent>
+                                  <TooltipContent>Review changes and approve or reject</TooltipContent>
                                 </Tooltip>
                               )}
                               {(run.status === 'failed' || run.status === 'cancelled') && (
@@ -1009,6 +1013,19 @@ export function TicketSheet({
       description="Are you sure you want to permanently delete this ticket? This action cannot be undone."
       confirmLabel="Delete"
       onConfirm={confirmDeleteTicket}
+    />
+
+    <ApprovalDialog
+      open={approvalDialogOpen}
+      onOpenChange={setApprovalDialogOpen}
+      runId={approvalRunId}
+      nodeKey={approvalNodeKey}
+      onResolved={() => {
+        if (ticket) {
+          api.listTicketRuns(ticket.id).then(setRuns).catch(() => undefined);
+        }
+        onChanged();
+      }}
     />
 
     {ticket && (

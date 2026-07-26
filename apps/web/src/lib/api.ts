@@ -316,6 +316,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ nodeKey }),
     }),
+  rejectRun: (runId: string, nodeKey: string, reason?: string) =>
+    request<WorkflowRun>(`/runs/${runId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ nodeKey, reason: reason || undefined }),
+    }),
+  summarizeRun: (runId: string) =>
+    request<{ summary: string }>(`/runs/${runId}/summarize`),
+  getChangedFiles: (runId: string) =>
+    request<Record<string, string>>(`/runs/${runId}/changed-files`),
   cancelRun: (runId: string) => request<{ cancelled: boolean }>(`/runs/${runId}/cancel`, { method: 'POST' }),
   retryRun: (runId: string) =>
     request<WorkflowRun>(`/runs/${runId}/retry`, { method: 'POST' }),

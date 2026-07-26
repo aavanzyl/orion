@@ -13,7 +13,7 @@ import type {
   UpdateTicketInput,
 } from '@orion/models';
 import type { Database } from '../client.js';
-import { projects, ticketLabels, ticketRelations, tickets } from '../schema.js';
+import { projects, runNodes, ticketLabels, ticketRelations, tickets, workflowRuns } from '../schema.js';
 import { toTicket, toTicketRelation } from '../mappers.js';
 
 function generateDisplayKey(projectName: string, counter: number): string {
@@ -52,6 +52,30 @@ export class TicketRepository {
       .orderBy(asc(tickets.position), asc(tickets.createdAt));
     const labels = await this.labelIdsFor(rows.map((r) => r.id));
     return rows.map((row) => toTicket(row, labels.get(row.id) ?? []));
+  }
+
+  /** Find all tickets in a project that have a run currently awaiting approval. */
+  async listWaitingRuns(projectId: ProjectId): Promise<Record<string, { runId: string; nodeKey: string }>> {
+    const rows = await this.db
+      .select({
+        ticketId: workflowRuns.ticketId,
+        runId: workflowRuns.id,
+        nodeKey: runNodes.nodeKey,
+      })
+      .from(workflowRuns)
+      .innerJoin(runNodes, eq(runNodes.runId, workflowRuns.id))
+      .where(
+        and(
+          eq(workflowRuns.projectId, projectId),
+          eq(workflowRuns.status, 'waiting'),
+          eq(runNodes.status, 'waiting'),
+        ),
+      );
+    const result: Record<string, { runId: string; nodeKey: string }> = {};
+    for (const row of rows) {
+      result[row.ticketId] = { runId: row.runId, nodeKey: row.nodeKey };
+    }
+    return result;
   }
 
   async listAll(): Promise<Ticket[]> {

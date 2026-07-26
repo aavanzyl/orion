@@ -20,6 +20,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { PathPicker } from '@/features/projects/path-picker';
 import {
   Table,
   TableBody,
@@ -378,16 +379,27 @@ export function WorkflowNodeDialog({
             {isScm && <ScmProperties data={data} onChange={patch} />}
 
             {isShell && (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="wn-script">Script</Label>
-                <Textarea
-                  id="wn-script"
-                  value={data.script ?? ''}
-                  onChange={(e) => patch({ script: e.target.value })}
-                  placeholder="npm test"
-                  spellCheck={false}
-                  className="min-h-24 font-mono text-xs"
-                />
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="wn-cwd">Working directory</Label>
+                  <PathPicker
+                    id="wn-cwd"
+                    value={data.workingDirectory ?? ''}
+                    onChange={(value) => patch({ workingDirectory: value })}
+                    placeholder="e.g. packages/frontend"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="wn-script">Script</Label>
+                  <Textarea
+                    id="wn-script"
+                    value={data.script ?? ''}
+                    onChange={(e) => patch({ script: e.target.value })}
+                    placeholder="npm test"
+                    spellCheck={false}
+                    className="min-h-24 font-mono text-xs"
+                  />
+                </div>
               </div>
             )}
 
@@ -490,23 +502,19 @@ export function WorkflowNodeDialog({
               Continue on error
             </Checkbox>
 
-            <Checkbox
-              checked={data.onFailureTransitionTo !== undefined}
-              onChange={(v) =>
-                patch({ onFailureTransitionTo: v ? '' : undefined })
-              }
-            >
-              On failure, transition to
-            </Checkbox>
-            {data.onFailureTransitionTo !== undefined && (
-              <div className="ml-6 mt-1">
+            {isApproval ? (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="wn-on-failure">On rejection, transition to</Label>
+                <p className="text-xs text-muted-foreground">
+                  Required for approval nodes — specifies where the workflow resumes after a rejection.
+                </p>
                 <Select
                   value={data.onFailureTransitionTo || '__none__'}
                   onValueChange={(v) =>
                     patch({ onFailureTransitionTo: v === '__none__' ? '' : v })
                   }
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger id="wn-on-failure" className="w-full">
                     <SelectValue placeholder="Select target node..." />
                   </SelectTrigger>
                   <SelectContent>
@@ -536,6 +544,56 @@ export function WorkflowNodeDialog({
                   </SelectContent>
                 </Select>
               </div>
+            ) : (
+              <>
+                <Checkbox
+                  checked={data.onFailureTransitionTo !== undefined}
+                  onChange={(v) =>
+                    patch({ onFailureTransitionTo: v ? '' : undefined })
+                  }
+                >
+                  On failure, transition to
+                </Checkbox>
+                {data.onFailureTransitionTo !== undefined && (
+                  <div className="ml-6 mt-1">
+                    <Select
+                      value={data.onFailureTransitionTo || '__none__'}
+                      onValueChange={(v) =>
+                        patch({ onFailureTransitionTo: v === '__none__' ? '' : v })
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select target node..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Select target node...</SelectItem>
+                        <SelectItem value="__divider__" disabled className="text-[10px] font-semibold text-muted-foreground">
+                          — Nodes —
+                        </SelectItem>
+                        {otherNodes
+                          .filter((o) => o.key !== node?.key)
+                          .map((o) => (
+                            <SelectItem key={o.id} value={o.id}>
+                              {o.id}
+                            </SelectItem>
+                          ))}
+                        {swimlaneOptions.length > 0 && (
+                          <>
+                            <SelectItem value="__divider_sw__" disabled className="text-[10px] font-semibold text-muted-foreground">
+                              — Swimlanes —
+                            </SelectItem>
+                            {swimlaneOptions.map((sw) => (
+                              <SelectItem key={`sw_${sw}`} value={sw}>
+                                {sw}
+                              </SelectItem>
+                            ))}
+                          </>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </>
             )}
 
             {(canLoop) && (
