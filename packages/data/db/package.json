@@ -42,7 +42,7 @@
   "dependencies": {
     "@electric-sql/pglite": "^0.3.10",
     "@orion/models": "*",
-    "drizzle-orm": "^0.44.6",
+    "drizzle-orm": "^0.45.2",
     "pg": "^8.13.1"
   }
 }
